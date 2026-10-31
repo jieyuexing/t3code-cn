@@ -196,15 +196,19 @@ describe("display-only translation", () => {
         .replaceAll("export ", "");
       const { __t, __tf } = createTranslator(dictionary, () => locale);
       const title = new Function("_t", "_tf", code + ";return childThreadInputsTitle;")(__t, __tf);
-      for (const [flags, english, chinese] of [
+      for (const [flags, english, chinese, sideChat = false] of [
         [[false], "Subagent needs input", "子 Agent 需要输入"],
         [[true], "Subagent needs approval", "子 Agent 需要审批"],
         [[false, false], "2 subagents need input", "2 个子 Agent 需要输入"],
         [[true, true], "2 subagents need approval", "2 个子 Agent 需要审批"],
         [[true, false], "2 subagents need you", "2 个子 Agent 需要你响应"],
+        [[true], "Side chat needs approval", "侧边对话 需要审批", true],
+        [[false, false], "2 side chats need input", "2 个侧边对话需要输入", true],
       ]) {
         const children = Object.freeze(
-          flags.map((hasPendingApprovals) => Object.freeze({ hasPendingApprovals })),
+          flags.map((hasPendingApprovals) =>
+            Object.freeze({ hasPendingApprovals, lineage: { sideChat } }),
+          ),
         );
         expect(title(children)).toBe(locale === "en" ? english : chinese);
       }

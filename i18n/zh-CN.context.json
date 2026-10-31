@@ -60,7 +60,11 @@
     "lines": "行"
   },
   "apps/web/src/components/onboarding/WelcomeWizard.tsx": {
+    ", then run:": "，然后运行：",
     ". You can set": "。之后可在“设置”中配置。",
+    "On a tailnet, run": "在 tailnet 上请改为运行",
+    "On the computer with your code, start T3 Code or run": "在存放代码的电脑上启动 T3 Code，或运行",
+    "instead.": "。",
     "it": "",
     "them": "",
     "up later from Settings.": ""
