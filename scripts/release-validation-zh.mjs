@@ -27,7 +27,6 @@ export function safeRelative(name) {
   if (
     typeof name !== "string" ||
     !name ||
-    // eslint-disable-next-line no-control-regex -- Reject control bytes in archive/evidence paths.
     /[\\:\x00-\x1f]/.test(name) ||
     name.startsWith("/") ||
     name.split("/").some((x) => !x || x === "." || x === "..")
