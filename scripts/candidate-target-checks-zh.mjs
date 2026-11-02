@@ -218,7 +218,7 @@ export async function smokeCli({ artifact, candidateFile, output }) {
   inventory(cwd);
   assertAncestors(cwd);
   const executable = NodePath.join(cwd, candidate.kind === "windows" ? "t3.exe" : "t3");
-  const { assertX64Binary } = await import("./build-cli-archive.ts");
+  const { assertX64Binary } = await import("./cli-official-template-zh.ts");
   assertX64Binary(executable, candidate.kind === "windows" ? "win" : "linux");
   const probeHome = NodePath.join(output, "home"),
     temp = NodePath.join(output, "temp");
