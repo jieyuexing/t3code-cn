@@ -8,6 +8,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { createBuildConfig, DESKTOP_ELECTRON_LANGUAGES } from "./build-desktop-artifact.ts";
 
 function fixture(args: string[], mode = "ok", extraEnv: Record<string, string> = {}) {
@@ -172,8 +173,12 @@ describe("fork packaging config", () => {
         /[\\/]scripts[\\/]sign-macos\.ts$/,
       );
     }).pipe(
-      Effect.provide(NodeServices.layer),
-      Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+      Effect.provide(
+        Layer.mergeAll(
+          NodeServices.layer,
+          ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+        ),
+      ),
     ),
   );
 });
