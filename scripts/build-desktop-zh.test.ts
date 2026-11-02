@@ -4,6 +4,11 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { it as effectIt } from "@effect/vitest";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Effect from "effect/Effect";
+import { createBuildConfig, DESKTOP_ELECTRON_LANGUAGES } from "./build-desktop-artifact.ts";
 
 function fixture(args: string[], mode = "ok", extraEnv: Record<string, string> = {}) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "zh-wrapper-"));
@@ -64,7 +69,7 @@ function fixture(args: string[], mode = "ok", extraEnv: Record<string, string> =
     ]) {
       if (!(name in extraEnv)) delete env[name];
     }
-    NodeFS.writeFileSync(NodePath.join(root, ".gitignore"), "release/\ncalled.json\nwsl/\n");
+    NodeFS.writeFileSync(NodePath.join(root, ".gitignore"), "release/\ncalled.json\n");
     const fixtureGit = (...gitArgs: string[]) =>
       NodeChildProcess.execFileSync("/usr/bin/git", gitArgs, { cwd: root, stdio: "pipe" });
     fixtureGit("init");
@@ -81,23 +86,6 @@ function fixture(args: string[], mode = "ok", extraEnv: Record<string, string> =
       "fixture",
     );
     fixtureGit("tag", "v0.0.46-nightly.20261008.2833");
-    if (args.includes("--wsl-runtime")) {
-      const wslDir = NodePath.join(root, "wsl");
-      NodeFS.mkdirSync(wslDir);
-      const wsl = NodePath.join(wslDir, "runtime.tar.gz");
-      NodeFS.writeFileSync(wsl, "fixture wsl");
-      const manifest = NodeChildProcess.execFileSync(
-        process.execPath,
-        [
-          "--input-type=module",
-          "--eval",
-          `import {sourceIdentity,fileIdentity} from './scripts/release-source-zh.mjs'; console.log(JSON.stringify({kind:'linux',version:'0.0.46-nightly.20261008.2833',source:sourceIdentity(process.cwd()),...fileIdentity(${JSON.stringify(wsl)})}));`,
-        ],
-        { cwd: root, encoding: "utf8" },
-      );
-      NodeFS.writeFileSync(`${wsl}.candidate.json`, manifest);
-      args = args.map((a) => (a === "/tmp/test.tar.gz" ? wsl : a));
-    }
     const result = NodeChildProcess.spawnSync(
       process.execPath,
       [NodePath.join(root, "scripts/build-desktop-zh.mjs"), ...args],
@@ -135,41 +123,6 @@ describe("nightly build wrapper", () => {
     ]);
     expect(r.called.version).toBe("0.0.46-nightly.20261008.2833");
   });
-  it("passes the explicit Windows WSL archive", () => {
-    const r = fixture([
-      "--platform",
-      "win",
-      "--target",
-      "nsis",
-      "--arch",
-      "x64",
-      "--wsl-runtime",
-      "/tmp/test.tar.gz",
-    ]);
-    expect(r.status).toBe(0);
-    expect(r.called.args.slice(-2)).toEqual([
-      "--wsl-runtime",
-      expect.stringContaining("/wsl/runtime.tar.gz"),
-    ]);
-    expect(r.restored).toBe(r.original);
-  });
-  it("explicit cross Windows candidate reports native validation pending", () => {
-    const r = fixture([
-      "--platform",
-      "win",
-      "--target",
-      "nsis",
-      "--arch",
-      "x64",
-      "--wsl-runtime",
-      "/tmp/test.tar.gz",
-      "--windows-cross-candidate",
-    ]);
-    expect(r.status).toBe(0);
-    expect(r.called.args).toContain("--windows-cross-candidate");
-    expect(r.output).toContain("target validation pending; NOT release-ready");
-    expect(r.restored).toBe(r.original);
-  });
   it.each(["fail", "signal"])("restores manifests after %s", (mode) => {
     const r = fixture([], mode);
     expect(r.status).not.toBe(0);
@@ -190,7 +143,7 @@ describe("nightly build wrapper", () => {
   it.each([
     ["--publish", "always"],
     ["--skip-checks"],
-    ["--windows-cross-candidate"],
+    ["--wsl-runtime", "/tmp/runtime.tar.gz"],
     ["--platform", "win", "--target", "nsis", "--arch", "x64"],
   ])("rejects invalid arguments %s", (...args) => {
     const r = fixture(args);
@@ -198,4 +151,29 @@ describe("nightly build wrapper", () => {
     expect(r.called).toBeUndefined();
     expect(r.restored).toBe(r.original);
   });
+});
+
+describe("fork packaging config", () => {
+  effectIt.effect("keeps the Chinese Electron locales and ad-hoc signs unsigned macOS builds", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      expect(DESKTOP_ELECTRON_LANGUAGES).toEqual(["en-US", "zh-CN", "zh_CN"]);
+      expect(config.electronLanguages).toEqual(DESKTOP_ELECTRON_LANGUAGES);
+      expect(config.mac).toMatchObject({ identity: "-", timestamp: "none", notarize: false });
+      expect(String((config.mac as Record<string, unknown>).sign)).toMatch(
+        /[\\/]scripts[\\/]sign-macos\.ts$/,
+      );
+    }).pipe(
+      Effect.provide(NodeServices.layer),
+      Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+    ),
+  );
 });

@@ -91,7 +91,6 @@ export function sameSource(left, right) {
 export function artifactSpec(version, kind) {
   const specs = {
     dmg: { name: `T3-Code-${version}-arm64.dmg`, platform: "darwin", arch: "arm64" },
-    nsis: { name: `T3-Code-${version}-x64.exe`, platform: "win32", arch: "x64" },
     linux: { name: `t3-${version}-linux-x64.tar.gz`, platform: "linux", arch: "x64" },
     windows: { name: `t3-${version}-win32-x64.zip`, platform: "win32", arch: "x64" },
   };

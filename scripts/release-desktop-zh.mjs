@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 中文版 Release 的唯一发布入口。所有本地检查先于任何 GitHub 写入。
-// 套装必须含 Windows x64 运行包（141 从它更新）；DMG、NSIS、Linux 运行包可选，NSIS 须与所嵌 Linux 包同套。
+// 套装必须含 Windows x64 运行包（141 从它更新）；DMG、Linux 运行包可选。
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -16,7 +16,7 @@ import {
   assertCandidate,
   sha256,
 } from "./release-source-zh.mjs";
-import { verifyReceipt, checkFiles, parse7zListing, inventory } from "./release-validation-zh.mjs";
+import { verifyReceipt } from "./release-validation-zh.mjs";
 
 const REPO = "jieyuexing/t3code-zh";
 export function releaseTag(version, explicit) {
@@ -51,27 +51,15 @@ export function preflightSuite(suiteFile, currentSource) {
     if (candidate.version !== suite.version || !sameSource(candidate.source, currentSource))
       throw new Error("Mixed source/version; rebuild complete suite");
     const receiptFile = resolve(entry.receipt);
-    const validation = verifyReceipt(
-      candidate,
-      receiptFile,
-      entry.materials ? resolve(entry.materials) : undefined,
-    );
+    const validation = verifyReceipt(candidate, receiptFile);
     artifacts.push({
       candidate,
       file: artifact,
       validation,
       receiptSha256: fileIdentity(receiptFile).sha256,
-      ...(entry.materials ? { materials: resolve(entry.materials) } : {}),
     });
   }
   if (!kinds.has("windows")) throw new Error("Missing asset: windows");
-  const nsis = artifacts.find((a) => a.candidate.kind === "nsis")?.candidate;
-  if (nsis) {
-    const linux = artifacts.find((a) => a.candidate.kind === "linux")?.candidate;
-    if (!linux) throw new Error("Missing asset: linux (embedded by nsis)");
-    if (nsis.embeddedWslSha256 !== linux.sha256)
-      throw new Error("Embedded WSL differs from suite Linux archive");
-  }
   const first = artifacts[0].candidate;
   if (artifacts.some((a) => a.candidate.upstreamCommit !== first.upstreamCommit))
     throw new Error("Mixed upstream identity");
@@ -89,7 +77,6 @@ export function preflightSuite(suiteFile, currentSource) {
       ...artifactSpec(c.version, c.kind),
       bytes: c.bytes,
       sha256: c.sha256,
-      ...(c.embeddedWslSha256 ? { embeddedWslSha256: c.embeddedWslSha256 } : {}),
       structure: "passed",
       validation: validation.scope,
     })),
@@ -133,7 +120,6 @@ export function preflightSuite(suiteFile, currentSource) {
 }
 const KIND_LABELS = {
   dmg: "macOS arm64 DMG",
-  nsis: "Windows x64 NSIS",
   linux: "Linux x64 CLI",
   windows: "Windows x64 CLI",
 };
@@ -187,61 +173,6 @@ export function assertAllUploaded(release, prepared) {
       throw new Error(`Stored digest/size mismatch: ${asset.name}`);
   }
 }
-// 最终 NSIS 原件再次解出内层归档，与准备材料时的原件绑定。绝不从 win-unpacked 取代它。
-export async function checkInstallerOriginal(prepared, sevenZip, scratch) {
-  const nsis = prepared.artifacts.find((a) => a.candidate.kind === "nsis");
-  const manifest = readJson(NodePath.join(nsis.materials, "materials.json"));
-  const inner = NodePath.join(scratch, "app-64.7z");
-  const fd = NodeFS.openSync(inner, "wx");
-  try {
-    NodeChildProcess.execFileSync(sevenZip, ["x", "-so", nsis.file, "$PLUGINSDIR/app-64.7z"], {
-      stdio: ["ignore", fd, "pipe"],
-    });
-  } finally {
-    NodeFS.closeSync(fd);
-  }
-  const actual = fileIdentity(inner);
-  if (actual.sha256 !== manifest.inner?.sha256 || actual.bytes !== manifest.inner?.bytes)
-    throw new Error("Final installer extraction identity mismatch");
-  const payload = NodePath.join(scratch, "payload");
-  // materials 的 member paths 已逐项受 checkFiles 检查；先核对原 listing 字节再解包。
-  const listing = NodeChildProcess.execFileSync(sevenZip, ["l", "-slt", inner], {
-    encoding: "utf8",
-  });
-  // 归档头的绝对路径不同，成员段必须一致。
-  parse7zListing(listing);
-  const previous = NodeFS.readFileSync(
-    NodePath.join(nsis.materials, "payload-listing.txt"),
-    "utf8",
-  );
-  if (listing.split(/\r?\n----------\r?\n/)[1] !== previous.split(/\r?\n----------\r?\n/)[1])
-    throw new Error("Payload listing mismatch");
-  NodeChildProcess.execFileSync(sevenZip, ["x", "-y", `-o${payload}`, inner], { stdio: "pipe" });
-  checkFiles(
-    payload,
-    manifest.files
-      .filter((r) => r.path.startsWith("payload-unpacked/"))
-      .map((r) => ({ ...r, path: r.path.slice(17) })),
-  );
-  const asar = await import("@electron/asar");
-  const serverAsar = NodePath.join(payload, "resources/server.asar");
-  for (const member of asar.listPackage(serverAsar)) {
-    if (asar.statFile(serverAsar, member.replace(/^[/\\]+/, ""), false).link)
-      throw new Error("Extracted sidecar link refused");
-  }
-  const sidecar = NodePath.join(scratch, "sidecar");
-  asar.extractAll(serverAsar, sidecar);
-  const expected = manifest.files
-    .filter((r) => r.path.startsWith("sidecar/"))
-    .map((r) => ({ ...r, path: r.path.slice(8) }));
-  checkFiles(sidecar, expected);
-  if (
-    inventory(sidecar).length !== expected.length ||
-    inventory(payload).length !==
-      manifest.files.filter((r) => r.path.startsWith("payload-unpacked/")).length
-  )
-    throw new Error("Extracted material file count mismatch");
-}
 // GitHub Actions（jieyuexing/t3code-zh-build）由工作流注入只授本仓发布权限的 GH_TOKEN，直连 GitHub。
 export const onGitHubActions = (base) => base.GITHUB_ACTIONS === "true";
 export function ghEnvironment(base) {
@@ -272,14 +203,12 @@ export async function main() {
   const { values } = NodeUtil.parseArgs({
     options: {
       "dry-run": { type: "boolean", default: false },
-      ...Object.fromEntries(
-        ["suite", "tag", "seven-zip"].map((name) => [name, { type: "string" }]),
-      ),
+      ...Object.fromEntries(["suite", "tag"].map((name) => [name, { type: "string" }])),
     },
   });
   if (!values.suite)
     throw new Error(
-      "Usage: release-desktop-zh.mjs --suite suite.json [--seven-zip /existing/7za] [--dry-run] [--tag zh-vV-rN]",
+      "Usage: release-desktop-zh.mjs --suite suite.json [--dry-run] [--tag zh-vV-rN]",
     );
   const root = NodeURL.fileURLToPath(new URL("../", import.meta.url));
   ghEnvironment(process.env);
@@ -305,10 +234,6 @@ export async function main() {
   if (!process.env.TMPDIR)
     throw new Error("Set task-owned TMPDIR/TMP/TEMP before release preflight");
   const scratch = NodeFS.mkdtempSync(NodePath.join(process.env.TMPDIR, "zh-release-"));
-  if (prepared.artifacts.some((a) => a.candidate.kind === "nsis")) {
-    if (!values["seven-zip"]) throw new Error("NSIS suite requires --seven-zip");
-    await checkInstallerOriginal(prepared, values["seven-zip"], scratch);
-  }
   const merge = git(root, "log", "-1", "--merges", "--format=%H", "--grep=^merge", "HEAD");
   const body = merge ? git(root, "log", "-1", "--format=%B", merge) : "";
   const start = body.search(/^更新说明/m);

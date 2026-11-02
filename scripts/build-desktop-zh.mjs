@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable t3code/no-global-process-runtime -- Dependency-free build bootstrap also runs in isolated wrapper fixtures. */
 
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -12,7 +11,6 @@ import {
   sameSource,
   fileIdentity,
   artifactSpec,
-  readJson,
   writeJson,
 } from "./release-source-zh.mjs";
 
@@ -28,49 +26,32 @@ if (!/^\d+\.\d+\.\d+-nightly\.\d{8}\.\d+$/.test(version)) {
   throw new Error(`无法识别上游 nightly 版本：${version}`);
 }
 const { values } = NodeUtil.parseArgs({
-  options: {
-    "windows-cross-candidate": { type: "boolean", default: false },
-    ...Object.fromEntries(
-      [
-        "platform",
-        "target",
-        "arch",
-        "wsl-runtime",
-        "official-archive",
-        "release-metadata",
-        "sha256sums",
-        "output-dir",
-      ].map((name) => [name, { type: "string" }]),
-    ),
-  },
+  options: Object.fromEntries(
+    [
+      "platform",
+      "target",
+      "arch",
+      "official-archive",
+      "release-metadata",
+      "sha256sums",
+      "output-dir",
+    ].map((name) => [name, { type: "string" }]),
+  ),
 });
 const platform = values.platform ?? "mac";
 const target = values.target ?? "dmg";
 const arch = values.arch ?? "arm64";
 if (
-  values["windows-cross-candidate"] &&
-  (platform !== "win" || target !== "nsis" || arch !== "x64" || process.platform === "win32")
-)
-  throw new Error("--windows-cross-candidate only supports non-Windows win/nsis/x64");
-if (
-  !["mac/dmg/arm64", "win/nsis/x64", "linux/archive/x64", "win/archive/x64"].includes(
+  !["mac/dmg/arm64", "linux/archive/x64", "win/archive/x64"].includes(
     `${platform}/${target}/${arch}`,
   )
 ) {
-  throw new Error("只支持 mac/dmg/arm64、win/nsis/x64 和 linux|win/archive/x64。");
+  throw new Error("只支持 mac/dmg/arm64 和 linux|win/archive/x64。");
 }
-if (target === "archive") {
-  for (const name of ["official-archive", "release-metadata", "sha256sums", "output-dir"]) {
-    if (!values[name]) throw new Error(`缺少 --${name}`);
-  }
-  if (values["wsl-runtime"]) throw new Error("archive 不接受 --wsl-runtime");
-} else {
-  for (const name of ["official-archive", "release-metadata", "sha256sums"]) {
-    if (values[name]) throw new Error(`${target} 不接受 --${name}`);
-  }
-  if (platform === "win" && !values["wsl-runtime"])
-    throw new Error("Windows NSIS 必须提供 --wsl-runtime");
-  if (platform === "mac" && values["wsl-runtime"]) throw new Error("DMG 不接受 --wsl-runtime");
+for (const name of ["official-archive", "release-metadata", "sha256sums", "output-dir"]) {
+  if (target === "archive" && !values[name]) throw new Error(`缺少 --${name}`);
+  if (target !== "archive" && name !== "output-dir" && values[name])
+    throw new Error(`${target} 不接受 --${name}`);
 }
 
 // Local fork artifacts must remain feed-free. Do not silently inherit CI publishing inputs.
@@ -101,21 +82,6 @@ const upstreamCommit = NodeChildProcess.execFileSync("git", ["rev-parse", `v${ve
   cwd: root,
   encoding: "utf8",
 }).trim();
-let embeddedWslSha256;
-if (values["wsl-runtime"]) {
-  const wsl = readJson(`${values["wsl-runtime"]}.candidate.json`);
-  const actual = fileIdentity(values["wsl-runtime"]);
-  if (
-    wsl.kind !== "linux" ||
-    wsl.version !== version ||
-    wsl.sha256 !== actual.sha256 ||
-    wsl.bytes !== actual.bytes ||
-    !sameSource(source, wsl.source)
-  )
-    throw new Error("WSL candidate must have identical source/version/hash; rebuild the set");
-  embeddedWslSha256 = actual.sha256;
-}
-
 const { releasePackageFiles } = await import("./update-release-package-versions.ts");
 const originals = new Map(
   releasePackageFiles.map((file) => [
@@ -180,8 +146,6 @@ try {
       version,
       "--output-dir",
       outputDir,
-      ...(values["windows-cross-candidate"] ? ["--windows-cross-candidate"] : []),
-      ...(values["wsl-runtime"] ? ["--wsl-runtime", values["wsl-runtime"]] : []),
     ]);
   }
 } catch (error) {
@@ -223,7 +187,6 @@ writeJson(`${artifact}.candidate.json`, {
   ...fileIdentity(artifact),
   structure: "passed",
   native: "pending",
-  ...(embeddedWslSha256 ? { embeddedWslSha256 } : {}),
 });
 console.log(
   `[zh-candidate] ${spec.name}: structure passed; target validation pending; NOT release-ready`,

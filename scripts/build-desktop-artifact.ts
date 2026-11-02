@@ -188,7 +188,6 @@ interface BuildCliInput {
   readonly mockUpdates: Option.Option<boolean>;
   readonly mockUpdateServerPort: Option.Option<number>;
   readonly wslRuntime: Option.Option<string>;
-  readonly windowsCrossCandidate?: Option.Option<boolean>;
 }
 
 function detectHostBuildPlatform(hostPlatform: string): typeof BuildPlatform.Type | undefined {
@@ -939,7 +938,6 @@ const resolvePythonForNodeGyp = Effect.fn("resolvePythonForNodeGyp")(function* (
 });
 
 interface ResolvedBuildOptions {
-  readonly windowsCrossCandidate?: boolean;
   readonly platform: typeof BuildPlatform.Type;
   readonly target: string;
   readonly arch: typeof BuildArch.Type;
@@ -1031,11 +1029,6 @@ export const WINDOWS_SERVER_ASAR_UNPACK_GLOBS = [
 ] as const;
 // Keep sidecar exclusions aligned with the app; .bin symlinks are unused and unsupported by ASAR extraction.
 export const WINDOWS_SERVER_ASAR_IGNORE_GLOBS = [
-  // Package-manager metadata contains the builder's absolute home/store paths.
-  "**/node_modules/.modules.yaml",
-  "**/node_modules/.pnpm-workspace-state-v1.json",
-  "**/node_modules/.pnpm",
-  "**/node_modules/.pnpm/**",
   "**/node_modules/@cursor/sdk-*",
   "**/node_modules/@cursor/sdk-*/**",
   "**/node_modules/@anthropic-ai/claude-agent-sdk-*",
@@ -1741,19 +1734,6 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
           ),
         ));
 
-  const windowsCrossCandidate =
-    input.windowsCrossCandidate === undefined
-      ? false
-      : Option.getOrElse(input.windowsCrossCandidate, () => false);
-  if (
-    windowsCrossCandidate &&
-    (platform !== "win" || target !== "nsis" || arch !== "x64" || hostPlatform === "win32")
-  ) {
-    return yield* new BuildCommandFailedError({
-      command: "--windows-cross-candidate requires a non-Windows host and win/nsis/x64",
-      exitCode: 1,
-    });
-  }
   const wslRuntime =
     Option.getOrUndefined(input.wslRuntime) ?? Option.getOrUndefined(env.wslRuntime);
 
@@ -1770,7 +1750,6 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     mockUpdates,
     mockUpdateServerPort,
     wslRuntime,
-    windowsCrossCandidate,
   } satisfies ResolvedBuildOptions;
 });
 
@@ -2223,11 +2202,7 @@ export const copyDirectoryPreservingSymlinks = Effect.fn("copyDirectoryPreservin
 );
 
 export const verifyPackagedBundleIsSelfContained = Effect.fn("verifyPackagedBundleIsSelfContained")(
-  function* (input: {
-    readonly asarPath: string;
-    readonly verbose: boolean;
-    readonly windowsCrossCandidate?: boolean;
-  }) {
+  function* (input: { readonly asarPath: string; readonly verbose: boolean }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
 
@@ -2245,17 +2220,6 @@ export const verifyPackagedBundleIsSelfContained = Effect.fn("verifyPackagedBund
         }),
     });
     yield* copyDirectoryPreservingSymlinks(extractedApp, probeApp);
-
-    // 跨 Windows 候选只完成抽取与链接闭包检查；祖先隔离和原生运行必须在目标根完成。
-    if (input.windowsCrossCandidate) {
-      if (!(yield* fs.exists(path.join(probeApp, "apps/server/dist/bin.mjs")))) {
-        return yield* new BundleNotSelfContainedError({
-          exitCode: -1,
-          output: "Missing sidecar entry",
-        });
-      }
-      return;
-    }
 
     // Ancestor node_modules could satisfy missing packaged dependencies and hide a broken stage.
     for (const candidate of ancestorNodeModulesPaths(probeApp, path.sep)) {
@@ -3335,20 +3299,11 @@ export const verifyWindowsPackagedRuntime = Effect.fn(
   readonly appExecutableName: string;
   readonly targetArch: typeof BuildArch.Type;
   readonly verbose: boolean;
-  readonly windowsCrossCandidate?: boolean;
 }) {
   const path = yield* Path.Path;
   const asarPath = path.join(input.packagedAppDir, "resources", WINDOWS_SERVER_ASAR_RESOURCE);
   yield* verifyWindowsPrimaryFffNativeLoad({ ...input, asarPath });
   const hostPlatform = yield* HostProcess.Platform;
-  if (input.windowsCrossCandidate) {
-    yield* verifyPackagedBundleIsSelfContained({
-      asarPath,
-      verbose: input.verbose,
-      windowsCrossCandidate: true,
-    });
-    return;
-  }
   if (hostPlatform !== "win32") {
     yield* Effect.log(
       `[desktop-artifact] Skipped the bundle self-check on a ${hostPlatform} host.`,
@@ -3366,22 +3321,11 @@ export const validateWindowsPackagedPayload = Effect.fn(
   readonly targetArch: typeof BuildArch.Type;
   readonly appVersion: string;
   readonly expectWslRuntime?: boolean;
-  readonly windowsCrossCandidate?: boolean;
   readonly fileLimit?: number;
   readonly verbose?: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  if (
-    input.windowsCrossCandidate &&
-    ((yield* HostProcess.Platform) === "win32" || input.targetArch !== "x64")
-  ) {
-    return yield* new WindowsPackagedPayloadValidationError({
-      reason: "sidecar-invalid",
-      packagedAppDir: input.stageDistDir,
-      cause: new Error("Cross candidate requires non-Windows host and x64"),
-    });
-  }
   const fileLimit = input.fileLimit ?? WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT;
   const isFile = (filePath: string) =>
     fs.stat(filePath).pipe(
@@ -3584,16 +3528,11 @@ export const validateWindowsPackagedPayload = Effect.fn(
     appExecutableName: input.appExecutableName,
     targetArch: input.targetArch,
     verbose: input.verbose ?? false,
-    ...(input.windowsCrossCandidate ? { windowsCrossCandidate: true } : {}),
   });
 
   yield* Effect.log(
     `[desktop-artifact] Validated Windows payload (${String(fileCount)} files, ${String(unpackedFiles.length)} sidecar natives).`,
   );
-  if (input.windowsCrossCandidate)
-    yield* Effect.log(
-      "[desktop-artifact] Candidate only: pending Windows native validation; NOT release-ready.",
-    );
   return { packagedAppDir, fileCount, unpackedFiles } as const;
 });
 
@@ -4126,7 +4065,6 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
         runtimeArchivePath: options.wslRuntime,
       }),
       verbose: options.verbose,
-      ...(options.windowsCrossCandidate ? { windowsCrossCandidate: true } : {}),
     });
   }
   // x64 builds on arm64 runners; the arm64 check covers the shared JS bundle.
@@ -4247,12 +4185,6 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   mockUpdateServerPort: Flag.Int("mock-update-server-port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
     Flag.withDescription("Mock update server port (env: T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT)."),
-    Flag.optional,
-  ),
-  windowsCrossCandidate: Flag.Boolean("windows-cross-candidate").pipe(
-    Flag.withDescription(
-      "Non-Windows win/nsis/x64 candidate: strict structure, native validation pending.",
-    ),
     Flag.optional,
   ),
   wslRuntime: Flag.String("wsl-runtime").pipe(

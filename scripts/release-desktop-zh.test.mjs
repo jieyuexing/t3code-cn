@@ -14,12 +14,11 @@ import {
   suiteContents,
 } from "./release-desktop-zh.mjs";
 import { fileIdentity, artifactSpec, sourceIdentity } from "./release-source-zh.mjs";
-import { verifyReceipt, parse7zListing } from "./release-validation-zh.mjs";
 
 const version = "0.0.46-nightly.20261008.2833";
 const source = { head: "1".repeat(40), treeSha256: "2".repeat(64), dirty: false };
 const write = (file, value) => NodeFS.writeFileSync(file, JSON.stringify(value));
-const ALL_KINDS = ["linux", "windows", "dmg", "nsis"];
+const ALL_KINDS = ["linux", "windows", "dmg"];
 function fixture(kinds = ALL_KINDS) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "release-fixture-"));
   const entries = [];
@@ -61,7 +60,6 @@ function fixture(kinds = ALL_KINDS) {
       upstreamCommit: "3".repeat(40),
       structure: "passed",
       native: "pending",
-      ...(kind === "nsis" ? { embeddedWslSha256: candidates.linux.sha256 } : {}),
     };
     candidates[kind] = candidate;
     const receipt = {
@@ -74,60 +72,7 @@ function fixture(kinds = ALL_KINDS) {
       artifactSha256: candidate.sha256,
       stages: {},
     };
-    if (kind === "nsis") {
-      const materials = NodePath.join(root, "materials");
-      NodeFS.mkdirSync(materials);
-      const files = ["windows-native-probe-zh.cjs", "validate-windows-zh.ps1"].map((name) => {
-        NodeFS.copyFileSync(new URL(name, import.meta.url), NodePath.join(materials, name));
-        return { path: name, ...fileIdentity(NodePath.join(materials, name)) };
-      });
-      write(NodePath.join(materials, "materials.json"), {
-        schema: 1,
-        candidate,
-        embeddedWslSha256: candidate.embeddedWslSha256,
-        files,
-      });
-      receipt.materialsSha256 = fileIdentity(NodePath.join(materials, "materials.json")).sha256;
-      receipt.integrityBefore = receipt.integrityAfter = receipt.materialsSha256;
-      receipt.isolation = {
-        environmentCleared: true,
-        noGlobalSearchPaths: true,
-        nodePath: "",
-        monitorEnabled: false,
-        ancestors: [{ nodeModules: false, reparse: false }],
-      };
-      receipt.removedDependency = "ffi-rs";
-      receipt.removedFiles = 5;
-      const event = (value) => JSON.stringify(value) + "\n";
-      receipt.stages.electron = stage(kind, "electron", "v24.21.0\n");
-      receipt.stages.node = stage(
-        kind,
-        "node",
-        event({
-          platform: "win32",
-          arch: "x64",
-          nodePath: "",
-          globalPaths: [],
-          monitorEnabled: "false",
-          versions: { node: "24.21.0", electron: "44.4.2" },
-        }),
-      );
-      receipt.stages.bad = stage(kind, "bad", "", "ERR_MODULE_NOT_FOUND: ffi-rs", 1);
-      receipt.stages.good = stage(kind, "good", `t3 v${version}\n`);
-      for (const name of ["ffi", "fff", "keyring"])
-        receipt.stages[name] = stage(kind, name, event({ mode: name, loaded: true }));
-      receipt.stages.pty = stage(
-        kind,
-        "pty",
-        [
-          { nativeLoaded: true },
-          { event: "pty-exit", exitCode: 0, ok: true, output: "T3ZH-PTY-OK" },
-          { event: "probe-cleanup" },
-        ]
-          .map(event)
-          .join(""),
-      );
-    } else if (kind === "dmg") {
+    if (kind === "dmg") {
       receipt.stages.attach = stage(kind, "attach", "<key>mount-point</key>");
       receipt.stages.architecture = stage(kind, "architecture", "arm64");
       receipt.stages.plist = stage(kind, "plist", version);
@@ -177,7 +122,6 @@ function fixture(kinds = ALL_KINDS) {
       artifact: spec.name,
       candidate: `${kind}.candidate.json`,
       receipt: `${kind}.receipt.json`,
-      ...(kind === "nsis" ? { materials: "materials" } : {}),
     });
   }
   const suite = { schema: 1, version, artifacts: entries };
@@ -213,13 +157,6 @@ for (const [name, mutate] of [
     },
   ],
   [
-    "nsis without its embedded linux archive",
-    (f) => {
-      f.suite.artifacts = f.suite.artifacts.filter((e) => e.candidate !== "linux.candidate.json");
-      write(f.suiteFile, f.suite);
-    },
-  ],
-  [
     "wrong hash",
     (f) => NodeFS.appendFileSync(NodePath.join(f.root, f.candidates.dmg.name), "changed"),
   ],
@@ -230,60 +167,37 @@ for (const [name, mutate] of [
       write(NodePath.join(f.root, "dmg.candidate.json"), f.candidates.dmg);
     },
   ],
-  ["missing receipt", (f) => NodeFS.unlinkSync(NodePath.join(f.root, "nsis.receipt.json"))],
-  [
-    "wrong OS",
+  ["missing receipt", (f) => NodeFS.unlinkSync(NodePath.join(f.root, "windows.receipt.json"))],
+  ...[
+    ["wrong OS", { platform: "linux" }],
+    ["wrong arch", { arch: "arm64" }],
+    ["wrong version", { version: "0.0.45" }],
+  ].map(([label, change]) => [
+    label,
+    (f) =>
+      write(NodePath.join(f.root, "windows.receipt.json"), { ...f.receipts.windows, ...change }),
+  ]),
+  ...[
+    ["native failure", { exitCode: 1 }],
+    ["native timeout", { timedOut: true }],
+  ].map(([label, change]) => [
+    label,
     (f) => {
-      f.receipts.nsis.platform = "linux";
-      write(NodePath.join(f.root, "nsis.receipt.json"), f.receipts.nsis);
+      write(NodePath.join(f.root, "windows-smoke.json"), {
+        ...f.stageRefs["windows-smoke"],
+        ...change,
+      });
+      f.receipts.windows.stages.smoke = f.identity("windows-smoke.json");
+      write(NodePath.join(f.root, "windows.receipt.json"), f.receipts.windows);
     },
-  ],
-  [
-    "wrong arch",
-    (f) => {
-      f.receipts.nsis.arch = "arm64";
-      write(NodePath.join(f.root, "nsis.receipt.json"), f.receipts.nsis);
-    },
-  ],
-  [
-    "wrong version",
-    (f) => {
-      f.receipts.nsis.version = "0.0.45";
-      write(NodePath.join(f.root, "nsis.receipt.json"), f.receipts.nsis);
-    },
-  ],
-  [
-    "native failure",
-    (f) => {
-      f.stageRefs["nsis-ffi"].exitCode = 1;
-      write(NodePath.join(f.root, "nsis-ffi.json"), f.stageRefs["nsis-ffi"]);
-      f.receipts.nsis.stages.ffi = f.identity("nsis-ffi.json");
-      write(NodePath.join(f.root, "nsis.receipt.json"), f.receipts.nsis);
-    },
-  ],
-  [
-    "native timeout",
-    (f) => {
-      f.stageRefs["nsis-pty"].timedOut = true;
-      write(NodePath.join(f.root, "nsis-pty.json"), f.stageRefs["nsis-pty"]);
-      f.receipts.nsis.stages.pty = f.identity("nsis-pty.json");
-      write(NodePath.join(f.root, "nsis.receipt.json"), f.receipts.nsis);
-    },
-  ],
+  ]),
   [
     "forged passed flag",
-    (f) => write(NodePath.join(f.root, "nsis.receipt.json"), { passed: true }),
+    (f) => write(NodePath.join(f.root, "windows.receipt.json"), { passed: true }),
   ],
   [
     "tampered log",
-    (f) => NodeFS.appendFileSync(NodePath.join(f.root, "nsis-good.stdout"), "tamper"),
-  ],
-  [
-    "ancestor contamination",
-    (f) => {
-      f.receipts.nsis.isolation.ancestors[0].nodeModules = true;
-      write(NodePath.join(f.root, "nsis.receipt.json"), f.receipts.nsis);
-    },
+    (f) => NodeFS.appendFileSync(NodePath.join(f.root, "windows-version.stdout"), "tamper"),
   ],
 ])
   NodeTest.test(`rejects ${name}`, () =>
@@ -294,16 +208,14 @@ for (const [name, mutate] of [
   );
 
 NodeTest.test(
-  "complete local fixture yields exactly six public assets without private receipts",
+  "complete local fixture yields exactly five public assets without private receipts",
   () =>
     withFixture((f) => {
       const prepared = preflightSuite(f.suiteFile, source);
-      NodeAssert.equal(prepared.assets.length, 6);
+      NodeAssert.equal(prepared.assets.length, 5);
       const provenance = prepared.assets.find((a) => a.name === "PROVENANCE.json").text;
       NodeAssert.ok(!provenance.includes(f.root));
-      NodeAssert.ok(
-        !/pid|ancestors|materialsSha256|receiptSha256|stdout|USERPROFILE/.test(provenance),
-      );
+      NodeAssert.ok(!/pid|receiptSha256|stdout|USERPROFILE/.test(provenance));
       NodeAssert.match(
         prepared.assets.find((a) => a.name === "SHA256SUMS").text,
         /PROVENANCE.json/,
@@ -388,18 +300,6 @@ NodeTest.test("revision tag is explicit and preserves product version", () => {
   NodeAssert.equal(releaseTag(version), `zh-v${version}`);
   NodeAssert.equal(releaseTag(version, `zh-v${version}-r1`), `zh-v${version}-r1`);
 });
-NodeTest.test("7z listing rejects traversal, duplicate and links before extraction", () => {
-  for (const data of [
-    "Path = ../bad",
-    "Path = good\nSymbolic Link = /outside",
-    "Path = good\n\nPath = GOOD",
-  ])
-    NodeAssert.throws(() => parse7zListing(`header\n----------\n${data}\n`));
-  NodeAssert.equal(
-    parse7zListing("header\n----------\nPath = resources/server.asar\nSize = 2\n").length,
-    1,
-  );
-});
 NodeTest.test(
   "source identity changes for untracked build inputs and scripts, with HEAD unchanged",
   () => {
@@ -437,23 +337,6 @@ NodeTest.test(
   },
 );
 NodeTest.test(
-  "legacy W4 summary without bound source/materials/stage originals cannot issue release approval",
-  () =>
-    withFixture((f) => {
-      const file = NodePath.join(f.root, "legacy.json");
-      write(file, {
-        status: "bounded-windows-payload-validation-passed",
-        installerSha256: f.candidates.nsis.sha256,
-        passed: true,
-      });
-      NodeAssert.throws(
-        () => verifyReceipt(f.candidates.nsis, file, NodePath.join(f.root, "materials")),
-        /identity/,
-      );
-    }),
-);
-
-NodeTest.test(
   "dry-run and conflicting draft perform zero writes; matching draft resumes and only publishes complete digests",
   () =>
     withFixture((f) => {
@@ -484,7 +367,7 @@ NodeTest.test(
           });
         }
         if (args[1] === "edit") {
-          NodeAssert.equal(release.assets.length, 6);
+          NodeAssert.equal(release.assets.length, 5);
           release.draft = false;
           tagCommit = source.head;
         }
@@ -526,7 +409,7 @@ NodeTest.test(
       };
       publishPrepared({ ...options, dryRun: false });
       NodeAssert.equal(writes.filter((a) => a[1] === "create").length, 0);
-      NodeAssert.equal(writes.filter((a) => a[1] === "upload").length, 5);
+      NodeAssert.equal(writes.filter((a) => a[1] === "upload").length, 4);
       NodeAssert.equal(writes.at(-1)[1], "edit");
     }),
 );
@@ -650,12 +533,3 @@ NodeTest.test("publisher on GitHub Actions requires the injected token and adds 
   NodeAssert.equal(env.GH_TOKEN, "fixture-token");
   NodeAssert.ok(!("HTTPS_PROXY" in env));
 });
-
-NodeTest.test(
-  "Windows validation script is ASCII so PowerShell 5.1 parses it under any code page",
-  () => {
-    const script = NodeFS.readFileSync(new URL("./validate-windows-zh.ps1", import.meta.url));
-    const offending = [...script.entries()].find(([, byte]) => byte > 0x7f);
-    NodeAssert.equal(offending, undefined, "validate-windows-zh.ps1 must contain only ASCII bytes");
-  },
-);

@@ -210,9 +210,3 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 ## Additional tips
 
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
-
-## Fork cross-platform build
-
-- 中文候选构建 → `node scripts/build-desktop-zh.mjs`（默认 mac/dmg/arm64；CLI 使用 linux|win/archive/x64；非 Windows 的 NSIS 必须显式 `--windows-cross-candidate` 和同源 `--wsl-runtime`）→ `i18n/README.md`「跨平台候选」。输出候选身份与 pending，清单按字节恢复，拒绝并发源码变化；维护脚本和未跟踪输入也计入源码身份。
-- 最终产物验证 → `node scripts/verify-release-candidate-zh.mjs --prepare-windows|--audit-dmg|--smoke-cli ...`，Windows 使用材料内 `validate-windows-zh.ps1`，回执用同入口 `--receipt` 重放 → `i18n/README.md`「最终产物目标验证」。保留祖先/链接/隔离环境、真实缺依赖红绿与超时条件；私有原始回执留本地。
-- 同源套装预检/发布 → `node scripts/release-desktop-zh.mjs --suite <任务目录/suite.json> [--seven-zip <已有工具>] --dry-run [--tag zh-vV-rN]` → `i18n/README.md`「套装发布」。clean HEAD 必须精确为 origin/zh-i18n；套装须含 Windows x64 运行包，所列产物的目标证明齐全才可建 draft，全部资产逐件核对才 publish。已发布 Release 不可变；去掉 dry-run 需要当次发布授权。

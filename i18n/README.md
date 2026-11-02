@@ -49,15 +49,7 @@ vp test run i18n/
 
 ## 跨平台候选
 
-原 `npm run dist:desktop:dmg:arm64:zh` 保持不变；可显式指定 `--output-dir`，已有同名产物拒绝覆盖。在非 Windows 宿主构建 Windows 中文桌面候选使用：
-
-```sh
-node scripts/build-desktop-zh.mjs --platform win --target nsis --arch x64 \
-  --wsl-runtime /absolute/output/t3-V-linux-x64.tar.gz \
-  --windows-cross-candidate --output-dir /absolute/output
-```
-
-先串行构建 Linux 与 Windows CLI（`V` 为当前所基于的 upstream nightly，不带 `v`）：
+`build-desktop-zh.mjs` 只构建三种目标：DMG arm64（`npm run dist:desktop:dmg:arm64:zh`，可显式指定 `--output-dir`，已有同名产物拒绝覆盖），以及 Linux x64、Windows x64 CLI archive。不构建 Windows NSIS 安装包。CLI 先 Linux 后 Windows 串行构建（`V` 为当前所基于的 upstream nightly，不带 `v`）：
 
 ```sh
 node scripts/build-desktop-zh.mjs --platform linux --target archive --arch x64 \
@@ -71,21 +63,15 @@ CLI 包装内部调用 `build-cli-zh.mjs`，在同一 nightly 盖章事务中重
 
 官方模板必须来自精确同版 `pingdotgg/t3code` Release，元数据包含 asset size/digest/URL；同时校验 GitHub digest 和 SHA256SUMS（自身也校验 digest）。先检查本地 tag 是 HEAD 祖先、native/resource-monitor、lock、workspace 依赖配置、patches、外置依赖清单和 server manifest（仅忽略临时版本盖章）与 tag 完全一致。差异即拒绝。解包前检查全部路径与类型，拒绝链接、路径穿越、重复成员和特殊文件。只提取 node_modules 和 resource-monitor，Linux 另取 lib/（libatomic.so.1 与许可证，宿主没有 ldd/dpkg-query），再用 patchelf 给 fork t3 设 RUNPATH `$ORIGIN/lib`，因此 macOS 宿主需要 `brew install patchelf`；官方 t3/client 不进入候选。每个候选旁的 `.provenance.json` 记录来源 hash、复用成员逐文件 hash 和 fork 可执行文件 hash。node-pty 的其他 Windows 架构 vendor 文件与 ffi-rs ia32 sibling 原样保留，并按目录声明验架构；目标加载的二进制必须是 x64。
 
-包装只接受列出的目标/参数，保持 feed-free、失败/信号后的清单恢复与并发修改拒绝。官方闭包复用不是原生依赖自主编译，也不替代目标系统运行验收。Windows 可沿用经同源校验的 monitor 到既有 `T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR=true` 入口；只用已安装 Wine，设置独立 WINEPREFIX，不运行安装器。构建候选不修改既有 Release。
+包装只接受列出的目标/参数，保持 feed-free、失败/信号后的清单恢复与并发修改拒绝。官方闭包复用不是原生依赖自主编译，也不替代目标系统运行验收。构建候选不修改既有 Release。
 
-`--windows-cross-candidate` 只接受非 Windows 宿主的 win/nsis/x64。全部宿主结构检查、ASAR 抽取/链接闭包、native 文件、WSL 版本/hash 继续执行；原生加载及祖先 node_modules 隔离检查转交合格 Windows 根。成功退出只表示候选构建完成，明确输出 pending；没有通用 skip-checks。默认构建的严格验证行为保留，历史失败命令不因此变成成功。
-
-每件候选旁的 `.candidate.json` 包含版本、精确上游 commit、产物 bytes/hash、目标 OS/arch、包含未跟踪输入和维护脚本的完整源码指纹及 dirty 状态。版本盖章前后指纹必须相同；被忽略的 `.env` 输入拒绝。Windows 嵌入的 Linux archive 必须有同源候选清单。维护脚本/文档/测试变化也改变指纹；不同 dirty 产物即使 HEAD 相同也不能拼套装。候选可 dirty，发布必须 clean 后整套重建。
+每件候选旁的 `.candidate.json` 包含版本、精确上游 commit、产物 bytes/hash、目标 OS/arch、包含未跟踪输入和维护脚本的完整源码指纹及 dirty 状态。版本盖章前后指纹必须相同；被忽略的 `.env` 输入拒绝。维护脚本/文档/测试变化也改变指纹；不同 dirty 产物即使 HEAD 相同也不能拼套装。候选可 dirty，发布必须 clean 后整套重建。
 
 ### 最终产物目标验证
 
 所有路径均为本任务私有目录，TMPDIR/TMP/TEMP 指任务根。以下入口只验证候选，不发布：
 
 ```sh
-# M3：从最终 NSIS 提取材料；7za 必须是已有工具，output 必须不存在。
-node scripts/verify-release-candidate-zh.mjs --prepare-windows \
-  --artifact /output/T3-Code-V-x64.exe --candidate /output/T3-Code-V-x64.exe.candidate.json \
-  --seven-zip /existing/7za --output /task/windows-materials
 # M3：只读挂载自己的 DMG，检查签名、版本、arm64、中文 bundle、无更新 feed，卸载自己的挂载点。
 node scripts/verify-release-candidate-zh.mjs --audit-dmg \
   --artifact /output/T3-Code-V-arm64.dmg --candidate /output/T3-Code-V-arm64.dmg.candidate.json \
@@ -98,21 +84,11 @@ node scripts/verify-release-candidate-zh.mjs --smoke-cli \
 
 CLI 的原上游 `smoke-cli-archive.ts` 保持原合同；发行目标入口额外绑定候选身份、禁用 monitor、保存原始退出/HTTP 回执，serve 启动配对信息不落日志。Windows CLI 改用 win32-x64 ZIP，在 Windows x64 执行；Node 及仓库依赖必须已备妥，不自动安装。以上均不是安装/GUI/provider 或生产切换验收。
 
-把 Windows materials 完整传到已获准、所有祖先无 node_modules 或重解析点的 Windows 隔离根，以准备命令返回的 manifest hash 调用：
-
-```powershell
-powershell -NoProfile -File C:\isolated\materials\validate-windows-zh.ps1 `
-  -Materials C:\isolated\materials -Output C:\isolated\run-new `
-  -ExpectedMaterialsSha256 <materials.json-sha256>
-```
-
-不改变 ExecutionPolicy。脚本复验所有材料 hash 与自身代码，清空子进程环境，NODE_PATH 空、`--no-global-search-paths`、monitor=false，先缺 ffi-rs 的真实坏样本、后完整 sidecar，再加载 ffi/fff/keyring 和有界 PTY。每阶段 20 秒，保留超时/退出码和私有原始日志；PTY 显式释放探针自身 worker/socket，不证明应用终端生命周期。失败停止，不能补依赖或放宽 guard；重试前核对旧运行状态，并使用新输出目录。
-
-取回私有回执后用同一验证入口 `--artifact ... --candidate ... --receipt /run/receipt.json --materials /task/windows-materials` 重放。检查原件 hash、全部阶段、目标身份、红绿顺序、退出/超时和隔离条件；不接受任意 `passed:true`。只有旧 summary、没有新合同所需原件绑定的历史回执会拒绝，不能补字段伪造成新包通过。原始主机/IP/路径/PID/home 和回执不进入 Release。
+取回私有回执后用同一验证入口 `--artifact ... --candidate ... --receipt /run/receipt.json` 重放。检查原件 hash、全部阶段、目标身份、退出/超时条件；不接受任意 `passed:true`。原始主机/IP/路径/PID/home 和回执不进入 Release。
 
 ### 套装发布
 
-`release-desktop-zh.mjs` 是唯一 publisher。协调者整合、提交并推送到 `origin/zh-i18n` 后，以同一 clean 源码构建要发布的产物并完成各自目标验证。套装必须含 **Windows x64 archive**（141 的 `t3-141-update win` 只取它和 SHA256SUMS）；DMG arm64、NSIS x64、Linux x64 archive 可选，含 NSIS 时必须同时含它所嵌的 Linux 包。2026-10-30 起由公开仓库 `jieyuexing/t3code-zh-build` 的 `build.yml` 在 GitHub runner 上构建 DMG arm64、Linux x64 与 Windows x64 archive，各自在目标系统验证后调用本 publisher 发布（不含 NSIS，见该仓 README）；本机手动发布只在 runner 不可用时做。`suite.json` 留任务目录，四件齐全时结构为（只发 Windows 时 artifacts 只留最后一项）：
+`release-desktop-zh.mjs` 是唯一 publisher。协调者整合、提交并推送到 `origin/zh-i18n` 后，以同一 clean 源码构建要发布的产物并完成各自目标验证。套装必须含 **Windows x64 archive**（141 的 `t3-141-update win` 只取它和 SHA256SUMS）；DMG arm64、Linux x64 archive 可选。2026-10-30 起由公开仓库 `jieyuexing/t3code-zh-build` 的 `build.yml` 在 GitHub runner 上构建 DMG arm64、Linux x64 与 Windows x64 archive，各自在目标系统验证后调用本 publisher 发布；本机手动发布只在 runner 不可用时做。`suite.json` 留任务目录，三件齐全时结构为（只发 Windows 时 artifacts 只留最后一项）：
 
 ```json
 {
@@ -123,12 +99,6 @@ powershell -NoProfile -File C:\isolated\materials\validate-windows-zh.ps1 `
       "artifact": "T3-Code-V-arm64.dmg",
       "candidate": "T3-Code-V-arm64.dmg.candidate.json",
       "receipt": "dmg-audit/receipt.json"
-    },
-    {
-      "artifact": "T3-Code-V-x64.exe",
-      "candidate": "T3-Code-V-x64.exe.candidate.json",
-      "receipt": "windows-run/receipt.json",
-      "materials": "windows-materials"
     },
     {
       "artifact": "t3-V-linux-x64.tar.gz",
@@ -148,7 +118,6 @@ powershell -NoProfile -File C:\isolated\materials\validate-windows-zh.ps1 `
 
 ```sh
 node scripts/release-desktop-zh.mjs --suite /task/suite.json --dry-run
-# 套装含 NSIS 时追加 --seven-zip /existing/7za，用于复核安装包原件。
 # 已发布过同版时，必须由协调者明确选尚未使用的修订 tag；不会自动选择。
 node scripts/release-desktop-zh.mjs --suite /task/suite.json --tag zh-vV-r1 --dry-run
 ```
@@ -157,4 +126,4 @@ dry-run 无 GitHub 写入。完整本地预检通过后才查远端：HEAD 必�
 
 获准正式发布时才去掉 `--dry-run`：先建立 draft、上传套装产物和自动生成的 SHA256SUMS/PROVENANCE.json，逐件核对 GitHub 存储 digest/size，完整才 publish。同源码、同套装 draft 可恢复；同名异 hash、额外资产、错误 tag 或另一套源码均拒绝，不删除或覆盖修复。本机经既有 2080 代理，上传使用 gh 自己管理凭据，令牌不进入 argv/env/日志；GitHub Actions 上（`GITHUB_ACTIONS=true`）只接受工作流注入的 `GH_TOKEN`，直连并用 `gh release upload`。公开 provenance 只含必要版本、仓库/commit、源码与产物 hash、目标与检查边界，不上传私有候选清单或回执。
 
-定向验证：`vp test run scripts/build-desktop-zh.test.ts scripts/build-cli-archive.test.ts scripts/build-desktop-artifact.test.ts`、`node --test scripts/release-desktop-zh.test.mjs`。严格自包含测试需祖先无 node_modules 的合格隔离 TMP 根，不移动宿主目录来通过。归档来源检查仍可用 `--verify-template-only`；fixture 通过不能替代 Windows 运行。
+定向验证：`vp test run scripts/build-desktop-zh.test.ts scripts/build-cli-archive.test.ts scripts/build-desktop-artifact.test.ts`、`node --test scripts/release-desktop-zh.test.mjs`。严格自包含测试需祖先无 node_modules 的合格隔离 TMP 根，不移动宿主目录来通过。归档来源检查仍可用 `--verify-template-only`；fixture 通过不能替代目标系统运行。
