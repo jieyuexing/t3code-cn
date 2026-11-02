@@ -9,6 +9,9 @@
   "apps/web/src/components/DiffPanel.tsx": {
     "of them.": "个。"
   },
+  "apps/web/src/components/ManagedPolicy.tsx": {
+    "This environment is managed by": "此环境的管理方："
+  },
   "apps/web/src/components/Sidebar.tsx": {
     "Active": "收件箱"
   },
@@ -60,10 +63,13 @@
     "lines": "行"
   },
   "apps/web/src/components/onboarding/WelcomeWizard.tsx": {
+    ", see our": "，请参阅我们的",
     ", then run:": "，然后运行：",
     ". You can set": "。之后可在“设置”中配置。",
     "On a tailnet, run": "在 tailnet 上请改为运行",
     "On the computer with your code, start T3 Code or run": "在存放代码的电脑上启动 T3 Code，或运行",
+    "To read more about how your data is used": "如需详细了解我们如何使用你的数据",
+    "and how to opt out": "以及如何选择退出",
     "instead.": "。",
     "it": "",
     "them": "",
@@ -100,6 +106,10 @@
     "Provider variables that read from": "从",
     "Update T3 Code on": "请更新"
   },
+  "apps/web/src/components/settings/SettingsPanels.tsx": {
+    "; switch to Stable to keep getting updates.": "；请切换到稳定版以继续获取更新。",
+    "{0} Nightly builds are not available{1}": "{0}无法使用 Nightly 版本{1}"
+  },
   "apps/web/src/components/settings/SimlockDeviceHostEditor.tsx": {
     "is this gateway.": "指向此网关。",
     "per environment": "（每个环境一个）",
@@ -130,5 +140,13 @@
     "approval": "审批",
     "input": "输入",
     "you": "你响应"
+  },
+  "packages/contracts/src/settings.ts": {
+    "This setting": "此设置",
+    "Your organization": "你所在组织的",
+    "your organization": "你所在的组织",
+    "{0} is managed by {1} and cannot be changed.": "{0}由{1}管理，无法更改。",
+    "{0} policy does not allow the {1} provider.": "{0}策略不允许使用 {1} 提供方。",
+    "{0}'s": "{0} 的"
   }
 }

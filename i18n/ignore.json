@@ -203,6 +203,14 @@
     "category": "code",
     "reason": "CSS class / style string"
   },
+  "/Library/Application Support/T3Code/policy.json": {
+    "category": "code",
+    "reason": "managed policy system path"
+  },
+  "/Library/Managed Preferences/com.t3tools.t3code.plist": {
+    "category": "code",
+    "reason": "managed policy system path"
+  },
   "/btw": {
     "category": "command",
     "reason": "slash command"
@@ -586,6 +594,10 @@
   "C++": {
     "category": "brand",
     "reason": "编程语言、标记语言或框架名称，按术语表保留原名。"
+  },
+  "C:\\Program Files\\T3Code\\policy.json": {
+    "category": "code",
+    "reason": "managed policy system path"
   },
   "CASE WHEN typeof({0}) = 'blob' THEN '[blob: ' || length({1}) || ' bytes]' ELSE substr(CAST({2} AS TEXT), 1, 1024) END": {
     "category": "code",
@@ -1546,6 +1558,10 @@
   "ObjC.import(\"CoreGraphics\");\nObjC.import(\"AppKit\");\nfunction run() {\n  const app = $.NSWorkspace.sharedWorkspace.frontmostApplication;\n  if (app.isNil()) return \"\";\n  const pid = app.processIdentifier;\n  const list = $.CGWindowListCopyWindowInfo(\n    $.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements,\n    $.kCGNullWindowID,\n  );\n  $.CFMakeCollectable(list);\n  const count = $.CFArrayGetCount(list);\n  for (let i = 0; i < count; i++) {\n    const w = ObjC.castRefToObject($.CFArrayGetValueAtIndex(list, i));\n    if (w.objectForKey(\"kCGWindowOwnerPID\").js !== pid) continue;\n    if (w.objectForKey(\"kCGWindowLayer\").js !== 0) continue;\n    const b = ObjC.deepUnwrap(w.objectForKey(\"kCGWindowBounds\"));\n    return JSON.stringify({\n      id: w.objectForKey(\"kCGWindowNumber\").js,\n      title: String(ObjC.unwrap(w.objectForKey(\"kCGWindowName\")) || \"\"),\n      bounds: { x: b.X, y: b.Y, width: b.Width, height: b.Height },\n      owner: {\n        name: String(app.localizedName.js || ObjC.unwrap(w.objectForKey(\"kCGWindowOwnerName\")) || \"\"),\n        processId: pid,\n        path: String(app.bundleURL.path.js || \"\"),\n        bundleId: String(app.bundleIdentifier.js || \"\"),\n      },\n    });\n  }\n  return \"\";\n}": {
     "category": "code",
     "reason": "JXA 脚本"
+  },
+  "ObjC.import(\"CoreGraphics\");\nObjC.import(\"AppKit\");\nfunction run() {\n  const app = $.NSWorkspace.sharedWorkspace.frontmostApplication;\n  if (app.isNil()) return \"\";\n  const pid = app.processIdentifier;\n  let ownerName = String(app.localizedName.js || \"\");\n  const list = $.CGWindowListCopyWindowInfo(\n    $.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements,\n    $.kCGNullWindowID,\n  );\n  $.CFMakeCollectable(list);\n  const count = $.CFArrayGetCount(list);\n  const windows = [];\n  for (let i = 0; i < count; i++) {\n    const w = ObjC.castRefToObject($.CFArrayGetValueAtIndex(list, i));\n    if (w.objectForKey(\"kCGWindowOwnerPID\").js !== pid) continue;\n    if (w.objectForKey(\"kCGWindowLayer\").js !== 0) continue;\n    if (!ownerName) {\n      ownerName = String(ObjC.unwrap(w.objectForKey(\"kCGWindowOwnerName\")) || \"\");\n    }\n    const b = ObjC.deepUnwrap(w.objectForKey(\"kCGWindowBounds\"));\n    windows.push({\n      id: w.objectForKey(\"kCGWindowNumber\").js,\n      title: String(ObjC.unwrap(w.objectForKey(\"kCGWindowName\")) || \"\"),\n      bounds: { x: b.X, y: b.Y, width: b.Width, height: b.Height },\n      alpha: w.objectForKey(\"kCGWindowAlpha\").js,\n    });\n  }\n  return JSON.stringify({\n    owner: {\n      name: ownerName,\n      processId: pid,\n      path: String(app.bundleURL.path.js || \"\"),\n      bundleId: String(app.bundleIdentifier.js || \"\"),\n    },\n    windows,\n  });\n}": {
+    "category": "code",
+    "reason": "JXA script run by the desktop app"
   },
   "ObjC.import(\"CoreGraphics\");\nObjC.import(\"AppKit\");\nfunction run() {\n  let previous = \"\";\n  while (true) {\n    const apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier(\"com.apple.systempreferences\");\n    let result = null;\n    if (apps.count > 0) {\n      const pid = apps.objectAtIndex(0).processIdentifier;\n      const front = $.NSWorkspace.sharedWorkspace.frontmostApplication;\n      const list = $.CGWindowListCopyWindowInfo(\n        $.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements,\n        $.kCGNullWindowID\n      );\n      if (list) {\n        $.CFMakeCollectable(list);\n        const count = $.CFArrayGetCount(list);\n        for (let i = 0; i < count; i++) {\n          const w = ObjC.castRefToObject($.CFArrayGetValueAtIndex(list, i));\n          if (w.objectForKey(\"kCGWindowOwnerPID\").js !== pid || w.objectForKey(\"kCGWindowLayer\").js !== 0) continue;\n          const b = ObjC.deepUnwrap(w.objectForKey(\"kCGWindowBounds\"));\n          if (b.Width < 500 || b.Height < 350) continue;\n          result = { x: b.X, y: b.Y, width: b.Width, height: b.Height, frontmost: !front.isNil() && front.processIdentifier === pid };\n          break;\n        }\n      }\n    }\n    const line = JSON.stringify(result);\n    if (line !== previous) {\n      const data = $(line + \"\\n\").dataUsingEncoding($.NSUTF8StringEncoding);\n      $.NSFileHandle.fileHandleWithStandardOutput.writeData(data);\n      previous = line;\n    }\n    $.NSThread.sleepForTimeInterval(result && result.frontmost ? 0.5 : 1);\n  }\n}": {
     "category": "code",
@@ -4271,6 +4287,10 @@
     "category": "code",
     "reason": "Tailwind class list"
   },
+  "group flex w-full items-start gap-2.5 rounded-md bg-transparent py-1.5 ps-2 sm:ps-1.5 outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25": {
+    "category": "style",
+    "reason": "Tailwind class list"
+  },
   "group flex w-full items-start gap-2.5 rounded-md bg-transparent py-1.5 ps-2 text-left sm:ps-1.5 outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25": {
     "category": "code",
     "reason": "Tailwind 类名或 CSS 值，不是界面文案"
@@ -4315,6 +4335,10 @@
     "category": "code",
     "reason": "Tailwind/CSS class 字符串，属于样式代码。"
   },
+  "h-7 gap-1 has-[[data-composer-label]]:gap-1.5 px-1.75 font-normal text-foreground/70 text-sm hover:text-foreground dark:text-muted-foreground sm:h-6 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5 [&_svg]:mx-0 [&_svg[data-composer-control-chevron]]:ms-0 [&_svg[data-composer-control-chevron]]:-me-1": {
+    "category": "style",
+    "reason": "Tailwind class list"
+  },
   "h-7 gap-1 px-1.75 font-normal text-foreground/70 text-sm hover:text-foreground dark:text-muted-foreground sm:h-6 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5 [&_svg[data-composer-control-chevron]]:ms-0 [&_svg[data-composer-control-chevron]]:-me-1": {
     "category": "code",
     "reason": "Tailwind 类名或 CSS 值，不是界面文案"
@@ -4354,6 +4378,10 @@
   "h-8.5 w-full min-w-0 rounded-[inherit] px-[calc(--spacing(3)-1px)] leading-8.5 outline-none placeholder:text-placeholder sm:h-7.5 sm:leading-7.5 [transition:background-color_5000000s_ease-in-out_0s]": {
     "category": "code",
     "reason": "CSS class / style string"
+  },
+  "h-auto py-1": {
+    "category": "style",
+    "reason": "Tailwind class list"
   },
   "h-auto w-auto object-contain": {
     "category": "code",
