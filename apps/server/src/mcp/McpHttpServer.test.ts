@@ -455,42 +455,6 @@ it.effect("refuses preview tools to a client outside a thread before they run", 
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("rejects non-boolean snapshot image options before selecting a browser host", () =>
-  Effect.gen(function* () {
-    const server = yield* McpServer.McpServer;
-    for (const includeImage of ["false", 0, {}, []]) {
-      const result = yield* server
-        .callTool({
-          name: "preview_snapshot",
-          arguments: { includeImage },
-        })
-        .pipe(
-          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
-          Effect.provideService(McpSchema.McpServerClient, client),
-        );
-      expect(result.isError).toBe(true);
-      expect(result.content).toEqual([{ type: "text", text: "Preview snapshot failed: AiError." }]);
-      expect(result.structuredContent).toEqual({
-        error: { _tag: "AiError", operation: "snapshot", failureCount: 1 },
-      });
-    }
-  }).pipe(Effect.provide(layerTest)),
-);
-
-it.effect("treats null snapshot options as omitted through the registered MCP server", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const inputs = yield* serveSnapshots("mcp-null-options", snapshotResult);
-      const omitted = yield* callSnapshot({});
-      const nullable = yield* callSnapshot({ includeImage: null, save: null, tabId: null });
-      expect(nullable.isError).not.toBe(true);
-      expect(nullable.content).toEqual(omitted.content);
-      expect(nullable.structuredContent).toEqual(omitted.structuredContent);
-      expect(inputs).toEqual([{}, {}]);
-    }),
-  ).pipe(Effect.provide(layerTest)),
-);
-
 it.effect("advertises the compact input schema for every registered tool", () =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;

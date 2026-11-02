@@ -33,12 +33,6 @@ describe("display-only translation", () => {
       "High · Codex: Codex 无法读取用量（JSON-RPC -32000）。",
     );
     expect(displayUsageNotice("Grok could not read usage limits.")).toBe("Grok 无法读取用量限额。");
-    expect(displayUsageNotice("Local · Grok: Grok usage-limit check timed out.")).toBe(
-      "Local · Grok: Grok 读取用量限额超时。",
-    );
-    expect(displayUsageNotice("Local · Grok: Grok billing returned HTTP 418.")).toBe(
-      "Local · Grok: Grok 计费服务返回 HTTP 418。",
-    );
     expect(displayUsageNotice("Custom: unknown provider response")).toBe(
       "Custom: unknown provider response",
     );

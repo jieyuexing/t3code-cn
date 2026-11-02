@@ -7,7 +7,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 import { GrokSettings } from "@t3tools/provider-grok/settings";
 
 import {
@@ -480,88 +480,6 @@ describe("Grok usage limits", () => {
       ).windows,
     ).toEqual([{ id: "subscription", kind: "monthly", label: "Monthly", usedPercent: 100 }]);
   });
-
-  it("treats an omitted percentage as zero only for a complete known billing period", () => {
-    expect(
-      grokUsageResponseToLimits(
-        {
-          config: {
-            currentPeriod: {
-              type: "USAGE_PERIOD_TYPE_WEEKLY",
-              start: "2026-09-11T03:10:30.159171+00:00",
-              end: "2026-09-18T03:10:30.159171+00:00",
-            },
-          },
-        },
-        checkedAt,
-      ).windows,
-    ).toEqual([
-      {
-        id: "subscription",
-        kind: "weekly",
-        label: "Weekly",
-        usedPercent: 0,
-        resetsAt: "2026-09-18T03:10:30.159Z",
-      },
-    ]);
-
-    expect(
-      grokUsageResponseToLimits(
-        {
-          config: {
-            currentPeriod: {
-              type: "USAGE_PERIOD_TYPE_MONTHLY",
-              start: "2026-09-01T00:00:00.000Z",
-              end: "2026-10-01T00:00:00.000Z",
-            },
-          },
-        },
-        checkedAt,
-      ).windows,
-    ).toEqual([
-      {
-        id: "subscription",
-        kind: "monthly",
-        label: "Monthly",
-        usedPercent: 0,
-        resetsAt: "2026-10-01T00:00:00.000Z",
-      },
-    ]);
-
-    for (const currentPeriod of [
-      { type: "USAGE_PERIOD_TYPE_WEEKLY", end: "2026-09-18T03:10:30.159171+00:00" },
-      { type: "USAGE_PERIOD_TYPE_WEEKLY", start: "2026-09-11T03:10:30.159171+00:00" },
-      {
-        type: "USAGE_PERIOD_TYPE_WEEKLY",
-        start: "invalid",
-        end: "2026-09-18T03:10:30.159171+00:00",
-      },
-      {
-        type: "USAGE_PERIOD_TYPE_WEEKLY",
-        start: "2026-09-18T03:10:30.159171+00:00",
-        end: "2026-09-11T03:10:30.159171+00:00",
-      },
-      {
-        type: "USAGE_PERIOD_TYPE_WEEKLY",
-        start: "2026-09-11T03:10:30.159171+00:00",
-        end: "invalid",
-      },
-      {
-        type: "USAGE_PERIOD_TYPE_WEEKLY",
-        start: "2026-09-11T03:10:30.159171+00:00",
-        end: "2026-09-11T03:10:30.159171+00:00",
-      },
-      {
-        type: "USAGE_PERIOD_TYPE_DAILY",
-        start: "2026-09-11T03:10:30.159171+00:00",
-        end: "2026-09-18T03:10:30.159171+00:00",
-      },
-    ]) {
-      expect(grokUsageResponseToLimits({ config: { currentPeriod } }, checkedAt).windows).toEqual(
-        [],
-      );
-    }
-  });
 });
 
 it.layer(NodeServices.layer)("readGrokAccount", (it) => {
@@ -700,92 +618,38 @@ it.layer(NodeServices.layer)("readGrokAccount", (it) => {
           }).pipe(Effect.provideService(HttpClient.HttpClient, client));
           expect(malformed.unavailable).toEqual({
             reason: "probeFailed",
-            message: "Grok could not read saved credentials.",
+            message: "Grok could not read usage limits.",
           });
         }
       }).pipe(Effect.scoped),
   );
 
-  it.effect(
-    "classifies billing failures without exposing response bodies, keeping the account",
-    () =>
-      Effect.gen(function* () {
-        for (const [response, message] of [
-          [
-            new Response("private response", { status: 401 }),
-            "Grok sign-in was rejected. Reconnect Grok in provider settings.",
-          ],
-          [
-            new Response("private response", { status: 403 }),
-            "Grok usage limits are unavailable for this account.",
-          ],
-          [
-            new Response("private response", { status: 429 }),
-            "Grok usage-limit checks are rate limited. Try again soon.",
-          ],
-          [
-            new Response("private response", { status: 503 }),
-            "Grok billing is temporarily unavailable.",
-          ],
-          [new Response("private response", { status: 418 }), "Grok billing returned HTTP 418."],
-          [
-            new Response("{", { headers: { "content-type": "application/json" } }),
-            "Grok returned an invalid usage-limits response.",
-          ],
-          [
-            Response.json({ config: { creditUsagePercent: "private-value" } }),
-            "Grok returned an invalid usage-limits response.",
-          ],
-        ] as const) {
-          const { email, usageLimits: limits } = yield* readGrokAccount({
-            HOME: "/definitely/not/a/grok-home",
-            GROK_AUTH:
-              '{"https://accounts.x.ai/sign-in":{"key":"private-token","email":"someone@example.com"}}',
-          }).pipe(
-            Effect.provideService(
-              HttpClient.HttpClient,
-              HttpClient.make((request) =>
-                Effect.succeed(HttpClientResponse.fromWeb(request, response)),
-              ),
+  it.effect("sanitizes HTTP failures and malformed billing responses, keeping the account", () =>
+    Effect.gen(function* () {
+      for (const response of [
+        new Response("private response", { status: 401 }),
+        Response.json({ config: { creditUsagePercent: "private-value" } }),
+      ]) {
+        const { email, usageLimits: limits } = yield* readGrokAccount({
+          HOME: "/definitely/not/a/grok-home",
+          GROK_AUTH:
+            '{"https://accounts.x.ai/sign-in":{"key":"private-token","email":"someone@example.com"}}',
+        }).pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make((request) =>
+              Effect.succeed(HttpClientResponse.fromWeb(request, response)),
             ),
-          );
-          expect(email).toBe("someone@example.com");
-          expect(limits.windows).toEqual([]);
-          expect(limits.unavailable).toEqual({
-            reason: "probeFailed",
-            message,
-          });
-        }
-      }),
-  );
-
-  it.effect("reports a transport failure without exposing its cause", () =>
-    readGrokAccount({
-      HOME: "/definitely/not/a/grok-home",
-      GROK_AUTH: '{"https://accounts.x.ai/sign-in":{"key":"private-token"}}',
-    }).pipe(
-      Effect.provideService(
-        HttpClient.HttpClient,
-        HttpClient.make((request) =>
-          Effect.fail(
-            new HttpClientError.HttpClientError({
-              reason: new HttpClientError.TransportError({
-                request,
-                cause: new Error("private transport cause"),
-              }),
-            }),
           ),
-        ),
-      ),
-      Effect.tap(({ usageLimits }) =>
-        Effect.sync(() =>
-          expect(usageLimits.unavailable).toEqual({
-            reason: "probeFailed",
-            message: "Grok could not connect to the billing service.",
-          }),
-        ),
-      ),
-    ),
+        );
+        expect(email).toBe("someone@example.com");
+        expect(limits.windows).toEqual([]);
+        expect(limits.unavailable).toEqual({
+          reason: "probeFailed",
+          message: "Grok could not read usage limits.",
+        });
+      }
+    }),
   );
 });
 

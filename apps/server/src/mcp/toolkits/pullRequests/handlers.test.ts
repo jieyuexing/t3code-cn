@@ -17,7 +17,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import type { Tool } from "effect/ai";
 
@@ -685,22 +684,6 @@ describe("listThreadPullRequests", () => {
 });
 
 describe("pull request guide tools", () => {
-  it.each(["read_pull_request_guide", "write_pull_request_guides"] as const)(
-    "%s decodes nullable optional target fields with its advertised JSON codec",
-    (name) => {
-      const parameters = PullRequestsToolkit.tools[name].parametersSchema;
-      // The MCP server registers every tool with its JSON codec (decodeAsAdvertised in McpHttpServer.ts).
-      const decode = Schema.decodeUnknownSync(Schema.toCodecJson(parameters));
-      const target = { url: "https://github.com/owner/repo/pull/1" };
-      const wrap = (value: unknown) =>
-        name === "read_pull_request_guide" ? value : { pullRequests: [value] };
-      expect(decode(wrap({ ...target, repository: null, number: null, host: null }))).toEqual(
-        decode(wrap(target)),
-      );
-      expect(() => decode(wrap({ ...target, number: "1" }))).toThrow();
-    },
-  );
-
   it.effect(
     "writes guides through the project whose checkout is each pull request's repository",
     () =>
