@@ -3287,6 +3287,10 @@
     "category": "code",
     "reason": "internal atom/command identifier"
   },
+  "environment-data:orchestration:native-child-work": {
+    "category": "protocol",
+    "reason": "atom query identifier"
+  },
   "environment-data:orchestration:older-settled-counts": {
     "category": "code",
     "reason": "internal atom/command identifier"
