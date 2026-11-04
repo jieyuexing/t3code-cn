@@ -3907,6 +3907,10 @@
     "category": "code",
     "reason": "查询/原子标签标识符"
   },
+  "environment-data:source-control:star": {
+    "category": "protocol",
+    "reason": "atom query identifier"
+  },
   "environment-data:terminal:attach": {
     "category": "code",
     "reason": "internal atom/command identifier"
@@ -5338,6 +5342,10 @@
   "snappy output length mismatch": {
     "category": "code",
     "reason": "Chromium LevelDB/Snappy 解析器的底层诊断标记，供故障定位，保留原文。"
+  },
+  "star on GitHub": {
+    "category": "dev-only",
+    "reason": "atom command label, reportFailure off, internal logging only"
   },
   "t": {
     "category": "code",
