@@ -5,6 +5,7 @@ import {
   codexRateLimitsFailureMessage,
   codexRateLimitsToLimits,
   codexRateLimitsToUpdate,
+  isCodexUsageAuthRequiredError,
   mergeCodexRateLimits,
 } from "./codexUsageLimits.ts";
 
@@ -207,6 +208,34 @@ describe("codexRateLimitsFailureMessage", () => {
         }),
       ),
     ).toBe("Codex could not read usage (JSON-RPC -32603).");
+  });
+});
+
+describe("isCodexUsageAuthRequiredError", () => {
+  const authRequired = "codex account authentication required to read rate limits";
+
+  it("recognizes only Codex's account-less usage refusal", () => {
+    expect(
+      isCodexUsageAuthRequiredError(
+        new CodexErrors.CodexAppServerRequestError({ code: -32600, errorMessage: authRequired }),
+      ),
+    ).toBe(true);
+    expect(
+      isCodexUsageAuthRequiredError(
+        new CodexErrors.CodexAppServerRequestError({ code: -32603, errorMessage: authRequired }),
+      ),
+    ).toBe(false);
+    expect(
+      isCodexUsageAuthRequiredError(
+        new CodexErrors.CodexAppServerRequestError({
+          code: -32600,
+          errorMessage: "failed to fetch codex rate limits: 503 Service Unavailable",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isCodexUsageAuthRequiredError(new CodexErrors.CodexAppServerProcessExitedError({})),
+    ).toBe(false);
   });
 });
 
