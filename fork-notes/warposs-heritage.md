@@ -20,13 +20,13 @@ Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `w
 
 **落地情况。** `8373e32`：`crates/warp_core/src/channel/mod.rs`、`app/src/settings_view/mod.rs`、`crates/onboarding/src/model.rs` 等 17 个文件。
 
-**对 T3 的适用性。** 这一节整体随载体失效：T3 Code 本身就是"整合官方 CLI、不取代它们"的产品（事实来源：总仓 AGENTS.md），没有需要剥离的自家 AI 层。可保留的只是方法论——产品级限制放在一个渠道/构建常量上，由所有边界查询，而不是散落的开关。embedded surface spike 没有后继，无需迁移。
+**对 T3 的适用性。** 这一节整体随载体失效：T3 Code 本身就是"整合官方 CLI、不取代它们"的产品（事实来源：fork 根 `README.md` 开头的 "agent harness control surface" 与支持的 CLI 列表），没有需要剥离的自家 AI 层。可保留的只是方法论——产品级限制放在一个渠道/构建常量上，由所有边界查询，而不是散落的开关。embedded surface spike 没有后继，无需迁移。
 
 ## 3. CLI 中介：外部 agent 会话的发现、恢复与额度总览
 
 **要解决的问题。** 上游 Warp 能探测第三方 CLI agent 并给它们工具条，但这些能力是"单会话局部"的：没有一个宿主级视图能列出本机所有 Codex/Grok 会话、重启终端后无法把某个 tab 接回原来的 agent 会话、两家额度要分别去各自 CLI 查。更深一层的需求是跨 agent 交接（Codex 做完的结论交给另一个 agent 继续），但那只写了合同。
 
-**关键设计决定与取舍。** 规格的原则是"Warp 中介、agent 执行"：每个 CLI 保留自己的认证、沙箱、审批和内部记忆；宿主只索引、只准备、从不自动提交。三项硬约束被当作验收常量写进规格：`Universe 不进 Warp 运行时`（开发可由总仓驱动，产品不得在构建或运行时依赖总仓）、`CLI-first 固定流程`（register → validate → assemble → draft → review → place，不加守护进程和消息总线）、`viewUri=etech://`（视图身份与浏览器内容 URL 分开）。技术选型明确拒绝"本地中介 daemon / MCP 控制服务"，选择在进程内投影现有会话模型，理由是不复制会话真相、可整体用 feature flag 摘除。
+**关键设计决定与取舍。** 规格的原则是"Warp 中介、agent 执行"：每个 CLI 保留自己的认证、沙箱、审批和内部记忆；宿主只索引、只准备、从不自动提交。三项硬约束被当作验收常量写进规格：`Universe 不进 Warp 运行时`（开发可由总仓驱动，产品不得在构建或运行时依赖总仓）、`CLI-first 固定流程`（register → validate → assemble → draft → review → place，不加守护进程和消息总线）、`viewUri=company://`（视图身份与浏览器内容 URL 分开）。技术选型明确拒绝"本地中介 daemon / MCP 控制服务"，选择在进程内投影现有会话模型，理由是不复制会话真相、可整体用 feature flag 摘除。
 
 落地部分的两条关键取舍：
 
@@ -37,9 +37,9 @@ Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `w
 
 **对 T3 的适用性。**
 
-- 会话发现与恢复：T3 的线程由服务端持有，可 `archive|delete|resession`（事实来源：总仓 AGENTS.md），Codex 走 `packages/effect-codex-app-server` 的 `thread/resume` 协议（事实来源：该包 `replay.ts`、`schema.test.ts`）。Warposs 那套 PTY/rollout 文件绑定随终端载体失效；但"没有唯一身份就不猜、不按 cwd 推断"的原则值得在 T3 处理外部已有会话导入时保留。Grok 会话在 T3 的恢复方式待核对。
-- 额度总览：T3 侧有 `universe quota`（事实来源：总仓 AGENTS.md），是否有 UI 级两家并列的额度展示待核对。"独立观测、不合成、失败隔离"的展示规则值得迁移。
-- 跨 agent 交接合同：T3 已有 `delegate_task`、`t3_thread_fork` 等线程级能力（事实来源：T3 MCP 工具列表），语义上覆盖了"把结论交给另一个 agent"的需求；Warposs 的信封格式与 `etech://` 视图身份规则未在 T3 实现，是否需要待核对。
+- 会话发现与恢复：T3 的线程由服务端持有，可归档、取消归档与删除（事实来源：fork `packages/contracts/src/orchestrationV2.ts` 的 `thread.archive`、`thread.unarchive`、`thread.delete` 命令），Codex 走 `packages/effect-codex-app-server` 的 `thread/resume` 协议（事实来源：该包 `replay.ts`、`schema.test.ts`）。Warposs 那套 PTY/rollout 文件绑定随终端载体失效；但"没有唯一身份就不猜、不按 cwd 推断"的原则值得在 T3 处理外部已有会话导入时保留。Grok 会话在 T3 的恢复方式待核对。
+- 额度总览：T3 侧有 `universe quota`（事实来源：协调仓规则），是否有 UI 级两家并列的额度展示待核对。"独立观测、不合成、失败隔离"的展示规则值得迁移。
+- 跨 agent 交接合同：T3 已有 `delegate_task`、`t3_thread_fork` 等线程级能力（事实来源：T3 MCP 工具列表），语义上覆盖了"把结论交给另一个 agent"的需求；Warposs 的信封格式与 `company://` 视图身份规则未在 T3 实现，是否需要待核对。
 - 安装交接与 Resume Lab：针对 Rust 桌面包与 SQLite 的工程物，随载体失效；"升级不杀正在跑的 agent"这个要求本身对 T3 桌面端的 DMG 升级仍然成立，待核对 T3 现状。
 
 ## 4. agent 侧栏会话持久化与 mini 侧栏
@@ -50,7 +50,7 @@ Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `w
 
 **落地情况。** 归档与恢复 `696027d`（`app/src/workspace/view.rs`、`registry.rs`、`undo_close/stack.rs`、迁移 `add_archived_tabs`）；持久化 `d0e7b3f`；规格 `61288ef`、`3811c20`（`specs/warposs-session-sidebar-persistence/TECH.md`，含手工 fixture 路径）；mini 模式 `809845a`、`3c2272e`、`20648ba`、`a56b9ff`（均在 `app/src/workspace/view/vertical_tabs.rs`）。
 
-**对 T3 的适用性。** 线程身份、归档与恢复在 T3 由服务端线程模型原生提供（事实来源：总仓 AGENTS.md 的 `t3ctl … archive|delete|resession`），可视为已覆盖。侧栏宽度、折叠/mini 显示是否持久化，在 `apps/web/src` 下未 grep 到明显对应项，待核对；若没有，"宽度阈值触发图标模式、分组标题与悬停工具条随之隐藏"是一个小而清晰的可迁移切片。
+**对 T3 的适用性。** 线程身份、归档与恢复在 T3 由服务端线程模型原生提供（事实来源：fork `packages/contracts/src/orchestrationV2.ts` 的 `thread.archive`、`thread.unarchive`、`thread.delete` 命令），可视为已覆盖。侧栏宽度、折叠/mini 显示是否持久化，在 `apps/web/src` 下未 grep 到明显对应项，待核对；若没有，"宽度阈值触发图标模式、分组标题与悬停工具条随之隐藏"是一个小而清晰的可迁移切片。
 
 ## 5. Markdown 阅读器与 Obsidian 风格阅读档案
 
@@ -77,15 +77,15 @@ Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `w
 | 定制思想                                 | 落地程度（Warposs）                 | 状态（对 T3）                            | 依据                                      |
 | ---------------------------------------- | ----------------------------------- | ---------------------------------------- | ----------------------------------------- |
 | 中文化：owned/borrowed 边界分类 + 审计器 | 完整，100% 审计                     | 已被 T3 覆盖（由 fork 自身的字典层覆盖） | t3code-zh `i18n/README.md`                |
-| terminal-only 渠道策略                   | 完整                                | 随载体失效（方法论可借鉴）               | 总仓 AGENTS.md                            |
+| terminal-only 渠道策略                   | 完整                                | 随载体失效（方法论可借鉴）               | fork `README.md`                          |
 | embedded surface 生命周期 spike          | 仅合同，未链入                      | 随载体失效                               | 源仓 `spikes/`                            |
-| 外部会话索引（Codex/Grok 分组）          | 实现，flag 默认关，视觉验收 unknown | 已被 T3 覆盖（服务端线程）               | 总仓 AGENTS.md                            |
+| 外部会话索引（Codex/Grok 分组）          | 实现，flag 默认关，视觉验收 unknown | 已被 T3 覆盖（服务端线程）               | `orchestrationV2.ts` 线程命令             |
 | 进程绑定的恢复目标、不按 cwd 猜          | 实现                                | 随载体失效（原则值得迁移）               | `effect-codex-app-server` `thread/resume` |
 | Grok 会话恢复                            | 实现                                | 待核对                                   | —                                         |
-| 两家额度独立观测、不合成                 | 实现（模型与标题栏）                | 值得迁移（展示规则；UI 现状待核对）      | 总仓 AGENTS.md 仅见 `universe quota`      |
+| 两家额度独立观测、不合成                 | 实现（模型与标题栏）                | 值得迁移（展示规则；UI 现状待核对）      | 协调仓规则仅见 `universe quota`           |
 | 跨 agent 交接信封 / MCP 装配 / registry  | 仅合同                              | 已被 T3 覆盖（语义层；信封格式待核对）   | T3 MCP 工具列表                           |
 | 安装交接不杀 agent、Resume Lab           | 实现（脚本）                        | 随载体失效（要求本身待核对）             | —                                         |
-| tab 单一 UUID、归档/恢复同身份           | 实现                                | 已被 T3 覆盖                             | 总仓 AGENTS.md                            |
+| tab 单一 UUID、归档/恢复同身份           | 实现                                | 已被 T3 覆盖                             | `orchestrationV2.ts` 线程命令             |
 | 侧栏宽度持久化与 mini 图标模式           | 实现                                | 待核对（缺失则值得迁移）                 | `apps/web/src` 未见对应                   |
 | Markdown V2（标准解析、IR、流式）        | 仅合同                              | 已被 T3 覆盖                             | `apps/web/package.json`、`markdown-*.ts`  |
 | 共享阅读器：源码与投影分离、快照标注     | 实现                                | 值得迁移（作为原则）                     | —                                         |

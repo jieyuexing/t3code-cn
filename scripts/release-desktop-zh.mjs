@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 中文版 Release 的唯一发布入口。所有本地检查先于任何 GitHub 写入。
-// 套装必须含 Windows x64 运行包（141 从它更新）；DMG、Linux 运行包可选。
+// 本脚本只强制套装含 Windows x64 运行包，DMG、Linux 运行包对它可选；现行 runner 每次发三件，
+// 141 取 Windows 包、台式机取 Linux 包，两者都核对 SHA256SUMS 与 PROVENANCE.json。
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
