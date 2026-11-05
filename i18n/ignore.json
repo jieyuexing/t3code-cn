@@ -3335,6 +3335,10 @@
     "category": "code",
     "reason": "internal atom/command identifier"
   },
+  "environment-data:orchestration:thread-titles": {
+    "category": "dev-only",
+    "reason": "internal atom query/command label"
+  },
   "environment-data:orchestration:thread-transcript": {
     "category": "code",
     "reason": "环境命令内部标识，与已有 environment-data 标签保持原始值。"
@@ -3714,6 +3718,22 @@
   "environment-data:server:auth-access-changes": {
     "category": "code",
     "reason": "internal atom/command identifier"
+  },
+  "environment-data:server:auth-create-pairing-credential": {
+    "category": "dev-only",
+    "reason": "internal atom query/command label"
+  },
+  "environment-data:server:auth-revoke-client": {
+    "category": "dev-only",
+    "reason": "internal atom query/command label"
+  },
+  "environment-data:server:auth-revoke-other-clients": {
+    "category": "dev-only",
+    "reason": "internal atom query/command label"
+  },
+  "environment-data:server:auth-revoke-pairing-link": {
+    "category": "dev-only",
+    "reason": "internal atom query/command label"
   },
   "environment-data:server:check-otlp-endpoint": {
     "category": "protocol",
@@ -5667,13 +5687,25 @@
     "category": "code",
     "reason": "内部状态存储标签"
   },
+  "web:cloud:link-environment": {
+    "category": "dev-only",
+    "reason": "internal atom query/command label"
+  },
   "web:cloud:link-primary-environment": {
     "category": "dev-only",
     "reason": "atom command label, console only"
   },
+  "web:cloud:unlink-environment": {
+    "category": "dev-only",
+    "reason": "internal atom query/command label"
+  },
   "web:cloud:unlink-primary-environment": {
     "category": "dev-only",
     "reason": "atom command label, console only"
+  },
+  "web:cloud:update-environment-preferences": {
+    "category": "dev-only",
+    "reason": "internal atom query/command label"
   },
   "web:cloud:update-primary-environment-preferences": {
     "category": "dev-only",
