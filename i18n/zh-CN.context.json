@@ -55,6 +55,10 @@
     ", then select Refresh.": " 上确认，然后选择“刷新”。",
     "Confirm on": "请在"
   },
+  "apps/web/src/components/device/DevicePanel.tsx": {
+    "list": "列表",
+    "lists": "列表"
+  },
   "apps/web/src/components/device/DeviceToolsPanel.tsx": {
     "Clear::line=206": "清透",
     "Motion": "运动"
