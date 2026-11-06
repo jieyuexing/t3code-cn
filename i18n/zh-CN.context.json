@@ -103,7 +103,6 @@
     "Value": "直接输入"
   },
   "apps/web/src/components/settings/SecretsSettings.tsx": {
-    "Provider variables that read from": "从",
     "Update T3 Code on": "请更新"
   },
   "apps/web/src/components/settings/SettingsPanels.tsx": {
@@ -129,6 +128,12 @@
   },
   "apps/web/src/components/settings/UpdateTrackSwitchDialog.tsx": {
     "nothing": "（无）"
+  },
+  "apps/web/src/components/settings/VoiceSettingsPanel.tsx": {
+    "Selected": "已选用",
+    "dictionary": "词典",
+    "entry": "个条目",
+    "sorry": "不对"
   },
   "apps/web/src/components/sidebar/UpdateEverythingDialog.tsx": {
     "skipped": "项已跳过"
