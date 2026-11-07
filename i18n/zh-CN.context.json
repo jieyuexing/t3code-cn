@@ -137,7 +137,8 @@
     "Selected": "已选用",
     "dictionary": "词典",
     "entry": "个条目",
-    "sorry": "不对"
+    "sorry": "不对",
+    "via": "，经由"
   },
   "apps/web/src/components/sidebar/UpdateEverythingDialog.tsx": {
     "skipped": "项已跳过"

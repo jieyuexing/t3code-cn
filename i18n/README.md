@@ -126,4 +126,4 @@ dry-run 无 GitHub 写入。完整本地预检通过后才查远端：HEAD 必�
 
 获准正式发布时才去掉 `--dry-run`：先建立 draft、上传套装产物和自动生成的 SHA256SUMS/PROVENANCE.json，逐件核对 GitHub 存储 digest/size，完整才 publish。同源码、同套装 draft 可恢复；同名异 hash、额外资产、错误 tag 或另一套源码均拒绝，不删除或覆盖修复。本机路径（已不再使用）经既有 2080 代理，令牌由 `gh auth token` 取出，只经 stdin 配置交给 `/usr/bin/curl` 上传，不进入 argv/env/日志；GitHub Actions 上（`GITHUB_ACTIONS=true`）只接受工作流注入的 `GH_TOKEN`，直连并用 `gh release upload`。公开 provenance 只含必要版本、仓库/commit、源码与产物 hash、目标与检查边界，不上传私有候选清单或回执。
 
-定向验证：`vp test run scripts/build-desktop-zh.test.ts scripts/build-cli-archive.test.ts scripts/build-desktop-artifact.test.ts`、`node --test scripts/release-desktop-zh.test.mjs`。严格自包含测试需祖先无 node_modules 的合格隔离 TMP 根，不移动宿主目录来通过。归档来源检查仍可用 `--verify-template-only`；fixture 通过不能替代目标系统运行。
+定向验证：`vp test run scripts/build-desktop-zh.test.ts scripts/build-cli-archive.test.ts scripts/cli-official-template-zh.test.ts scripts/build-desktop-artifact.test.ts`、`node --test scripts/release-desktop-zh.test.mjs`。严格自包含测试需祖先无 node_modules 的合格隔离 TMP 根，不移动宿主目录来通过。归档来源检查仍可用 `--verify-template-only`；fixture 通过不能替代目标系统运行。

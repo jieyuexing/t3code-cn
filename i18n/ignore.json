@@ -1115,6 +1115,10 @@
     "category": "brand",
     "reason": "product name Grok Build"
   },
+  "Grok Voice Transcribe": {
+    "category": "brand",
+    "reason": "cloud speech provider product name"
+  },
   "Grove": {
     "category": "brand",
     "reason": "主题名称（专有名称）"
@@ -1599,9 +1603,17 @@
     "category": "protocol",
     "reason": "CdpRelay 返回给 CDP 客户端（Agent 的自动化工具）的协议错误，不是界面文案。"
   },
+  "OpenAI": {
+    "category": "brand",
+    "reason": "cloud speech provider name"
+  },
   "OpenCode": {
     "category": "brand",
     "reason": "provider brand name"
+  },
+  "OpenRouter": {
+    "category": "brand",
+    "reason": "cloud speech provider name"
   },
   "Opera Safe Storage": {
     "category": "code",
@@ -3514,6 +3526,10 @@
   "environment-data:provider:auth-logout": {
     "category": "code",
     "reason": "internal atom/command identifier"
+  },
+  "environment-data:provider:auth-remove-method": {
+    "category": "dev-only",
+    "reason": "internal atom query/command label"
   },
   "environment-data:provider:auth-respond": {
     "category": "code",
