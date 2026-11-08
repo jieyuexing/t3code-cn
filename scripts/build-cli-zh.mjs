@@ -36,13 +36,13 @@ const forward = (signal) => {
 };
 process.on("SIGINT", () => forward("SIGINT"));
 process.on("SIGTERM", () => forward("SIGTERM"));
-async function run(command, args) {
+async function run(command, args, { cwd = root, env = process.env } = {}) {
   if (interrupted) throw new Error(`构建已中断：${interrupted}`);
   await new Promise((resolve, reject) => {
     child = NodeChildProcess.spawn(command, args, {
-      cwd: root,
+      cwd,
       stdio: "inherit",
-      env: process.env,
+      env,
     });
     child.once("error", reject);
     child.once("close", (code, signal) => {
@@ -102,22 +102,37 @@ const executable = NodePath.join(
   `${values.platform}-x64`,
   values.platform === "win" ? "node.exe" : "node",
 );
+// bin.mjs 只是 bootstrap，CLI 本体作为 binMain.mjs 资产内嵌；build-exe 用完即删资产目录，
+// 这里按同一 pack 配置重出一份，资产与 execArgv 和 apps/server/vite.config.ts 的 seaConfig 保持一致。
+const cliAssetDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-zh-cli-asset-"));
 const seaConfig = NodePath.join(root, "apps/server/dist-exe/zh-sea-config.json");
-NodeFS.writeFileSync(
-  seaConfig,
-  JSON.stringify({
-    main: "apps/server/dist-exe/bin.mjs",
-    mainFormat: "module",
-    executable,
-    output: `apps/server/dist-exe/t3-${values.platform}-x64${values.platform === "win" ? ".exe" : ""}`,
-    disableExperimentalSEAWarning: true,
-    useCodeCache: false,
-    useSnapshot: false,
-  }),
-);
 try {
+  await run("vp", ["pack"], {
+    cwd: NodePath.join(root, "apps/server"),
+    env: {
+      ...process.env,
+      T3CODE_PACK_EXE: "bundle",
+      T3CODE_CLI_ASSET_DIR: cliAssetDir,
+      T3CODE_PACK_EXE_TARGET: `${values.platform}-x64`,
+    },
+  });
+  NodeFS.writeFileSync(
+    seaConfig,
+    JSON.stringify({
+      main: "apps/server/dist-exe/bin.mjs",
+      mainFormat: "module",
+      executable,
+      output: `apps/server/dist-exe/t3-${values.platform}-x64${values.platform === "win" ? ".exe" : ""}`,
+      disableExperimentalSEAWarning: true,
+      useCodeCache: false,
+      useSnapshot: false,
+      execArgv: ["--require-module"],
+      assets: { "binMain.mjs": NodePath.join(cliAssetDir, "binMain.mjs") },
+    }),
+  );
   await run(process.execPath, ["--build-sea", seaConfig]);
 } finally {
-  NodeFS.unlinkSync(seaConfig);
+  NodeFS.rmSync(seaConfig, { force: true });
+  NodeFS.rmSync(cliAssetDir, { recursive: true, force: true });
 }
 await run(process.execPath, archiveArgs);
