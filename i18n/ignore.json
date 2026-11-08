@@ -2915,6 +2915,10 @@
     "category": "semantic-value",
     "reason": "Azure DevOps 主机名；协议/地址匹配需保持原拼写。"
   },
+  "dialog-backdrop z-50": {
+    "category": "style",
+    "reason": "Tailwind 类名或 CSS 值，不是界面文案"
+  },
   "dialog-glass rounded-2xl border": {
     "category": "style",
     "reason": "Tailwind 类名或 CSS 值，不是界面文案"
