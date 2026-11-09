@@ -9,6 +9,10 @@
   "apps/web/src/components/DiffPanel.tsx": {
     "of them.": "个。"
   },
+  "apps/web/src/components/InstallT3Commands.tsx": {
+    ". If": "，可跳过安装。如果安装后找不到",
+    "Then": "然后"
+  },
   "apps/web/src/components/ManagedPolicy.tsx": {
     "This environment is managed by": "此环境的管理方："
   },
@@ -66,18 +70,22 @@
   "apps/web/src/components/files/LargeTextViewer.tsx": {
     "lines": "行"
   },
-  "apps/web/src/components/onboarding/WelcomeWizard.tsx": {
-    ", see our": "，请参阅我们的",
-    ", then run:": "，然后运行：",
-    ". You can set": "。之后可在“设置”中配置。",
-    "On a tailnet, run": "在 tailnet 上请改为运行",
-    "On the computer with your code, start T3 Code or run": "在存放代码的电脑上启动 T3 Code，或运行",
-    "To read more about how your data is used": "如需详细了解我们如何使用你的数据",
-    "and how to opt out": "以及如何选择退出",
-    "instead.": "。",
-    "it": "",
-    "them": "",
-    "up later from Settings.": ""
+  "apps/web/src/components/mcp/UseInAnotherAppDialog.tsx": {
+    "Expires": "剩余",
+    "Restart T3 Code on": "请重启以下环境上的 T3 Code：",
+    "Run these where": "在运行",
+    "What can": "允许",
+    "do?": "做什么？",
+    "help": "帮助",
+    "runs.": "的地方运行这些命令。"
+  },
+  "apps/web/src/components/onboarding/WelcomePage.tsx": {
+    ". Open a new terminal to use": "。打开新终端即可使用",
+    "Added to": "已添加到",
+    "From your": "来自",
+    "Looking for projects in your": "正在从",
+    "history": "的历史记录",
+    "history…": "的历史记录中查找项目…"
   },
   "apps/web/src/components/pullRequest/PullRequestCodeTab.tsx": {
     "hidden": "已隐藏（测试）",
@@ -92,6 +100,9 @@
   "apps/web/src/components/settings/AppearanceSettingsPanel.tsx": {
     "Bars": "条形",
     "Word": "文字"
+  },
+  "apps/web/src/components/settings/DatabaseStorageNotice.tsx": {
+    "T3 Code on": "位于"
   },
   "apps/web/src/components/settings/LabsSettingsPanel.tsx": {
     "pool, added in": "池租用模拟器与仿真器（在"
