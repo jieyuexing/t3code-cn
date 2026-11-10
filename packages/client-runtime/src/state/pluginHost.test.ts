@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId, WS_METHODS, type PluginHostSnapshot } from "@t3tools/contracts";
+import { EnvironmentId, PluginId, WS_METHODS, type PluginHostSnapshot } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -14,6 +14,7 @@ import {
   AVAILABLE_CONNECTION_STATE,
   PrimaryConnectionTarget,
   type PreparedConnection,
+  type SupervisorConnectionState,
 } from "../connection/model.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
@@ -26,7 +27,7 @@ const snapshot = (name: string): PluginHostSnapshot => ({
   plugins: [],
   views: [
     {
-      pluginId: name,
+      pluginId: PluginId.make(name),
       pluginName: name,
       generation: 1,
       viewId: "main",
@@ -59,11 +60,11 @@ const makeEnvironment = Effect.fn("TestPluginHost.makeEnvironment")(function* (i
       httpBaseUrl: "https://plugin-host.example.test",
       wsBaseUrl: "wss://plugin-host.example.test",
     }),
-    state: yield* SubscriptionRef.make({
+    state: yield* SubscriptionRef.make<SupervisorConnectionState>({
       ...AVAILABLE_CONNECTION_STATE,
       desired: true,
-      network: "online" as const,
-      phase: "connected" as const,
+      network: "online",
+      phase: "connected",
       attempt: 1,
       generation: 1,
     }),

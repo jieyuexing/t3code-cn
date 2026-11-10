@@ -15,7 +15,6 @@ export function createPluginHostEnvironmentAtoms<R, E>(
     snapshot: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:plugin-host:snapshot",
       tag: WS_METHODS.pluginHostSubscribe,
-      idleTtlMs: 0,
     }),
     call: createEnvironmentRpcCommand(runtime, {
       label: "environment-command:plugin-host:call",

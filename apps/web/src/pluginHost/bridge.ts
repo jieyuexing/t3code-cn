@@ -18,11 +18,11 @@ export class BridgeCallError extends Schema.TaggedError<BridgeCallError>()("Brid
 }) {}
 const isBridgeCallError = Schema.is(BridgeCallError);
 
-export const BRIDGE_MAX_MESSAGE_CHARS = 64 * 1024;
-export const BRIDGE_MAX_DEPTH = 32;
-export const BRIDGE_MAX_PENDING_CALLS = 16;
-export const BRIDGE_MAX_VIOLATIONS = 8;
-export const BRIDGE_PING_INTERVAL_MS = 5_000;
+const BRIDGE_MAX_MESSAGE_CHARS = 64 * 1024;
+const BRIDGE_MAX_DEPTH = 32;
+const BRIDGE_MAX_PENDING_CALLS = 16;
+const BRIDGE_MAX_VIOLATIONS = 8;
+const BRIDGE_PING_INTERVAL_MS = 5_000;
 const HANDLER_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
 const MAX_CALL_ID = 2 ** 31 - 1;
 
