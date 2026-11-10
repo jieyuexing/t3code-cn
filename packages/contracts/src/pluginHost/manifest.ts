@@ -1,4 +1,4 @@
-// Manifest shape follows pingdotgg/t3code#16053 so plugins can move between hosts.
+// The shape follows the upstream plugin proposal so plugins can move between hosts.
 // Fields this host does not implement (tools, actions, ...) are ignored on decode; capabilities it does not implement are refused by the loader.
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -50,7 +50,7 @@ export type PluginCommandDeclaration = typeof PluginCommandDeclaration.Type;
 
 /** The plugin handler a command runs; plugins register it with `context.handle`. */
 export const pluginCommandHandler = (commandId: string) => `command:${commandId}`;
-/** The plugin handler a view's call reaches, as in #16053. */
+/** The plugin handler a view's call reaches, named as in the upstream proposal. */
 export const pluginViewHandler = (viewId: string, handler: string) => `view:${viewId}:${handler}`;
 
 const settingBase = {

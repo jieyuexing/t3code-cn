@@ -1,8 +1,6 @@
 // Each plugin owns a Scope that holds everything it registered, in the manner of Cordis contexts:
 // closing it stops the process and withdraws the views and commands, so nothing outlives a disable or reload.
 import {
-  pluginCommandHandler,
-  pluginViewHandler,
   PluginHostError,
   type PluginHostCallInput,
   type PluginHostCallResult,
@@ -96,10 +94,17 @@ const decodeHostCallInput = Schema.decodeUnknownEffect(HostCallInput);
 const LOG_LEVELS = { debug: "Debug", info: "Info", warn: "Warn", error: "Error" } as const;
 
 const fail = (reason: PluginHostError["reason"], detail?: string) =>
-  new PluginHostError({ reason, ...(detail === undefined ? {} : { detail: detail.slice(0, 1000) }) });
+  new PluginHostError({
+    reason,
+    ...(detail === undefined ? {} : { detail: detail.slice(0, 1000) }),
+  });
+
+const SETTING_VALUE_TYPES = { text: "string", boolean: "boolean", number: "number" } as const;
 
 const settingProblem = (field: PluginSettingField, value: PluginSettingValue) =>
-  typeof value === field.type ? undefined : `${field.key} must be a ${field.type}.`;
+  typeof value === SETTING_VALUE_TYPES[field.type]
+    ? undefined
+    : `${field.key} must be a ${field.type}.`;
 
 const resolveSettings = (
   fields: ReadonlyArray<PluginSettingField>,
@@ -117,7 +122,9 @@ const resolveSettings = (
   return values;
 };
 
-export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<PluginHostOptions> & { readonly stateDir: string }) {
+export const make = Effect.fn("PluginHost.make")(function* (
+  overrides: Partial<PluginHostOptions> & { readonly stateDir: string },
+) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
@@ -137,7 +144,9 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
     ...overrides,
   };
   const restartBackoffMs = Duration.toMillis(Duration.fromInputUnsafe(options.restartBackoff));
-  const maxRestartBackoffMs = Duration.toMillis(Duration.fromInputUnsafe(options.maxRestartBackoff));
+  const maxRestartBackoffMs = Duration.toMillis(
+    Duration.fromInputUnsafe(options.maxRestartBackoff),
+  );
   const stableUptimeMs = Duration.toMillis(Duration.fromInputUnsafe(options.stableUptime));
 
   const hostScope = yield* Effect.scope;
@@ -200,7 +209,9 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
     });
 
   const readData = (slot: Slot) =>
-    store.readData(slot.id).pipe(Effect.orElseSucceed((): PluginDataFile => ({ settings: {}, storage: {} })));
+    store
+      .readData(slot.id)
+      .pipe(Effect.orElseSucceed((): PluginDataFile => ({ settings: {}, storage: {} })));
 
   const serveHostCall = (slot: Slot) =>
     Effect.fn("PluginHost.serveHostCall")(function* (
@@ -213,7 +224,9 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
       const key = request.key.slice(0, 128);
       if (method === "settings.get") {
         const declared = slot.registration?.manifest.settings.some((field) => field.key === key);
-        return declared ? (slot.settingValues[key] ?? null) : yield* Effect.fail(`Unknown setting ${key}.`);
+        return declared
+          ? (slot.settingValues[key] ?? null)
+          : yield* Effect.fail(`Unknown setting ${key}.`);
       }
       if (method === "storage.get") {
         const data = yield* readData(slot);
@@ -222,12 +235,17 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
       const value = request.value ?? null;
       if (jsonBytes(value) > MAX_STORAGE_VALUE_BYTES)
         return yield* Effect.fail("The value is too large to store.");
-      yield* dataLock.withPermits(1)(
-        Effect.gen(function* () {
-          const data = yield* readData(slot);
-          yield* store.writeData(slot.id, { ...data, storage: { ...data.storage, [key]: value } });
-        }),
-      ).pipe(Effect.mapError(() => "The value could not be stored."));
+      yield* dataLock
+        .withPermits(1)(
+          Effect.gen(function* () {
+            const data = yield* readData(slot);
+            yield* store.writeData(slot.id, {
+              ...data,
+              storage: { ...data.storage, [key]: value },
+            });
+          }),
+        )
+        .pipe(Effect.mapError(() => "The value could not be stored."));
       return null;
     });
 
@@ -276,9 +294,7 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
         yield* setState(slot, { _tag: "running" });
         return yield* Deferred.await(process.exited);
       }),
-    ).pipe(
-      Effect.catchTags({ PluginProcessError: (error) => Effect.succeed(error.reason) }),
-    );
+    ).pipe(Effect.catchTags({ PluginProcessError: (error) => Effect.succeed(error.reason) }));
 
   const supervise = Effect.fn("PluginHost.supervise")(function* (
     slot: Slot,
@@ -307,7 +323,10 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
   });
 
   const eligible = (slot: Slot) =>
-    slot.enabled && slot.consent === "granted" && slot.problem === undefined && slot.registration !== undefined;
+    slot.enabled &&
+    slot.consent === "granted" &&
+    slot.problem === undefined &&
+    slot.registration !== undefined;
 
   const start = Effect.fn("PluginHost.start")(function* (slot: Slot) {
     const registration = slot.registration;
@@ -342,7 +361,10 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
         ? undefined
         : `the manifest declares the id ${registration.manifest.id}, not ${slot.id}.`;
     slot.consent = consent[slot.id] === registration.digest ? "granted" : "required";
-    slot.settingValues = resolveSettings(registration.manifest.settings, (yield* readData(slot)).settings);
+    slot.settingValues = resolveSettings(
+      registration.manifest.settings,
+      (yield* readData(slot)).settings,
+    );
   });
 
   const makeSlot = (record: RegistryRecord): Slot => ({
@@ -365,7 +387,11 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
     registryProblem === undefined
       ? store
           .writeRegistry(
-            [...slots.values()].map(({ id, path: slotPath, enabled }) => ({ id, path: slotPath, enabled })),
+            [...slots.values()].map(({ id, path: slotPath, enabled }) => ({
+              id,
+              path: slotPath,
+              enabled,
+            })),
           )
           .pipe(Effect.mapError((error) => fail("io-failed", error.message)))
       : Effect.fail(fail("io-failed", registryProblem)),
@@ -410,14 +436,23 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
     return { generation, script, style };
   });
 
-  const invoke = Effect.fn("PluginHost.invoke")(function* (slot: Slot, handler: string, input: Json) {
+  const invoke = Effect.fn("PluginHost.invoke")(function* (
+    slot: Slot,
+    handler: string,
+    input: Json,
+  ) {
     const { process } = yield* running(slot);
     if (!process.handlers.includes(handler)) return yield* fail("not-found", handler);
-    return yield* process.invoke(handler, input).pipe(
-      Effect.mapError((error) =>
-        fail("call-failed", error.detail === undefined ? error.reason : `${error.reason}: ${error.detail}`),
-      ),
-    );
+    return yield* process
+      .invoke(handler, input)
+      .pipe(
+        Effect.mapError((error) =>
+          fail(
+            "call-failed",
+            error.detail === undefined ? error.reason : `${error.reason}: ${error.detail}`,
+          ),
+        ),
+      );
   });
 
   const setSetting = Effect.fn("PluginHost.setSetting")(function* (
@@ -429,18 +464,22 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
     if (field === undefined) return yield* fail("not-found", key);
     const problem = settingProblem(field, value);
     if (problem !== undefined) return yield* fail("invalid-input", problem);
-    yield* dataLock.withPermits(1)(
-      Effect.gen(function* () {
-        const data = yield* store.readData(slot.id);
-        yield* store.writeData(slot.id, { ...data, settings: { ...data.settings, [key]: value } });
-      }),
-    ).pipe(Effect.mapError((error) => fail("io-failed", error.message)));
+    yield* dataLock
+      .withPermits(1)(
+        Effect.gen(function* () {
+          const data = yield* store.readData(slot.id);
+          yield* store.writeData(slot.id, {
+            ...data,
+            settings: { ...data.settings, [key]: value },
+          });
+        }),
+      )
+      .pipe(Effect.mapError((error) => fail("io-failed", error.message)));
     slot.settingValues = { ...slot.settingValues, [key]: value };
     yield* emit;
   });
 
   const mutate = <A, E>(effect: Effect.Effect<A, E>) => lock.withPermits(1)(effect);
-
 
   const add = Effect.fn("PluginHost.add")(function* (directory: string) {
     const registration = yield* load(directory).pipe(
@@ -472,7 +511,9 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
     if (slot.consent !== "granted") {
       if (!grantConsent) return yield* fail("consent-required", slot.id);
       const next = { ...consent, [slot.id]: registration.digest };
-      yield* store.writeConsent(next).pipe(Effect.mapError((error) => fail("io-failed", error.message)));
+      yield* store
+        .writeConsent(next)
+        .pipe(Effect.mapError((error) => fail("io-failed", error.message)));
       consent = next;
       slot.consent = "granted";
     }
@@ -509,25 +550,43 @@ export const make = Effect.fn("PluginHost.make")(function* (overrides: Partial<P
       case "invoke":
         return { value: yield* invoke(yield* slotOf(input.pluginId), input.handler, input.input) };
       case "readView":
-        return { value: yield* readViewBundle(yield* slotOf(input.pluginId), input.viewId, input.generation) };
+        return {
+          value: yield* readViewBundle(
+            yield* slotOf(input.pluginId),
+            input.viewId,
+            input.generation,
+          ),
+        };
       case "setSetting":
         return yield* mutate(
-          slotOf(input.pluginId).pipe(Effect.flatMap((slot) => setSetting(slot, input.key, input.value))),
+          slotOf(input.pluginId).pipe(
+            Effect.flatMap((slot) => setSetting(slot, input.key, input.value)),
+          ),
         ).pipe(Effect.andThen(none));
       case "add":
         return yield* mutate(add(input.path)).pipe(Effect.andThen(none));
       case "remove":
-        return yield* mutate(slotOf(input.pluginId).pipe(Effect.flatMap(remove))).pipe(Effect.andThen(none));
+        return yield* mutate(slotOf(input.pluginId).pipe(Effect.flatMap(remove))).pipe(
+          Effect.andThen(none),
+        );
       case "enable":
         return yield* mutate(
-          slotOf(input.pluginId).pipe(Effect.flatMap((slot) => enable(slot, input.grantConsent === true))),
+          slotOf(input.pluginId).pipe(
+            Effect.flatMap((slot) => enable(slot, input.grantConsent === true)),
+          ),
         ).pipe(Effect.andThen(none));
       case "disable":
-        return yield* mutate(slotOf(input.pluginId).pipe(Effect.flatMap(disable))).pipe(Effect.andThen(none));
+        return yield* mutate(slotOf(input.pluginId).pipe(Effect.flatMap(disable))).pipe(
+          Effect.andThen(none),
+        );
       case "reload":
-        return yield* mutate(slotOf(input.pluginId).pipe(Effect.flatMap(reload))).pipe(Effect.andThen(none));
+        return yield* mutate(slotOf(input.pluginId).pipe(Effect.flatMap(reload))).pipe(
+          Effect.andThen(none),
+        );
       case "resume":
-        return yield* mutate(slotOf(input.pluginId).pipe(Effect.flatMap(resume))).pipe(Effect.andThen(none));
+        return yield* mutate(slotOf(input.pluginId).pipe(Effect.flatMap(resume))).pipe(
+          Effect.andThen(none),
+        );
     }
   });
 

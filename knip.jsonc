@@ -58,6 +58,8 @@
         "scripts/update-test-shard-weights.ts",
         "scripts/verify-background-live.ts",
         "src/provider/testFixtures/*.mjs",
+        // The plugin host starts this file as a child process by path.
+        "src/pluginHost/child.mjs",
         // graphqlgen reads its config.
         "graphql.config.ts",
       ],

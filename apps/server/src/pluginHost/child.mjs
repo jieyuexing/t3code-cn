@@ -1,5 +1,5 @@
 // Runs one plugin in its own process. Plain JS because the host starts it with `node child.mjs`.
-import { pathToFileURL } from "node:url";
+import * as NodeURL from "node:url";
 
 const send = (message) => process.send?.(message);
 const handlers = new Map();
@@ -14,8 +14,17 @@ const hostCall = (method, input) =>
     send({ _tag: "HostCall", requestId, method, input });
   });
 
-const log = (level) => (...parts) =>
-  send({ _tag: "Log", level, message: parts.map((part) => String(part)).join(" ").slice(0, 4000) });
+const log =
+  (level) =>
+  (...parts) =>
+    send({
+      _tag: "Log",
+      level,
+      message: parts
+        .map((part) => String(part))
+        .join(" ")
+        .slice(0, 4000),
+    });
 
 const buildContext = (message) => {
   const context = {
@@ -37,7 +46,7 @@ const buildContext = (message) => {
 
 const activate = async (message) => {
   try {
-    module = await import(pathToFileURL(message.entryPath).href);
+    module = await import(NodeURL.pathToFileURL(message.entryPath).href);
     const run = module.activate ?? module.default;
     if (typeof run !== "function") throw new Error("The entry exports no activate function.");
     await run(buildContext(message));

@@ -70,14 +70,14 @@ export class PluginHostError extends Schema.TaggedError<PluginHostError>()("Plug
   }
 }
 
-export const PluginHostSubscribeRpc = Rpc.make(PLUGIN_HOST_WS_METHODS.pluginHostSubscribe, {
+const PluginHostSubscribeRpc = Rpc.make(PLUGIN_HOST_WS_METHODS.pluginHostSubscribe, {
   payload: Schema.Struct({}),
   success: PluginHostSnapshot,
   error: EnvironmentAuthorizationError,
   stream: true,
 });
 
-export const PluginHostCallRpc = Rpc.make(PLUGIN_HOST_WS_METHODS.pluginHostCall, {
+const PluginHostCallRpc = Rpc.make(PLUGIN_HOST_WS_METHODS.pluginHostCall, {
   payload: PluginHostCallInput,
   success: PluginHostCallResult,
   error: Schema.Union([PluginHostError, EnvironmentAuthorizationError]),

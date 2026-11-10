@@ -65,7 +65,18 @@ export interface PluginProcess {
 }
 
 // Enough for a plugin to find its tools and temp space without inheriting the server's credentials.
-const CHILD_ENV_KEYS = ["PATH", "Path", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "SystemRoot", "LANG", "LC_ALL"];
+const CHILD_ENV_KEYS = [
+  "PATH",
+  "Path",
+  "HOME",
+  "USERPROFILE",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "SystemRoot",
+  "LANG",
+  "LC_ALL",
+];
 const STDERR_TAIL_BYTES = 2048;
 
 interface CallFailure {
@@ -106,12 +117,14 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
           env: environment,
           stdio: ["ignore", "ignore", "pipe", "ipc"],
         }),
-      catch: (cause) => new PluginProcessError({ pluginId, reason: `cannot start (${String(cause)})` }),
+      catch: (cause) =>
+        new PluginProcessError({ pluginId, reason: `cannot start (${String(cause)})` }),
     }),
     (spawned) =>
       Effect.gen(function* () {
         if (spawned.exitCode === null && spawned.signalCode === null) {
-          if (spawned.connected) spawned.send({ _tag: "Deactivate" } satisfies PluginHostMessage, () => undefined);
+          if (spawned.connected)
+            spawned.send({ _tag: "Deactivate" } satisfies PluginHostMessage, () => undefined);
           const stopped = yield* Deferred.await(exited).pipe(Effect.timeoutOption(stopGrace));
           if (stopped._tag === "None") {
             spawned.kill("SIGKILL");
@@ -142,7 +155,12 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
         Deferred.doneUnsafe(ready, Effect.succeed(message.handlers));
         break;
       case "ActivationFailed":
-        Deferred.doneUnsafe(ready, Effect.fail(new PluginProcessError({ pluginId, reason: `activation failed: ${message.message}` })));
+        Deferred.doneUnsafe(
+          ready,
+          Effect.fail(
+            new PluginProcessError({ pluginId, reason: `activation failed: ${message.message}` }),
+          ),
+        );
         break;
       case "Succeeded":
       case "Failed": {
@@ -163,8 +181,16 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
         runFork(
           options.serveHostCall(message.method, message.input).pipe(
             Effect.match({
-              onSuccess: (value): PluginHostMessage => ({ _tag: "HostCallSucceeded", requestId: message.requestId, value }),
-              onFailure: (failure): PluginHostMessage => ({ _tag: "HostCallFailed", requestId: message.requestId, message: failure.slice(0, 2000) }),
+              onSuccess: (value): PluginHostMessage => ({
+                _tag: "HostCallSucceeded",
+                requestId: message.requestId,
+                value,
+              }),
+              onFailure: (failure): PluginHostMessage => ({
+                _tag: "HostCallFailed",
+                requestId: message.requestId,
+                message: failure.slice(0, 2000),
+              }),
             }),
             Effect.map(send),
           ),
@@ -219,7 +245,9 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
       Effect.timeoutOption(callTimeout),
       Effect.mapError(fail),
       Effect.flatMap((result) =>
-        result._tag === "Some" ? Effect.succeed(result.value) : Effect.fail(fail({ reason: "timeout" })),
+        result._tag === "Some"
+          ? Effect.succeed(result.value)
+          : Effect.fail(fail({ reason: "timeout" })),
       ),
       Effect.ensuring(Effect.sync(() => pending.delete(requestId))),
     );
