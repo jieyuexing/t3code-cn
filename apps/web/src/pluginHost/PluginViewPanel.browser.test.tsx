@@ -37,6 +37,7 @@ function setup(generation: number | null, canCall = true) {
     registered: 1,
     plugins: [],
     commands: [],
+    services: [],
     views:
       generation === null
         ? []

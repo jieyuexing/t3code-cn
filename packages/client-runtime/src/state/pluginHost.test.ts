@@ -36,6 +36,7 @@ const snapshot = (name: string): PluginHostSnapshot => ({
     },
   ],
   commands: [],
+  services: [],
 });
 
 const makeEnvironment = Effect.fn("TestPluginHost.makeEnvironment")(function* (id: string) {

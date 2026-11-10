@@ -48,6 +48,7 @@ const frame = (viewIds: readonly string[]): PluginHostSnapshot => ({
   registered: viewIds.length,
   plugins: [],
   commands: [],
+  services: [],
   views: viewIds.map((viewId) => ({
     pluginId: PluginId.make(viewId === "clock" ? "example.echo-clock" : "example.notes"),
     pluginName: viewId,

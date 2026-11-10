@@ -1,10 +1,17 @@
 import type { PluginHostEntry } from "@t3tools/contracts";
 
-export type PluginStatusKind = "standby" | "running" | "quarantined" | "approval" | "off";
+export type PluginStatusKind =
+  | "standby"
+  | "running"
+  | "waiting"
+  | "quarantined"
+  | "approval"
+  | "off";
 
 const PLUGIN_STATUS_LABEL_BY_KIND: Readonly<Record<PluginStatusKind, string>> = {
   standby: "Standby",
   running: "Running",
+  waiting: "Waiting for services",
   quarantined: "Quarantined",
   approval: "Awaiting consent",
   off: "Not enabled",
@@ -13,12 +20,13 @@ const PLUGIN_STATUS_LABEL_BY_KIND: Readonly<Record<PluginStatusKind, string>> = 
 export const PLUGIN_STATUS_VARIANT_BY_KIND = {
   standby: "outline",
   running: "success",
+  waiting: "warning",
   quarantined: "error",
   approval: "warning",
   off: "outline",
 } as const satisfies Readonly<Record<PluginStatusKind, string>>;
 
-/** The four words a user sees; backoff reads as quarantined and an idle plugin as off. */
+/** The words a user sees; backoff reads as quarantined and an idle plugin as off. */
 export function pluginStatus(plugin: PluginHostEntry): { kind: PluginStatusKind; label: string } {
   const kind = pluginStatusKind(plugin);
   return { kind, label: PLUGIN_STATUS_LABEL_BY_KIND[kind] };
@@ -36,6 +44,8 @@ function pluginStatusKind(plugin: PluginHostEntry): PluginStatusKind {
     case "starting":
     case "running":
       return "running";
+    case "waiting":
+      return "waiting";
     case "backoff":
     case "quarantined":
       return "quarantined";

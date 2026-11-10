@@ -218,6 +218,7 @@ function PluginRow(props: {
           {state._tag === "backoff" ? (
             <p>{`Stopped after ${state.failures} failures. Retrying at ${new Date(state.retryAt).toLocaleTimeString()}. ${state.reason}`}</p>
           ) : null}
+          {state._tag === "waiting" ? <p>{state.reason}</p> : null}
           {state._tag === "quarantined" ? (
             <p>{`Stopped after ${state.failures} failures and no longer restarted. ${state.reason}`}</p>
           ) : null}

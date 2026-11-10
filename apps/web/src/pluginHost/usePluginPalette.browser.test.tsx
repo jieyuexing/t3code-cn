@@ -59,6 +59,7 @@ function setup(commands: boolean, result: unknown = "ok") {
     commands: commands
       ? [{ pluginId, pluginName: "Echo Clock", commandId: "echo-now", title: "Echo the time" }]
       : [],
+    services: [],
   };
 }
 
