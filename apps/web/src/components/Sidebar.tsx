@@ -265,6 +265,7 @@ import {
   type SidebarSweepAction,
 } from "./sidebar/SidebarThreadRow";
 import { SidebarDraftBlock } from "./sidebar/SidebarDraftBlock";
+import { sortFolderThreadsByStatus } from "./sidebar/folderStatusOrder-zh";
 import {
   SidebarProjectFolderHeader,
   sidebarFolderRowId,
@@ -679,7 +680,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   // Availability gates dragging only; sorting must stay consistent across clients.
   const sortedPinned = sortPinnedThreadsForSidebar(pinned);
   const sortedActive = sortActiveBySend
-    ? sortWorkingThreadsBySend(active)
+    ? sortFolderThreadsByStatus(sortWorkingThreadsBySend(active))
     : workingShelfEnabled
       ? sortInboxThreadsByReturn(active, inboxObservation.returnedAt)
       : sortThreadsForSidebar(active);
