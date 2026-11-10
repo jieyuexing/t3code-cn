@@ -10,10 +10,40 @@
       "capabilities": ["settings", "views", "commands"],
       "inject": ["settings", "log", "handle"],
       "views": [
-        { "id": "clock", "title": "Echo Clock", "placement": "side-panel", "html": "./view.html" }
+        {
+          "id": "clock",
+          "title": "Echo Clock",
+          "placement": "side-panel",
+          "html": "./view.html"
+        }
       ],
-      "commands": [{ "id": "echo-now", "title": "Echo the current time" }],
-      "settings": [{ "type": "text", "key": "prefix", "label": "Prefix", "default": "Now" }]
+      "commands": [
+        {
+          "id": "echo-now",
+          "title": "Echo the current time"
+        }
+      ],
+      "settings": [
+        {
+          "type": "text",
+          "key": "prefix",
+          "label": "Prefix",
+          "default": "Now"
+        }
+      ],
+      "provides": [
+        {
+          "name": "example.clock",
+          "methods": [
+            {
+              "name": "now",
+              "title": "Current time",
+              "description": "The prefixed ISO time.",
+              "readOnly": true
+            }
+          ]
+        }
+      ]
     }
   }
 }

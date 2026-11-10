@@ -8,10 +8,12 @@ const FailureReason = Schema.String.check(Schema.isMaxLength(1000));
 /**
  * `idle` plugins are not enabled; `standby` ones are enabled and offer their views
  * and commands, and start a process on the first call. Views and commands are offered
- * in `standby`, `starting` and `running`, and withdrawn in `backoff` and `quarantined`.
+ * in `standby`, `starting` and `running`, and withdrawn in `waiting`, `backoff` and `quarantined`.
  */
 export const PluginHostState = Schema.Union([
   Schema.TaggedStruct("idle", {}),
+  /** Enabled, but a service it injects is not available; nothing of it is offered and no process runs. */
+  Schema.TaggedStruct("waiting", { reason: FailureReason }),
   Schema.TaggedStruct("standby", {}),
   Schema.TaggedStruct("starting", {}),
   Schema.TaggedStruct("running", {}),
@@ -47,6 +49,22 @@ export const PluginHostEntry = Schema.Struct({
   rejectedViews: Schema.Array(Schema.Struct({ viewId: Schema.String, reason: Schema.String })),
   settings: Schema.Array(PluginSettingField),
   settingValues: Schema.Record(Schema.String, PluginSettingValue),
+  /** The services this plugin provides, with their declared methods. */
+  provides: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      methods: Schema.Array(
+        Schema.Struct({
+          name: Schema.String,
+          title: Schema.optionalKey(Schema.String),
+          description: Schema.optionalKey(Schema.String),
+          readOnly: Schema.optionalKey(Schema.Boolean),
+        }),
+      ),
+    }),
+  ),
+  /** The injected services that are not available, while `state` is `waiting`; empty otherwise. */
+  waitingFor: Schema.Array(Schema.String),
 });
 export type PluginHostEntry = typeof PluginHostEntry.Type;
 
@@ -79,5 +97,9 @@ export const PluginHostSnapshot = Schema.Struct({
   plugins: Schema.Array(PluginHostEntry),
   views: Schema.Array(PluginHostView),
   commands: Schema.Array(PluginHostCommand),
+  /** Every service an enabled plugin provides, with its provider; `available` while that plugin is active and not quarantined. */
+  services: Schema.Array(
+    Schema.Struct({ name: Schema.String, provider: PluginId, available: Schema.Boolean }),
+  ),
 });
 export type PluginHostSnapshot = typeof PluginHostSnapshot.Type;

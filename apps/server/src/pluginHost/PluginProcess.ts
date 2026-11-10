@@ -39,6 +39,8 @@ export class PluginCallError extends Schema.TaggedError<PluginCallError>()("Plug
   }
 }
 
+type ReadyMessage = Extract<PluginChildMessage, { _tag: "Ready" }>;
+
 export interface PluginProcessOptions {
   readonly registration: PluginRegistration;
   readonly command: string;
@@ -47,6 +49,8 @@ export interface PluginProcessOptions {
   readonly callTimeout: Duration.Input;
   readonly stopGrace: Duration.Input;
   readonly maxPayloadBytes: number;
+  /** The plugin services this plugin injects. */
+  readonly injectedServices: ReadonlyArray<string>;
   /** Serves `settings.get` and `storage.*`; a failure message reaches the plugin. */
   readonly serveHostCall: (
     method: Extract<PluginChildMessage, { _tag: "HostCall" }>["method"],
@@ -97,7 +101,7 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
   const stopGrace = Duration.fromInputUnsafe(options.stopGrace);
 
   const exited = Deferred.makeUnsafe<string>();
-  const ready = Deferred.makeUnsafe<ReadonlyArray<string>, PluginProcessError>();
+  const ready = Deferred.makeUnsafe<ReadyMessage, PluginProcessError>();
   const pending = new Map<number, Deferred.Deferred<Json, CallFailure>>();
   let nextRequestId = 1;
   let stderrTail = "";
@@ -152,7 +156,7 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
   const handleMessage = (message: PluginChildMessage) => {
     switch (message._tag) {
       case "Ready":
-        Deferred.doneUnsafe(ready, Effect.succeed(message.handlers));
+        Deferred.doneUnsafe(ready, Effect.succeed(message));
         break;
       case "ActivationFailed":
         Deferred.doneUnsafe(
@@ -223,8 +227,9 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
     version: registration.manifest.version,
     entryPath: registration.entryPath,
     capabilities: registration.manifest.capabilities,
+    services: options.injectedServices,
   });
-  const handlers = yield* Deferred.await(ready).pipe(
+  const readyMessage = yield* Deferred.await(ready).pipe(
     Effect.timeoutOption(activationTimeout),
     Effect.flatMap((result) =>
       result._tag === "Some"
@@ -232,6 +237,35 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
         : Effect.fail(new PluginProcessError({ pluginId, reason: "did not activate in time" })),
     ),
   );
+
+  // The manifest is what dependents were checked against, so the plugin must register exactly that.
+  const registered = new Map(
+    readyMessage.provided.map((service) => [service.name, service.methods]),
+  );
+  for (const declared of registration.manifest.provides) {
+    const methods = registered.get(declared.name);
+    if (methods === undefined)
+      return yield* new PluginProcessError({
+        pluginId,
+        reason: `it declares the service ${declared.name} but did not register it with context.provide.`,
+      });
+    const expected = declared.methods.map((method) => method.name).toSorted();
+    const actual = methods.toSorted();
+    if (actual.length !== expected.length || actual.some((name, index) => name !== expected[index]))
+      return yield* new PluginProcessError({
+        pluginId,
+        reason: `the service ${declared.name} registered methods [${actual.join(", ")}], not the declared [${expected.join(", ")}].`,
+      });
+  }
+  const undeclared = [...registered.keys()].find(
+    (name) => !registration.manifest.provides.some((declared) => declared.name === name),
+  );
+  if (undeclared !== undefined)
+    return yield* new PluginProcessError({
+      pluginId,
+      reason: `it registered the service ${undeclared}, which its manifest does not declare.`,
+    });
+  const handlers = readyMessage.handlers;
 
   const invoke = Effect.fn("PluginProcess.invoke")(function* (handler: string, input: Json) {
     const fail = (failure: CallFailure) => new PluginCallError({ pluginId, handler, ...failure });

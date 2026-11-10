@@ -9,6 +9,7 @@ import {
   PLUGIN_MANIFEST_FILE,
   PLUGIN_MANIFEST_MAX_BYTES,
   PluginHostExtension,
+  PluginServiceName,
   PluginStandardManifest,
   type PluginId,
 } from "@t3tools/contracts";
@@ -22,6 +23,7 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const parseJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const decodeStandard = Schema.decodeUnknownEffect(PluginStandardManifest);
 const decodeExtension = Schema.decodeUnknownEffect(PluginHostExtension);
+const isServiceName = Schema.is(PluginServiceName);
 
 export class PluginManifestError extends Schema.TaggedError<PluginManifestError>()(
   "PluginManifestError",
@@ -49,7 +51,7 @@ export interface PluginRegistration {
   readonly directory: string;
   /** Real path of the entry module, inside `directory`. */
   readonly entryPath: string;
-  /** Consent lasts only while this digest of name, entry, capabilities and inject is unchanged. */
+  /** Consent lasts only while this digest of name, entry, capabilities, inject and provided service names is unchanged. */
   readonly digest: string;
   /** Manifest content that was reported and ignored. */
   readonly ignored: ReadonlyArray<string>;
@@ -75,6 +77,7 @@ const consentDigest = (name: string, extension: PluginHostExtension) =>
         entry: extension.entry,
         capabilities: extension.capabilities.toSorted(),
         inject: extension.inject.toSorted(),
+        provides: extension.provides.map((service) => service.name).toSorted(),
       }),
     )
     .digest("hex");
@@ -211,11 +214,29 @@ export const loadPluginDirectory = Effect.fn("PluginManifestLoader.loadPluginDir
     const repeated = duplicate(ids);
     if (repeated !== undefined) return yield* fail(`the ${what} "${repeated}" is declared twice.`);
   }
+  const provided = extension.provides.map((service) => service.name);
+  for (const [what, names] of [
+    ["service provided", provided],
+    ["service injected", extension.inject],
+  ] as const) {
+    const repeated = duplicate(names);
+    if (repeated !== undefined) return yield* fail(`the ${what} "${repeated}" is declared twice.`);
+  }
+  for (const service of extension.provides) {
+    const repeated = duplicate(service.methods.map((method) => method.name));
+    if (repeated !== undefined)
+      return yield* fail(`the method "${repeated}" of service ${service.name} is declared twice.`);
+  }
   for (const name of extension.inject) {
-    const needed = HOST_SERVICES[name];
-    const available = Object.hasOwn(HOST_SERVICES, name);
-    if (!available || (needed !== undefined && !extension.capabilities.includes(needed)))
-      return yield* fail(`it needs the host service "${name}", which is not available to it.`);
+    if (Object.hasOwn(HOST_SERVICES, name)) {
+      const needed = HOST_SERVICES[name];
+      if (needed !== undefined && !extension.capabilities.includes(needed))
+        return yield* fail(`it needs the host service "${name}", which is not available to it.`);
+    } else if (!isServiceName(name)) {
+      return yield* fail(`it injects "${name}", which is not a service name.`);
+    } else if (provided.includes(name)) {
+      return yield* fail(`it injects the service "${name}" that it provides itself.`);
+    }
   }
 
   const entry = yield* resolveInsideDirectory(realDirectory, extension.entry).pipe(

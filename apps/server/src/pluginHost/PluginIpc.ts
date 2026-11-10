@@ -22,6 +22,8 @@ const PluginHostMessage = Schema.Union([
     entryPath: Schema.String,
     /** The manifest's capabilities, so the child offers only the APIs they grant. */
     capabilities: Schema.Array(Schema.String),
+    /** The plugin services this plugin injects, so the child offers `context.services` for exactly those. */
+    services: Schema.Array(Schema.String),
   }),
   Schema.TaggedStruct("Invoke", { requestId: RequestId, handler: HandlerName, input: Schema.Json }),
   Schema.TaggedStruct("Deactivate", {}),
@@ -34,7 +36,13 @@ export const PluginLogLevel = Schema.Literals(["debug", "info", "warn", "error"]
 export type PluginLogLevel = typeof PluginLogLevel.Type;
 
 const PluginChildMessage = Schema.Union([
-  Schema.TaggedStruct("Ready", { handlers: Schema.Array(HandlerName) }),
+  Schema.TaggedStruct("Ready", {
+    handlers: Schema.Array(HandlerName),
+    /** The services the plugin registered with `context.provide`, by name with their methods. */
+    provided: Schema.Array(
+      Schema.Struct({ name: Schema.String, methods: Schema.Array(Schema.String) }),
+    ),
+  }),
   Schema.TaggedStruct("ActivationFailed", { message: Message }),
   Schema.TaggedStruct("Succeeded", { requestId: RequestId, value: Schema.Json }),
   Schema.TaggedStruct("Failed", { requestId: RequestId, message: Message }),
@@ -45,7 +53,7 @@ const PluginChildMessage = Schema.Union([
   Schema.TaggedStruct("Deactivated", {}),
   Schema.TaggedStruct("HostCall", {
     requestId: RequestId,
-    method: Schema.Literals(["settings.get", "storage.get", "storage.set"]),
+    method: Schema.Literals(["settings.get", "storage.get", "storage.set", "service.call"]),
     input: Schema.Json,
   }),
 ]);
@@ -57,6 +65,15 @@ export const HostCallInput = Schema.Struct({
   key: Schema.String,
   value: Schema.optionalKey(Schema.Json),
 });
+
+export const ServiceCallInput = Schema.Struct({
+  service: Schema.String,
+  method: Schema.String,
+  input: Schema.Json,
+});
+
+/** The handler a service method answers under; `input` carries the call's input and its caller. */
+export const serviceHandler = (service: string, method: string) => `service:${service}:${method}`;
 
 export const PluginDataFile = Schema.Struct({
   settings: Schema.Record(Schema.String, PluginSettingValue),

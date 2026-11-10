@@ -87,6 +87,36 @@ const PluginCommandDeclaration = Schema.Struct({
 });
 export type PluginCommandDeclaration = typeof PluginCommandDeclaration.Type;
 
+/** Names `inject` uses for the host's own services; every other name is a service another plugin provides. */
+export const PLUGIN_HOST_SERVICE_NAMES = ["settings", "storage", "log", "handle"] as const;
+
+/** A service name is a global key, such as `example.clock`; one plugin at a time provides it. */
+export const PluginServiceName = Schema.String.check(
+  Schema.isMaxLength(64),
+  Schema.isPattern(/^[a-z][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/),
+  Schema.makeFilter(
+    (name) =>
+      !(PLUGIN_HOST_SERVICE_NAMES as ReadonlyArray<string>).includes(name) ||
+      `"${name}" is a name the host keeps for its own service.`,
+  ),
+);
+
+const PluginServiceMethod = Schema.Struct({
+  name: Schema.String.check(Schema.isMaxLength(64), Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]*$/)),
+  title: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(60))),
+  description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(240))),
+  /** JSON Schemas, kept for later use and not checked against calls yet. */
+  input: Schema.optionalKey(Schema.Json),
+  output: Schema.optionalKey(Schema.Json),
+  readOnly: Schema.optionalKey(Schema.Boolean),
+});
+
+const PluginServiceDeclaration = Schema.Struct({
+  name: PluginServiceName,
+  methods: Schema.Array(PluginServiceMethod).check(Schema.isMaxLength(32)),
+});
+export type PluginServiceDeclaration = typeof PluginServiceDeclaration.Type;
+
 /** The plugin handler a command runs; plugins register it with `context.handle`. */
 export const pluginCommandHandler = (commandId: string) => `command:${commandId}`;
 /** The plugin handler a view's call reaches. */
@@ -128,9 +158,12 @@ export const PluginHostExtension = Schema.Struct({
   capabilities: Schema.Array(PluginCapabilityName)
     .check(Schema.isMaxLength(32))
     .pipe(Schema.withDecodingDefault(Effect.succeed([]))),
-  /** Host services the plugin needs; the plugin does not start when one is unavailable. */
+  /** Services the plugin needs: host services by their reserved names, plugin services by theirs. It runs only while all are available. */
   inject: Schema.Array(Schema.String.check(Schema.isMaxLength(64)))
     .check(Schema.isMaxLength(16))
+    .pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  provides: Schema.Array(PluginServiceDeclaration)
+    .check(Schema.isMaxLength(8))
     .pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   views: Schema.Array(PluginViewDeclaration)
     .check(Schema.isMaxLength(8))

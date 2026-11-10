@@ -360,7 +360,7 @@ describe("PluginHost", () => {
         injection: yield* mutate("injection", (text) =>
           text.replace(
             '"inject": ["settings", "log", "handle"]',
-            '"inject": ["settings", "database"]',
+            '"inject": ["settings", "Not A Service"]',
           ),
         ),
       };
@@ -374,7 +374,7 @@ describe("PluginHost", () => {
         traversal: "entry",
         capability: "does not support tools",
         oversize: "64 KiB",
-        injection: "database",
+        injection: "Not A Service",
       } as const;
       for (const [name, directory] of Object.entries(badPaths)) {
         const error = yield* call(host, { _tag: "add", path: directory }).pipe(Effect.flip);
@@ -605,6 +605,7 @@ describe("PluginHost", () => {
         plugins: [],
         views: [],
         commands: [],
+        services: [],
       });
       const refused = yield* call(host, { _tag: "add", path: good }).pipe(Effect.flip);
       expect(refused.reason).toBe("host-disabled");
@@ -631,6 +632,7 @@ describe("PluginHost", () => {
         plugins: [],
         views: [],
         commands: [],
+        services: [],
       });
       const afterOff = yield* call(host, {
         _tag: "invoke",
@@ -677,6 +679,7 @@ describe("PluginHost", () => {
         plugins: [],
         views: [],
         commands: [],
+        services: [],
       });
       expect(spawns.count).toBe(0);
       expect(yield* fs.exists(path.join(stateDir, "plugins"))).toBe(false);

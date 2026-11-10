@@ -8,6 +8,13 @@ interface PluginContext {
   readonly pluginId: string;
   readonly log: Record<"debug" | "info" | "warn" | "error", (...parts: Array<unknown>) => void>;
   readonly handle: (name: string, fn: (input: Json) => unknown) => void;
+  readonly services: Readonly<
+    Record<string, Readonly<Record<string, (input?: Json) => Promise<Json>>>>
+  >;
+  readonly provide: (
+    name: string,
+    methods: Readonly<Record<string, (input: Json, meta: { readonly caller: string }) => unknown>>,
+  ) => void;
   settings?: { readonly get: (key: string) => Promise<Json> };
   storage?: {
     readonly get: (key: string) => Promise<Json>;
@@ -34,7 +41,12 @@ export function runPluginChild() {
   let nextHostCall = 1;
   let pluginModule: PluginModule | undefined;
 
-  const hostCall = (method: "settings.get" | "storage.get" | "storage.set", input: Json) =>
+  const provided = new Map<string, Array<string>>();
+
+  const hostCall = (
+    method: "settings.get" | "storage.get" | "storage.set" | "service.call",
+    input: Json,
+  ) =>
     new Promise<Json>((resolve, reject) => {
       const requestId = nextHostCall++;
       hostCalls.set(requestId, { resolve, reject });
@@ -60,6 +72,29 @@ export function runPluginChild() {
       handle: (name, fn) => {
         handlers.set(name, fn);
       },
+      provide: (name, methods) => {
+        provided.set(name, Object.keys(methods));
+        for (const [method, fn] of Object.entries(methods))
+          handlers.set(`service:${name}:${method}`, (call) => {
+            const { input, caller } = call as { input: Json; caller: string };
+            return fn(input, { caller });
+          });
+      },
+      services: Object.fromEntries(
+        message.services.map((service) => [
+          service,
+          new Proxy(
+            {},
+            {
+              get: (_target, method) =>
+                typeof method === "string"
+                  ? (input?: Json) =>
+                      hostCall("service.call", { service, method, input: input ?? null })
+                  : undefined,
+            },
+          ),
+        ]),
+      ),
     };
     if (message.capabilities.includes("settings")) {
       context.settings = { get: (key) => hostCall("settings.get", { key }) };
@@ -77,7 +112,11 @@ export function runPluginChild() {
       const run = pluginModule.activate ?? pluginModule.default;
       if (typeof run !== "function") throw new Error("The entry exports no activate function.");
       await run(buildContext(message));
-      send({ _tag: "Ready", handlers: [...handlers.keys()] });
+      send({
+        _tag: "Ready",
+        handlers: [...handlers.keys()],
+        provided: [...provided].map(([name, methods]) => ({ name, methods })),
+      });
     } catch (error) {
       send({ _tag: "ActivationFailed", message: messageText(error) });
     }

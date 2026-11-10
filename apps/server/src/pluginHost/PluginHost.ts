@@ -1,6 +1,7 @@
 // Each plugin owns a Scope that holds everything it registered, in the manner of Cordis contexts:
 // closing it stops the process and withdraws the views and commands, so nothing outlives a disable or reload.
 import {
+  PLUGIN_HOST_SERVICE_NAMES,
   PluginHostError,
   type PluginHostCallInput,
   type PluginHostCallResult,
@@ -31,7 +32,14 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import { ServerConfig } from "../config.ts";
-import { HostCallInput, jsonBytes, type Json, type PluginDataFile } from "./PluginIpc.ts";
+import {
+  HostCallInput,
+  jsonBytes,
+  ServiceCallInput,
+  serviceHandler,
+  type Json,
+  type PluginDataFile,
+} from "./PluginIpc.ts";
 import { loadPluginDirectory, type PluginRegistration } from "./PluginManifestLoader.ts";
 import { spawnPluginProcess, type PluginProcess } from "./PluginProcess.ts";
 import { makePluginStore, type PluginStore, type RegistryRecord } from "./PluginStore.ts";
@@ -56,6 +64,8 @@ export interface PluginHostOptions extends PluginViewDeliveryOptions {
   readonly callTimeout: Duration.Input;
   readonly stopGrace: Duration.Input;
   readonly spawnProcess: typeof spawnPluginProcess;
+  /** Called when a plugin is activated or stopped, in the order reconciliation does it. */
+  readonly onTransition?: (pluginId: PluginId, action: "start" | "stop") => void;
 }
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
@@ -90,6 +100,12 @@ interface Slot {
   offer: Scope.Closeable | undefined;
   /** The delivered copy of each offered view's page, by view id. */
   readonly viewFiles: Map<string, string>;
+  /** Set while a reload or resume takes the plugin and its dependents down; reconciliation then leaves it off. */
+  suspended: boolean;
+  /** The injected services that are not available while the plugin is `waiting`. */
+  waitingFor: ReadonlyArray<string>;
+  /** Why another plugin's claim on a service keeps this one from starting. */
+  conflict: string | undefined;
   /** Makes concurrent first calls share one process start. */
   readonly startLock: Semaphore.Semaphore;
   settingValues: Record<string, PluginSettingValue>;
@@ -98,6 +114,8 @@ interface Slot {
 }
 
 const decodeHostCallInput = Schema.decodeUnknownEffect(HostCallInput);
+const decodeServiceCall = Schema.decodeUnknownEffect(ServiceCallInput);
+const RESERVED_SERVICES = new Set<string>(PLUGIN_HOST_SERVICE_NAMES);
 
 const LOG_LEVELS = { debug: "Debug", info: "Info", warn: "Warn", error: "Error" } as const;
 
@@ -170,10 +188,12 @@ export const make = Effect.fn("PluginHost.make")(function* (
     plugins: [],
     views: [],
     commands: [],
+    services: [],
   });
 
   const entryOf = (slot: Slot): PluginHostEntry => {
     const registration = slot.registration;
+    const problem = slot.problem ?? slot.conflict;
     return {
       id: slot.id,
       name: registration?.manifest.name ?? slot.id,
@@ -186,19 +206,63 @@ export const make = Effect.fn("PluginHost.make")(function* (
       generation: slot.generation,
       state: slot.state,
       ...(slot.running?.pid === undefined ? {} : { pid: slot.running.pid }),
-      ...(slot.problem === undefined ? {} : { problem: slot.problem }),
+      ...(problem === undefined ? {} : { problem }),
       ignoredFields: registration?.ignored ?? [],
       rejectedViews: registration?.rejectedViews ?? [],
       settings: registration?.manifest.settings ?? [],
       settingValues: slot.settingValues,
+      provides: (registration?.manifest.provides ?? []).map((service) => ({
+        name: service.name,
+        methods: service.methods.map(({ name, title, description, readOnly }) => ({
+          name,
+          ...(title === undefined ? {} : { title }),
+          ...(description === undefined ? {} : { description }),
+          ...(readOnly === undefined ? {} : { readOnly }),
+        })),
+      })),
+      waitingFor: slot.waitingFor,
     };
   };
+
+  const injectedServices = (slot: Slot) =>
+    (slot.registration?.manifest.inject ?? []).filter((name) => !RESERVED_SERVICES.has(name));
+  const providedServices = (slot: Slot) =>
+    (slot.registration?.manifest.provides ?? []).map((service) => service.name);
+
+  const eligible = (slot: Slot) =>
+    slot.enabled &&
+    slot.consent === "granted" &&
+    slot.problem === undefined &&
+    slot.registration !== undefined;
+
+  /** Plugins that want to run: eligible and not held down by a reload. */
+  const claims = (slot: Slot) => hostEnabled && !slot.suspended && eligible(slot);
+
+  /** The first plugin of `include` to declare each service name; a service has one provider. */
+  const serviceOwners = (include: (slot: Slot) => boolean) => {
+    const owners = new Map<string, Slot>();
+    for (const slot of slots.values())
+      if (include(slot))
+        for (const name of providedServices(slot)) if (!owners.has(name)) owners.set(name, slot);
+    return owners;
+  };
+
+  /** A provider's service is available while its scope is open, even if its process crashed, unless it is quarantined. */
+  const serviceAvailable = (provider: Slot) =>
+    provider.scope !== undefined && provider.state._tag !== "quarantined";
 
   const emit = Effect.suspend(() => {
     const active = hostEnabled ? [...slots.values()] : [];
     return SubscriptionRef.set(snapshotRef, {
       hostEnabled,
       registered: slots.size,
+      services: hostEnabled
+        ? [...serviceOwners(claims)].map(([name, provider]) => ({
+            name,
+            provider: provider.id,
+            available: serviceAvailable(provider),
+          }))
+        : [],
       plugins: active.map(entryOf),
       views: active.flatMap((slot) =>
         slot.views.map((view) => ({ ...view, generation: slot.generation })),
@@ -230,11 +294,36 @@ export const make = Effect.fn("PluginHost.make")(function* (
       .readData(slot.id)
       .pipe(Effect.orElseSucceed((): PluginDataFile => ({ settings: {}, storage: {} })));
 
+  /** Forwards a call from `caller` to a service method, after checking everything the host can check. */
+  const callService = Effect.fn("PluginHost.callService")(function* (caller: Slot, input: Json) {
+    const request = yield* decodeServiceCall(input).pipe(
+      Effect.mapError(() => "The request needs a service, a method and an input."),
+    );
+    const { service, method } = request;
+    if (!injectedServices(caller).includes(service))
+      return yield* Effect.fail(`Plugin ${caller.id} does not declare a dependency on ${service}.`);
+    const provider = serviceOwners(claims).get(service);
+    if (provider === undefined || !serviceAvailable(provider))
+      return yield* Effect.fail(`The service ${service} is not available.`);
+    const declared = provider.registration?.manifest.provides
+      .find((candidate) => candidate.name === service)
+      ?.methods.some((candidate) => candidate.name === method);
+    if (declared !== true)
+      return yield* Effect.fail(`The service ${service} has no method ${method}.`);
+    const { process } = yield* ensureRunning(provider).pipe(
+      Effect.mapError((error) => `${service} (${provider.id}): ${error.message}`),
+    );
+    return yield* process
+      .invoke(serviceHandler(service, method), { input: request.input, caller: caller.id })
+      .pipe(Effect.mapError((error) => `${service}.${method}: ${error.message}`));
+  });
+
   const serveHostCall = (slot: Slot) =>
     Effect.fn("PluginHost.serveHostCall")(function* (
-      method: "settings.get" | "storage.get" | "storage.set",
+      method: "settings.get" | "storage.get" | "storage.set" | "service.call",
       input: Json,
     ) {
+      if (method === "service.call") return yield* callService(slot, input);
       const request = yield* decodeHostCallInput(input).pipe(
         Effect.mapError(() => "The request needs a key."),
       );
@@ -281,6 +370,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
           callTimeout: options.callTimeout,
           stopGrace: options.stopGrace,
           maxPayloadBytes: MAX_PAYLOAD_BYTES,
+          injectedServices: injectedServices(slot),
           serveHostCall: serveHostCall(slot),
           onLog: (level, message) =>
             Effect.logWithLevel(LOG_LEVELS[level])(message).pipe(
@@ -334,6 +424,11 @@ export const make = Effect.fn("PluginHost.make")(function* (
     if (scope !== undefined) yield* Scope.close(scope, Exit.void);
   });
 
+  /** Services that depended on a quarantined provider stop, from outside the provider's own scope. */
+  const requestReconcile = Effect.suspend(() =>
+    mutate(reconcile()).pipe(Effect.forkIn(hostScope), Effect.asVoid),
+  );
+
   /** Runs one process to its end, then settles into backoff, back to standby, or quarantine. */
   const cycle = Effect.fn("PluginHost.cycle")(function* (
     slot: Slot,
@@ -350,6 +445,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
     yield* withdraw(slot);
     if (slot.failures >= options.maxFailures) {
       yield* setState(slot, { _tag: "quarantined", failures: slot.failures, reason });
+      yield* requestReconcile;
       return;
     }
     const delay = Math.min(restartBackoffMs * 2 ** (slot.failures - 1), maxRestartBackoffMs);
@@ -365,7 +461,12 @@ export const make = Effect.fn("PluginHost.make")(function* (
   });
 
   /** Starts the process on the first call; concurrent first calls wait for the same start. */
-  const ensureRunning = Effect.fn("PluginHost.ensureRunning")(function* (slot: Slot) {
+  const ensureRunning = Effect.fn("PluginHost.ensureRunning")(function* (
+    slot: Slot,
+  ): Effect.fn.Return<
+    { readonly process: PluginProcess; readonly registration: PluginRegistration },
+    PluginHostError
+  > {
     return yield* slot.startLock.withPermits(1)(
       Effect.gen(function* () {
         const { scope, registration } = slot;
@@ -393,12 +494,6 @@ export const make = Effect.fn("PluginHost.make")(function* (
     );
   });
 
-  const eligible = (slot: Slot) =>
-    slot.enabled &&
-    slot.consent === "granted" &&
-    slot.problem === undefined &&
-    slot.registration !== undefined;
-
   /** Offers the plugin's views and commands; the process starts on the first call. */
   const start = Effect.fn("PluginHost.start")(function* (slot: Slot) {
     const registration = slot.registration;
@@ -407,7 +502,9 @@ export const make = Effect.fn("PluginHost.make")(function* (
     const scope = yield* Scope.fork(hostScope, "sequential");
     slot.scope = scope;
     slot.failures = 0;
+    slot.waitingFor = [];
     slot.generation += 1;
+    options.onTransition?.(slot.id, "start");
     yield* offer(slot, registration, scope);
     yield* setState(slot, { _tag: "standby" });
   });
@@ -416,7 +513,10 @@ export const make = Effect.fn("PluginHost.make")(function* (
     const scope = slot.scope;
     slot.scope = undefined;
     slot.offer = undefined;
-    if (scope !== undefined) yield* Scope.close(scope, Exit.void);
+    if (scope !== undefined) {
+      options.onTransition?.(slot.id, "stop");
+      yield* Scope.close(scope, Exit.void);
+    }
     yield* delivery.discard(slot.viewFiles.values());
     slot.viewFiles.clear();
     yield* setState(slot, { _tag: "idle" });
@@ -463,6 +563,9 @@ export const make = Effect.fn("PluginHost.make")(function* (
     scope: undefined,
     offer: undefined,
     viewFiles: new Map(),
+    suspended: false,
+    waitingFor: [],
+    conflict: undefined,
     startLock: Semaphore.makeUnsafe(1),
     settingValues: {},
     views: [],
@@ -523,6 +626,8 @@ export const make = Effect.fn("PluginHost.make")(function* (
     handler: string,
     input: Json,
   ) {
+    // Service methods are reached through `context.services`, which checks the caller's dependencies.
+    if (handler.startsWith("service:")) return yield* fail("not-found", handler);
     const { process } = yield* ensureRunning(slot);
     if (!process.handlers.includes(handler)) return yield* fail("not-found", handler);
     return yield* process
@@ -576,13 +681,146 @@ export const make = Effect.fn("PluginHost.make")(function* (
     yield* emit;
   });
 
+  /**
+   * The one place plugins start and stop. It settles which plugins should be active: those that
+   * want to run and whose injected services are all provided by plugins that should be active
+   * and are not quarantined. It then stops the others, dependents before their providers, and
+   * starts the rest, providers before their dependents. Callers hold the management lock.
+   */
+  const reconcile = Effect.fn("PluginHost.reconcile")(function* () {
+    if (!hostEnabled) return;
+    const all = [...slots.values()];
+    const owners = serviceOwners(claims);
+    for (const slot of all) {
+      const taken = providedServices(slot)
+        .map((name) => ({ name, owner: owners.get(name) }))
+        .find((candidate) => candidate.owner !== undefined && candidate.owner !== slot);
+      slot.conflict =
+        claims(slot) && taken?.owner !== undefined
+          ? `the service ${taken.name} is already provided by ${taken.owner.id}.`
+          : undefined;
+    }
+    const candidates = all.filter((slot) => claims(slot) && slot.conflict === undefined);
+    const active = new Set<Slot>();
+    const provides = (name: string, dependent: Slot) => {
+      const provider = owners.get(name);
+      return (
+        provider !== undefined &&
+        provider !== dependent &&
+        active.has(provider) &&
+        provider.state._tag !== "quarantined"
+      );
+    };
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const slot of candidates)
+        if (!active.has(slot) && injectedServices(slot).every((name) => provides(name, slot))) {
+          active.add(slot);
+          changed = true;
+        }
+    }
+
+    const ranks = dependencyRanks(all);
+    const byRank = (direction: 1 | -1) => (left: Slot, right: Slot) =>
+      direction * ((ranks.get(left) ?? 0) - (ranks.get(right) ?? 0));
+    for (const slot of all
+      .filter((candidate) => candidate.scope !== undefined && !active.has(candidate))
+      .toSorted(byRank(-1)))
+      yield* stop(slot);
+    for (const slot of [...active]
+      .filter((candidate) => candidate.scope === undefined)
+      .toSorted(byRank(1)))
+      yield* start(slot);
+
+    const cycleFrom = (start: Slot) => {
+      const walk = (slot: Slot, path: ReadonlyArray<Slot>): ReadonlyArray<Slot> | undefined => {
+        for (const name of injectedServices(slot)) {
+          const next = owners.get(name);
+          if (next === undefined || active.has(next) || !candidates.includes(next)) continue;
+          if (next === start) return [...path, slot];
+          if (path.includes(next) || next === slot) continue;
+          const found = walk(next, [...path, slot]);
+          if (found !== undefined) return found;
+        }
+        return undefined;
+      };
+      return walk(start, []);
+    };
+    for (const slot of all.filter((candidate) => !active.has(candidate))) {
+      if (candidates.includes(slot)) {
+        slot.waitingFor = injectedServices(slot).filter((name) => !provides(name, slot));
+        const cycle = cycleFrom(slot);
+        yield* setState(slot, {
+          _tag: "waiting",
+          reason:
+            cycle === undefined
+              ? `waiting for ${slot.waitingFor.join(", ")}`
+              : `dependency cycle: ${[...cycle, slot].map((member) => member.id).join(" → ")}`,
+        });
+      } else {
+        slot.waitingFor = [];
+        if (slot.state._tag !== "idle") yield* setState(slot, { _tag: "idle" });
+      }
+    }
+    yield* emit;
+  });
+
+  /** How deep each plugin sits in the dependency graph: 0 without plugin dependencies, else one more than its deepest provider. */
+  const dependencyRanks = (all: ReadonlyArray<Slot>) => {
+    const owners = serviceOwners(
+      (slot) => slot.registration !== undefined && (claims(slot) || slot.scope !== undefined),
+    );
+    const ranks = new Map<Slot, number>();
+    const rank = (slot: Slot, visiting: ReadonlySet<Slot>): number => {
+      const known = ranks.get(slot);
+      if (known !== undefined) return known;
+      const depth = Math.max(
+        -1,
+        ...injectedServices(slot).flatMap((name) => {
+          const provider = owners.get(name);
+          return provider === undefined || provider === slot || visiting.has(provider)
+            ? []
+            : [rank(provider, new Set([...visiting, slot]))];
+        }),
+      );
+      ranks.set(slot, depth + 1);
+      return depth + 1;
+    };
+    for (const slot of all) rank(slot, new Set());
+    return ranks;
+  };
+
+  /** Takes a plugin and everything that depends on it down, runs `change`, and lets reconciliation bring them back. */
+  const restarting = <A, E>(slot: Slot, change: Effect.Effect<A, E>) =>
+    Effect.gen(function* () {
+      slot.suspended = true;
+      yield* reconcile();
+      return yield* change;
+    }).pipe(
+      Effect.ensuring(
+        Effect.suspend(() => {
+          slot.suspended = false;
+          return reconcile();
+        }),
+      ),
+    );
+
   const remove = Effect.fn("PluginHost.remove")(function* (slot: Slot) {
-    yield* stop(slot);
+    slot.suspended = true;
+    yield* reconcile();
     slots.delete(slot.id);
-    yield* persistRegistry.pipe(Effect.tapError(() => Effect.sync(() => slots.set(slot.id, slot))));
+    yield* persistRegistry.pipe(
+      Effect.tapError(() =>
+        Effect.sync(() => {
+          slot.suspended = false;
+          slots.set(slot.id, slot);
+        }),
+      ),
+    );
     const { [slot.id]: _removed, ...rest } = consent;
     consent = rest;
     yield* store.writeConsent(consent).pipe(Effect.ignore);
+    yield* reconcile();
     yield* emit;
   });
 
@@ -590,6 +828,15 @@ export const make = Effect.fn("PluginHost.make")(function* (
     const registration = slot.registration;
     if (registration === undefined || slot.problem !== undefined)
       return yield* fail("invalid-plugin", slot.problem);
+    const owners = serviceOwners((other) => other !== slot && claims(other));
+    for (const name of providedServices(slot)) {
+      const owner = owners.get(name);
+      if (owner !== undefined)
+        return yield* fail(
+          "service-conflict",
+          `the service ${name} is already provided by ${owner.id}.`,
+        );
+    }
     if (slot.consent !== "granted") {
       if (!grantConsent) return yield* fail("consent-required", slot.id);
       const next = { ...consent, [slot.id]: registration.digest };
@@ -601,46 +848,44 @@ export const make = Effect.fn("PluginHost.make")(function* (
     }
     slot.enabled = true;
     yield* persistRegistry.pipe(Effect.tapError(() => Effect.sync(() => (slot.enabled = false))));
-    yield* start(slot);
-    yield* emit;
+    yield* reconcile();
   });
 
   const disable = Effect.fn("PluginHost.disable")(function* (slot: Slot) {
-    yield* stop(slot);
     slot.enabled = false;
-    yield* persistRegistry;
-    yield* emit;
+    yield* persistRegistry.pipe(Effect.tapError(() => Effect.sync(() => (slot.enabled = true))));
+    yield* reconcile();
   });
 
   const reload = Effect.fn("PluginHost.reload")(function* (slot: Slot) {
-    yield* stop(slot);
-    yield* refresh(slot);
-    yield* start(slot);
-    yield* emit;
+    yield* restarting(slot, refresh(slot));
   });
 
   const resume = Effect.fn("PluginHost.resume")(function* (slot: Slot) {
     if (!eligible(slot)) return yield* fail("not-running", slot.id);
-    yield* stop(slot);
-    yield* start(slot);
+    yield* restarting(slot, Effect.void);
   });
 
   const activateAll = Effect.fn("PluginHost.activateAll")(function* () {
     consent = yield* store.readConsent.pipe(Effect.orElseSucceed(() => ({})));
     yield* delivery.sweep;
-    for (const slot of slots.values()) {
-      yield* refresh(slot);
-      yield* start(slot);
-    }
-    yield* emit;
+    for (const slot of slots.values()) yield* refresh(slot);
+    yield* reconcile();
   });
 
-  /** Stops every plugin and forgets what was parsed, so a closed switch leaves nothing loaded. */
-  const deactivateAll = Effect.fn("PluginHost.deactivateAll")(function* () {
-    for (const slot of slots.values()) {
+  /** Stops every plugin, dependents first, and forgets what was parsed, so a closed switch leaves nothing loaded. */
+  const deactivateAll = Effect.fn("PluginHost.deactivateAll")(function* (
+    ranks: ReadonlyMap<Slot, number>,
+  ) {
+    const all = [...slots.values()];
+    for (const slot of all.toSorted(
+      (left, right) => (ranks.get(right) ?? 0) - (ranks.get(left) ?? 0),
+    )) {
       yield* stop(slot);
       slot.registration = undefined;
       slot.problem = undefined;
+      slot.conflict = undefined;
+      slot.waitingFor = [];
       slot.consent = "required";
       slot.settingValues = {};
     }
@@ -649,6 +894,8 @@ export const make = Effect.fn("PluginHost.make")(function* (
 
   const setHostEnabled = Effect.fn("PluginHost.setHostEnabled")(function* (enabled: boolean) {
     if (enabled === hostEnabled) return;
+    // The dependency order comes from the manifests, which are forgotten once the switch is off.
+    const ranks = dependencyRanks([...slots.values()]);
     hostEnabled = enabled;
     yield* persistRegistry.pipe(
       Effect.tapError(() =>
@@ -657,7 +904,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
         }),
       ),
     );
-    yield* enabled ? activateAll() : deactivateAll();
+    yield* enabled ? activateAll() : deactivateAll(ranks);
   });
 
   const none = Effect.succeed({ value: null } satisfies PluginHostCallResult);
