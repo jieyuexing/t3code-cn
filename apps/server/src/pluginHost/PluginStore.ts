@@ -58,7 +58,10 @@ export const makePluginStore = Effect.fn("PluginStore.make")(function* (stateDir
       yield* fs.writeFileString(temporary, `${encodeJson(value)}\n`);
       yield* fs.rename(temporary, file);
     },
-    Effect.mapError((cause) => new PluginStoreError({ file: path.basename(file), cause })),
+    (effect, file) =>
+      effect.pipe(
+        Effect.mapError((cause) => new PluginStoreError({ file: path.basename(file), cause })),
+      ),
   );
 
   const readRegistry = readJson(registryPath).pipe(
