@@ -8,10 +8,9 @@ import { PluginViewFrame } from "./PluginViewFrame";
 import { useCanCallPluginHost, usePluginHostSnapshot } from "./usePluginHost";
 
 /**
- * The tab's content. The frame is mounted for the generation the view had when it first appeared.
- * A view that leaves the snapshot, or reappears under a newer generation, unmounts it and shows
- * the unavailable state; the same generation coming back (a crashed plugin after its backoff)
- * mounts it again, a newer one needs the tab closed and opened again.
+ * The tab's content. A view that leaves the snapshot unmounts the frame and shows the unavailable
+ * state; when it comes back the frame mounts again, a fresh page for a newer generation (the
+ * plugin reloaded or was re-enabled), the same page key for a crashed plugin after its backoff.
  */
 export function PluginViewPanel(props: {
   readonly surface: Extract<RightPanelSurface, { kind: "plugin" }>;
@@ -23,18 +22,15 @@ export function PluginViewPanel(props: {
   const navigate = useNavigate();
   const canCall = useCanCallPluginHost(environmentId);
   const { snapshot, failed } = usePluginHostSnapshot(environmentId);
-  const [mountedGeneration, setMountedGeneration] = useState<number | null>(null);
   const [reloads, setReloads] = useState(0);
   const view =
     snapshot?.views.find(
       (candidate) => candidate.pluginId === surface.pluginId && candidate.viewId === surface.viewId,
     ) ?? null;
-  if (mountedGeneration === null && view !== null) setMountedGeneration(view.generation);
 
   const settled = snapshot !== null || failed;
-  const available = view !== null && view.generation === mountedGeneration;
   if (!settled) return null;
-  if (!available) {
+  if (view === null) {
     return (
       <div className="flex size-full flex-col items-start justify-center gap-3 px-4 text-sm text-muted-foreground">
         <p>{`Plugin "${surface.title}" is unavailable (disabled or quarantined).`}</p>

@@ -96,10 +96,19 @@ export function usePluginPaletteItems(
             },
           });
           if (result._tag === "Success") {
+            // Every run gets feedback; a plugin that returns nothing still ran.
             const value = result.value.value;
-            if (typeof value === "string") {
-              toastManager.add({ type: "info", title: command.title, description: value });
-            }
+            const description =
+              value === null || value === undefined
+                ? undefined
+                : typeof value === "string"
+                  ? value
+                  : JSON.stringify(value).slice(0, 300);
+            toastManager.add({
+              type: "info",
+              title: command.title,
+              ...(description === undefined ? {} : { description }),
+            });
           } else if (!isAtomCommandInterrupted(result)) {
             toastManager.add({
               type: "error",

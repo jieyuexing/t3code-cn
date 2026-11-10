@@ -63,22 +63,23 @@ const panel = (visible: boolean, onCloseSurface = vi.fn()) => (
   />
 );
 
-it("mounts the page while visible and unmounts it when the view's generation changes", async () => {
+it("mounts a fresh page when the plugin comes back under a newer generation", async () => {
   setup(1);
   await using screen = await render(panel(true), { router: "/" });
   await expect.element(screen.getByTestId("frame")).toHaveTextContent("frame generation 1");
 
-  setup(2);
+  // Disabled: the page goes away.
+  setup(null);
   await screen.rerender(panel(true));
   await expect
     .element(screen.getByText('Plugin "Echo Clock" is unavailable', { exact: false }))
     .toBeVisible();
   expect(screen.container.querySelector("[data-testid=frame]")).toBeNull();
 
-  // A newer generation does not mount by itself; the tab is closed and opened again.
-  setup(3);
+  // Re-enabled or reloaded: the tab recovers by itself with the new page.
+  setup(2);
   await screen.rerender(panel(true));
-  await expect.element(screen.getByText("is unavailable", { exact: false })).toBeVisible();
+  await expect.element(screen.getByTestId("frame")).toHaveTextContent("frame generation 2");
 });
 
 it("mounts the page again when the same generation comes back after the view left", async () => {

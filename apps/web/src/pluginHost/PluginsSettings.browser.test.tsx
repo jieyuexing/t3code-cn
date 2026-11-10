@@ -1,6 +1,7 @@
 import { PluginId, type PluginHostEntry, type PluginHostSnapshot } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
+import { userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
 import { render } from "../../test/render";
@@ -154,6 +155,17 @@ it("asks for consent again when the manifest changed under an enabled plugin", a
   await toggle.click();
   await expect.element(screen.getByText("Allow changed-plugin to run?")).toBeVisible();
   expect(fixture.actions).toEqual([]);
+});
+
+it("adds a folder when Enter is pressed in the path field", async () => {
+  setup();
+  await using screen = await render(settings, { router: "/" });
+  await screen.getByRole("button", { name: "Add local folder…" }).click();
+  await screen.getByRole("textbox", { name: "Plugin folder path" }).fill("/plugins/typed");
+  await userEvent.keyboard("{Enter}");
+  await vi.waitFor(() =>
+    expect(fixture.actions).toEqual([{ _tag: "add", path: "/plugins/typed" }]),
+  );
 });
 
 it("adds a folder by path and removes a plugin after confirmation", async () => {

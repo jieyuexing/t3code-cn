@@ -128,7 +128,13 @@ function PluginList(props: {
         }
       >
         {adding ? (
-          <div className="flex items-center gap-2 pb-2">
+          <form
+            className="flex items-center gap-2 pb-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (canManage && path.trim() !== "") void add();
+            }}
+          >
             <Input
               aria-label="Plugin folder path"
               placeholder="/path/to/plugin"
@@ -136,17 +142,13 @@ function PluginList(props: {
               value={path}
               onChange={(event) => setPath(event.target.value)}
             />
-            <Button
-              size="xs"
-              disabled={!canManage || path.trim() === ""}
-              onClick={() => void add()}
-            >
+            <Button size="xs" type="submit" disabled={!canManage || path.trim() === ""}>
               Add
             </Button>
-            <Button size="xs" variant="ghost" onClick={() => setAdding(false)}>
+            <Button size="xs" type="button" variant="ghost" onClick={() => setAdding(false)}>
               Cancel
             </Button>
-          </div>
+          </form>
         ) : null}
       </SettingsRow>
       {snapshot.plugins.map((plugin) => (

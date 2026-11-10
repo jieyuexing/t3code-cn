@@ -87,7 +87,7 @@ function Probe() {
   );
 }
 
-it("lists plugin commands and views in their own group, runs a command with its prefix and toasts a string result", async () => {
+it("lists plugin commands and views in their own group, runs a command with its prefix and toasts a string result as is", async () => {
   setup(true, "It is 12:00");
   await using screen = await render(<Probe />, { router: "/" });
   const group = screen.getByRole("region", { name: "Plugins" });
@@ -106,15 +106,18 @@ it("lists plugin commands and views in their own group, runs a command with its 
   expect(fixture.toasts[0]).toMatchObject({ title: "Echo the time", description: "It is 12:00" });
 });
 
-it("stays quiet for results that are not text, and the group goes with the plugin", async () => {
+it("summarizes results that are not text, and the group goes with the plugin", async () => {
   setup(true, { hello: "world" });
   await using screen = await render(<Probe />, { router: "/" });
   await screen
     .getByRole("region", { name: "Plugins" })
     .getByRole("button", { name: "Echo the time · Echo Clock" })
     .click();
-  await vi.waitFor(() => expect(fixture.calls).toHaveLength(1));
-  expect(fixture.toasts).toEqual([]);
+  await vi.waitFor(() => expect(fixture.toasts).toHaveLength(1));
+  expect(fixture.toasts[0]).toMatchObject({
+    title: "Echo the time",
+    description: '{"hello":"world"}',
+  });
 
   setup(false);
   await screen.rerender(<Probe />);
