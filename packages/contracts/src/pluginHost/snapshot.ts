@@ -59,6 +59,7 @@ export const PluginHostEntry = Schema.Struct({
           title: Schema.optionalKey(Schema.String),
           description: Schema.optionalKey(Schema.String),
           readOnly: Schema.optionalKey(Schema.Boolean),
+          agent: Schema.optionalKey(Schema.Boolean),
         }),
       ),
     }),

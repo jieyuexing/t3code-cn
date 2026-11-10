@@ -1,17 +1,12 @@
 // Each plugin owns a Scope that holds everything it registered, in the manner of Cordis contexts:
 // closing it stops the process and withdraws the views and commands, so nothing outlives a disable or reload.
 import {
-  PLUGIN_HOST_SERVICE_NAMES,
   PluginHostError,
   type PluginHostCallInput,
   type PluginHostCallResult,
-  type PluginHostCommand,
-  type PluginHostEntry,
   type PluginHostSnapshot,
   type PluginHostState,
-  type PluginHostView,
   type PluginId,
-  type PluginSettingField,
   type PluginSettingValue,
 } from "@t3tools/contracts";
 import { resolveSelfInvocation, selfInvocationArgs } from "@t3tools/shared/nodeRuntime";
@@ -32,16 +27,26 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import { ServerConfig } from "../config.ts";
-import {
-  HostCallInput,
-  jsonBytes,
-  ServiceCallInput,
-  serviceHandler,
-  type Json,
-  type PluginDataFile,
-} from "./PluginIpc.ts";
+import { HostCallInput, jsonBytes, type Json, type PluginDataFile } from "./PluginIpc.ts";
 import { loadPluginDirectory, type PluginRegistration } from "./PluginManifestLoader.ts";
 import { spawnPluginProcess, type PluginProcess } from "./PluginProcess.ts";
+import {
+  applyReconcilePlan,
+  dependencyRanks,
+  planReconcile,
+  serviceOwners,
+} from "./PluginReconcile.ts";
+import { buildSnapshot } from "./PluginSnapshot.ts";
+import { resolveSettings, settingProblem } from "./PluginSettings.ts";
+import { makeServiceCalls, type AgentServiceMethod } from "./PluginServiceCall.ts";
+import {
+  eligible,
+  fail,
+  injectedServices,
+  makeSlot,
+  providedServices,
+  type Slot,
+} from "./PluginSlot.ts";
 import { makePluginStore, type PluginStore, type RegistryRecord } from "./PluginStore.ts";
 import {
   issueViewUrl,
@@ -79,74 +84,19 @@ export class PluginHost extends Context.Service<
     readonly call: (
       input: PluginHostCallInput,
     ) => Effect.Effect<PluginHostCallResult, PluginHostError>;
+    /** The service methods agents may call right now. */
+    readonly agentMethods: Effect.Effect<ReadonlyArray<AgentServiceMethod>>;
+    readonly callAgentService: (request: {
+      readonly service: string;
+      readonly method: string;
+      readonly input: Json;
+    }) => Effect.Effect<Json, PluginHostError>;
   }
 >()("t3/pluginHost/PluginHost") {}
 
-interface Slot {
-  readonly id: PluginId;
-  path: string;
-  enabled: boolean;
-  registration: PluginRegistration | undefined;
-  problem: string | undefined;
-  consent: "granted" | "required";
-  generation: number;
-  state: PluginHostState;
-  /** Consecutive process failures since the plugin was activated or last ran stably. */
-  failures: number;
-  running: PluginProcess | undefined;
-  /** Open while the plugin is active; closing it stops the process and withdraws everything. */
-  scope: Scope.Closeable | undefined;
-  /** Holds the offered views and commands; closed while the plugin cannot serve them. */
-  offer: Scope.Closeable | undefined;
-  /** The delivered copy of each offered view's page, by view id. */
-  readonly viewFiles: Map<string, string>;
-  /** Set while a reload or resume takes the plugin and its dependents down; reconciliation then leaves it off. */
-  suspended: boolean;
-  /** The injected services that are not available while the plugin is `waiting`. */
-  waitingFor: ReadonlyArray<string>;
-  /** Why another plugin's claim on a service keeps this one from starting. */
-  conflict: string | undefined;
-  /** Makes concurrent first calls share one process start. */
-  readonly startLock: Semaphore.Semaphore;
-  settingValues: Record<string, PluginSettingValue>;
-  readonly views: Array<Omit<PluginHostView, "generation">>;
-  readonly commands: Array<PluginHostCommand>;
-}
-
 const decodeHostCallInput = Schema.decodeUnknownEffect(HostCallInput);
-const decodeServiceCall = Schema.decodeUnknownEffect(ServiceCallInput);
-const RESERVED_SERVICES = new Set<string>(PLUGIN_HOST_SERVICE_NAMES);
 
 const LOG_LEVELS = { debug: "Debug", info: "Info", warn: "Warn", error: "Error" } as const;
-
-const fail = (reason: PluginHostError["reason"], detail?: string) =>
-  new PluginHostError({
-    reason,
-    ...(detail === undefined ? {} : { detail: detail.slice(0, 1000) }),
-  });
-
-const SETTING_VALUE_TYPES = { text: "string", boolean: "boolean", number: "number" } as const;
-
-const settingProblem = (field: PluginSettingField, value: PluginSettingValue) =>
-  typeof value === SETTING_VALUE_TYPES[field.type]
-    ? undefined
-    : `${field.key} must be a ${field.type}.`;
-
-const resolveSettings = (
-  fields: ReadonlyArray<PluginSettingField>,
-  saved: Readonly<Record<string, PluginSettingValue>>,
-) => {
-  const values: Record<string, PluginSettingValue> = {};
-  for (const field of fields) {
-    const candidate = saved[field.key];
-    const value =
-      candidate !== undefined && settingProblem(field, candidate) === undefined
-        ? candidate
-        : field.default;
-    if (value !== undefined) values[field.key] = value;
-  }
-  return values;
-};
 
 export const make = Effect.fn("PluginHost.make")(function* (
   overrides: Partial<PluginHostOptions> & PluginViewDeliveryOptions & { readonly stateDir: string },
@@ -191,85 +141,13 @@ export const make = Effect.fn("PluginHost.make")(function* (
     services: [],
   });
 
-  const entryOf = (slot: Slot): PluginHostEntry => {
-    const registration = slot.registration;
-    const problem = slot.problem ?? slot.conflict;
-    return {
-      id: slot.id,
-      name: registration?.manifest.name ?? slot.id,
-      version: registration?.manifest.version ?? "",
-      directory: registration?.directory ?? slot.path,
-      enabled: slot.enabled,
-      consent: slot.consent,
-      digest: registration?.digest ?? "",
-      capabilities: registration?.manifest.capabilities ?? [],
-      generation: slot.generation,
-      state: slot.state,
-      ...(slot.running?.pid === undefined ? {} : { pid: slot.running.pid }),
-      ...(problem === undefined ? {} : { problem }),
-      ignoredFields: registration?.ignored ?? [],
-      rejectedViews: registration?.rejectedViews ?? [],
-      settings: registration?.manifest.settings ?? [],
-      settingValues: slot.settingValues,
-      provides: (registration?.manifest.provides ?? []).map((service) => ({
-        name: service.name,
-        methods: service.methods.map(({ name, title, description, readOnly }) => ({
-          name,
-          ...(title === undefined ? {} : { title }),
-          ...(description === undefined ? {} : { description }),
-          ...(readOnly === undefined ? {} : { readOnly }),
-        })),
-      })),
-      waitingFor: slot.waitingFor,
-    };
-  };
-
-  const injectedServices = (slot: Slot) =>
-    (slot.registration?.manifest.inject ?? []).filter((name) => !RESERVED_SERVICES.has(name));
-  const providedServices = (slot: Slot) =>
-    (slot.registration?.manifest.provides ?? []).map((service) => service.name);
-
-  const eligible = (slot: Slot) =>
-    slot.enabled &&
-    slot.consent === "granted" &&
-    slot.problem === undefined &&
-    slot.registration !== undefined;
-
   /** Plugins that want to run: eligible and not held down by a reload. */
   const claims = (slot: Slot) => hostEnabled && !slot.suspended && eligible(slot);
+  const owners = (include: (slot: Slot) => boolean) => serviceOwners(slots.values(), include);
 
-  /** The first plugin of `include` to declare each service name; a service has one provider. */
-  const serviceOwners = (include: (slot: Slot) => boolean) => {
-    const owners = new Map<string, Slot>();
-    for (const slot of slots.values())
-      if (include(slot))
-        for (const name of providedServices(slot)) if (!owners.has(name)) owners.set(name, slot);
-    return owners;
-  };
-
-  /** A provider's service is available while its scope is open, even if its process crashed, unless it is quarantined. */
-  const serviceAvailable = (provider: Slot) =>
-    provider.scope !== undefined && provider.state._tag !== "quarantined";
-
-  const emit = Effect.suspend(() => {
-    const active = hostEnabled ? [...slots.values()] : [];
-    return SubscriptionRef.set(snapshotRef, {
-      hostEnabled,
-      registered: slots.size,
-      services: hostEnabled
-        ? [...serviceOwners(claims)].map(([name, provider]) => ({
-            name,
-            provider: provider.id,
-            available: serviceAvailable(provider),
-          }))
-        : [],
-      plugins: active.map(entryOf),
-      views: active.flatMap((slot) =>
-        slot.views.map((view) => ({ ...view, generation: slot.generation })),
-      ),
-      commands: active.flatMap((slot) => slot.commands),
-    });
-  });
+  const emit = Effect.suspend(() =>
+    SubscriptionRef.set(snapshotRef, buildSnapshot({ slots, hostEnabled, claims })),
+  );
 
   const setState = (slot: Slot, state: PluginHostState) =>
     Effect.suspend(() => {
@@ -294,28 +172,11 @@ export const make = Effect.fn("PluginHost.make")(function* (
       .readData(slot.id)
       .pipe(Effect.orElseSucceed((): PluginDataFile => ({ settings: {}, storage: {} })));
 
-  /** Forwards a call from `caller` to a service method, after checking everything the host can check. */
-  const callService = Effect.fn("PluginHost.callService")(function* (caller: Slot, input: Json) {
-    const request = yield* decodeServiceCall(input).pipe(
-      Effect.mapError(() => "The request needs a service, a method and an input."),
-    );
-    const { service, method } = request;
-    if (!injectedServices(caller).includes(service))
-      return yield* Effect.fail(`Plugin ${caller.id} does not declare a dependency on ${service}.`);
-    const provider = serviceOwners(claims).get(service);
-    if (provider === undefined || !serviceAvailable(provider))
-      return yield* Effect.fail(`The service ${service} is not available.`);
-    const declared = provider.registration?.manifest.provides
-      .find((candidate) => candidate.name === service)
-      ?.methods.some((candidate) => candidate.name === method);
-    if (declared !== true)
-      return yield* Effect.fail(`The service ${service} has no method ${method}.`);
-    const { process } = yield* ensureRunning(provider).pipe(
-      Effect.mapError((error) => `${service} (${provider.id}): ${error.message}`),
-    );
-    return yield* process
-      .invoke(serviceHandler(service, method), { input: request.input, caller: caller.id })
-      .pipe(Effect.mapError((error) => `${service}.${method}: ${error.message}`));
+  const serviceCalls = makeServiceCalls({
+    slots: () => slots.values(),
+    hostEnabled: () => hostEnabled,
+    claims,
+    ensureRunning: (slot) => ensureRunning(slot),
   });
 
   const serveHostCall = (slot: Slot) =>
@@ -323,7 +184,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
       method: "settings.get" | "storage.get" | "storage.set" | "service.call",
       input: Json,
     ) {
-      if (method === "service.call") return yield* callService(slot, input);
+      if (method === "service.call") return yield* serviceCalls.callFromPlugin(slot, input);
       const request = yield* decodeHostCallInput(input).pipe(
         Effect.mapError(() => "The request needs a key."),
       );
@@ -549,29 +410,6 @@ export const make = Effect.fn("PluginHost.make")(function* (
     );
   });
 
-  const makeSlot = (record: RegistryRecord): Slot => ({
-    id: record.id,
-    path: record.path,
-    enabled: record.enabled,
-    registration: undefined,
-    problem: undefined,
-    consent: "required",
-    generation: 0,
-    state: { _tag: "idle" },
-    failures: 0,
-    running: undefined,
-    scope: undefined,
-    offer: undefined,
-    viewFiles: new Map(),
-    suspended: false,
-    waitingFor: [],
-    conflict: undefined,
-    startLock: Semaphore.makeUnsafe(1),
-    settingValues: {},
-    views: [],
-    commands: [],
-  });
-
   const persistRegistry = Effect.suspend(() =>
     registryProblem === undefined
       ? store
@@ -682,113 +520,18 @@ export const make = Effect.fn("PluginHost.make")(function* (
   });
 
   /**
-   * The one place plugins start and stop. It settles which plugins should be active: those that
-   * want to run and whose injected services are all provided by plugins that should be active
-   * and are not quarantined. It then stops the others, dependents before their providers, and
-   * starts the rest, providers before their dependents. Callers hold the management lock.
+   * The one place plugins start and stop (see PluginReconcile.ts for how it settles who should be
+   * active). Callers hold the management lock.
    */
   const reconcile = Effect.fn("PluginHost.reconcile")(function* () {
     if (!hostEnabled) return;
-    const all = [...slots.values()];
-    const owners = serviceOwners(claims);
-    for (const slot of all) {
-      const taken = providedServices(slot)
-        .map((name) => ({ name, owner: owners.get(name) }))
-        .find((candidate) => candidate.owner !== undefined && candidate.owner !== slot);
-      slot.conflict =
-        claims(slot) && taken?.owner !== undefined
-          ? `the service ${taken.name} is already provided by ${taken.owner.id}.`
-          : undefined;
-    }
-    const candidates = all.filter((slot) => claims(slot) && slot.conflict === undefined);
-    const active = new Set<Slot>();
-    const provides = (name: string, dependent: Slot) => {
-      const provider = owners.get(name);
-      return (
-        provider !== undefined &&
-        provider !== dependent &&
-        active.has(provider) &&
-        provider.state._tag !== "quarantined"
-      );
-    };
-    for (let changed = true; changed;) {
-      changed = false;
-      for (const slot of candidates)
-        if (!active.has(slot) && injectedServices(slot).every((name) => provides(name, slot))) {
-          active.add(slot);
-          changed = true;
-        }
-    }
-
-    const ranks = dependencyRanks(all);
-    const byRank = (direction: 1 | -1) => (left: Slot, right: Slot) =>
-      direction * ((ranks.get(left) ?? 0) - (ranks.get(right) ?? 0));
-    for (const slot of all
-      .filter((candidate) => candidate.scope !== undefined && !active.has(candidate))
-      .toSorted(byRank(-1)))
-      yield* stop(slot);
-    for (const slot of [...active]
-      .filter((candidate) => candidate.scope === undefined)
-      .toSorted(byRank(1)))
-      yield* start(slot);
-
-    const cycleFrom = (start: Slot) => {
-      const walk = (slot: Slot, path: ReadonlyArray<Slot>): ReadonlyArray<Slot> | undefined => {
-        for (const name of injectedServices(slot)) {
-          const next = owners.get(name);
-          if (next === undefined || active.has(next) || !candidates.includes(next)) continue;
-          if (next === start) return [...path, slot];
-          if (path.includes(next) || next === slot) continue;
-          const found = walk(next, [...path, slot]);
-          if (found !== undefined) return found;
-        }
-        return undefined;
-      };
-      return walk(start, []);
-    };
-    for (const slot of all.filter((candidate) => !active.has(candidate))) {
-      if (candidates.includes(slot)) {
-        slot.waitingFor = injectedServices(slot).filter((name) => !provides(name, slot));
-        const cycle = cycleFrom(slot);
-        yield* setState(slot, {
-          _tag: "waiting",
-          reason:
-            cycle === undefined
-              ? `waiting for ${slot.waitingFor.join(", ")}`
-              : `dependency cycle: ${[...cycle, slot].map((member) => member.id).join(" → ")}`,
-        });
-      } else {
-        slot.waitingFor = [];
-        if (slot.state._tag !== "idle") yield* setState(slot, { _tag: "idle" });
-      }
-    }
-    yield* emit;
+    yield* applyReconcilePlan(planReconcile([...slots.values()], claims), {
+      stop,
+      start,
+      setState,
+      emit,
+    });
   });
-
-  /** How deep each plugin sits in the dependency graph: 0 without plugin dependencies, else one more than its deepest provider. */
-  const dependencyRanks = (all: ReadonlyArray<Slot>) => {
-    const owners = serviceOwners(
-      (slot) => slot.registration !== undefined && (claims(slot) || slot.scope !== undefined),
-    );
-    const ranks = new Map<Slot, number>();
-    const rank = (slot: Slot, visiting: ReadonlySet<Slot>): number => {
-      const known = ranks.get(slot);
-      if (known !== undefined) return known;
-      const depth = Math.max(
-        -1,
-        ...injectedServices(slot).flatMap((name) => {
-          const provider = owners.get(name);
-          return provider === undefined || provider === slot || visiting.has(provider)
-            ? []
-            : [rank(provider, new Set([...visiting, slot]))];
-        }),
-      );
-      ranks.set(slot, depth + 1);
-      return depth + 1;
-    };
-    for (const slot of all) rank(slot, new Set());
-    return ranks;
-  };
 
   /** Takes a plugin and everything that depends on it down, runs `change`, and lets reconciliation bring them back. */
   const restarting = Effect.fn("PluginHost.restarting")(
@@ -830,9 +573,9 @@ export const make = Effect.fn("PluginHost.make")(function* (
     const registration = slot.registration;
     if (registration === undefined || slot.problem !== undefined)
       return yield* fail("invalid-plugin", slot.problem);
-    const owners = serviceOwners((other) => other !== slot && claims(other));
+    const taken = owners((other) => other !== slot && claims(other));
     for (const name of providedServices(slot)) {
-      const owner = owners.get(name);
+      const owner = taken.get(name);
       if (owner !== undefined)
         return yield* fail(
           "service-conflict",
@@ -897,7 +640,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
   const setHostEnabled = Effect.fn("PluginHost.setHostEnabled")(function* (enabled: boolean) {
     if (enabled === hostEnabled) return;
     // The dependency order comes from the manifests, which are forgotten once the switch is off.
-    const ranks = dependencyRanks([...slots.values()]);
+    const ranks = dependencyRanks([...slots.values()], claims);
     hostEnabled = enabled;
     yield* persistRegistry.pipe(
       Effect.tapError(() =>
@@ -979,6 +722,8 @@ export const make = Effect.fn("PluginHost.make")(function* (
   return PluginHost.of({
     subscribe: SubscriptionRef.changes(snapshotRef),
     call,
+    agentMethods: serviceCalls.agentMethods,
+    callAgentService: serviceCalls.callFromAgent,
   });
 });
 

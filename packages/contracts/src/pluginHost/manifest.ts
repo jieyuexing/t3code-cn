@@ -109,6 +109,8 @@ const PluginServiceMethod = Schema.Struct({
   input: Schema.optionalKey(Schema.Json),
   output: Schema.optionalKey(Schema.Json),
   readOnly: Schema.optionalKey(Schema.Boolean),
+  /** Whether agents may call the method through T3's MCP tools; off unless set. */
+  agent: Schema.optionalKey(Schema.Boolean),
 });
 
 const PluginServiceDeclaration = Schema.Struct({
