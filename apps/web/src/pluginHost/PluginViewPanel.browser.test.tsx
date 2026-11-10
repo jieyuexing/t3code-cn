@@ -74,10 +74,24 @@ it("mounts the page while visible and unmounts it when the view's generation cha
     .toBeVisible();
   expect(screen.container.querySelector("[data-testid=frame]")).toBeNull();
 
-  // It does not come back by itself; the tab is closed and opened again.
+  // A newer generation does not mount by itself; the tab is closed and opened again.
   setup(3);
   await screen.rerender(panel(true));
   await expect.element(screen.getByText("is unavailable", { exact: false })).toBeVisible();
+});
+
+it("mounts the page again when the same generation comes back after the view left", async () => {
+  setup(1);
+  await using screen = await render(panel(true), { router: "/" });
+  await expect.element(screen.getByTestId("frame")).toBeVisible();
+
+  setup(null);
+  await screen.rerender(panel(true));
+  await expect.element(screen.getByText("is unavailable", { exact: false })).toBeVisible();
+
+  setup(1);
+  await screen.rerender(panel(true));
+  await expect.element(screen.getByTestId("frame")).toHaveTextContent("frame generation 1");
 });
 
 it("shows the unavailable state when the view leaves the snapshot, with a way to close or open settings", async () => {

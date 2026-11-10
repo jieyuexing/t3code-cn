@@ -8,9 +8,10 @@ import { PluginViewFrame } from "./PluginViewFrame";
 import { useCanCallPluginHost, usePluginHostSnapshot } from "./usePluginHost";
 
 /**
- * The tab's content. The frame is mounted for the generation the view had when it first appeared;
- * a new generation or a view that left the snapshot unmounts it, and it stays unmounted until the
- * tab is closed and opened again.
+ * The tab's content. The frame is mounted for the generation the view had when it first appeared.
+ * A view that leaves the snapshot, or reappears under a newer generation, unmounts it and shows
+ * the unavailable state; the same generation coming back (a crashed plugin after its backoff)
+ * mounts it again, a newer one needs the tab closed and opened again.
  */
 export function PluginViewPanel(props: {
   readonly surface: Extract<RightPanelSurface, { kind: "plugin" }>;

@@ -53,6 +53,20 @@ describe("plugin tabs", () => {
     });
   });
 
+  it("keeps open plugin tabs across a reload of the saved panel state", async () => {
+    useRightPanelStore.getState().openPlugin(ref, { kind: "plugin", ...clock });
+    const { storage, name } = useRightPanelStore.persist.getOptions();
+    const persisted = await storage!.getItem(name!);
+    useRightPanelStore.setState(useRightPanelStore.getInitialState());
+    await storage!.setItem(name!, persisted!);
+    await useRightPanelStore.persist.rehydrate();
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, ref)).toEqual({
+      kind: "plugin",
+      id: "plugin:example.echo-clock:clock",
+      ...clock,
+    });
+  });
+
   it("drops saved history entries that lack a view", async () => {
     const { storage, name } = useClosedViewStore.persist.getOptions();
     await storage!.setItem(name!, {

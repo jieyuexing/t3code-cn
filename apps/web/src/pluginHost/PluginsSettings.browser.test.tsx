@@ -58,7 +58,7 @@ function setup(options: { hostEnabled?: boolean; canCall?: boolean } = {}) {
   fixture.canCall = options.canCall ?? true;
   fixture.snapshot = {
     hostEnabled: options.hostEnabled ?? true,
-    registered: 6,
+    registered: 7,
     plugins: [
       entry("standby-plugin", { state: { _tag: "standby" } }),
       entry("running-plugin", { state: { _tag: "running" }, pid: 48213 }),
@@ -74,6 +74,8 @@ function setup(options: { hostEnabled?: boolean; canCall?: boolean } = {}) {
         },
       }),
       entry("approval-plugin", { enabled: false, consent: "required", state: { _tag: "idle" } }),
+      // The manifest changed after it was enabled: still enabled, but the consent no longer holds.
+      entry("changed-plugin", { enabled: true, consent: "required", state: { _tag: "idle" } }),
       entry("rejected-plugin", {
         enabled: false,
         consent: "required",
@@ -135,6 +137,16 @@ it("asks for consent inside the list before enabling a plugin, and retries a qua
   );
 });
 
+it("asks for consent again when the manifest changed under an enabled plugin", async () => {
+  setup();
+  await using screen = await render(settings, { router: "/" });
+  const toggle = screen.getByRole("switch", { name: "Enable changed-plugin" });
+  await expect.element(toggle).not.toBeChecked();
+  await toggle.click();
+  await expect.element(screen.getByText("Allow changed-plugin to run?")).toBeVisible();
+  expect(fixture.actions).toEqual([]);
+});
+
 it("adds a folder by path and removes a plugin after confirmation", async () => {
   setup();
   await using screen = await render(settings, { router: "/" });
@@ -152,7 +164,7 @@ it("adds a folder by path and removes a plugin after confirmation", async () => 
 it("shows only the switch and the registered count while plugins are off", async () => {
   setup({ hostEnabled: false });
   await using screen = await render(settings, { router: "/" });
-  await expect.element(screen.getByText("6 registered")).toBeVisible();
+  await expect.element(screen.getByText("7 registered")).toBeVisible();
   expect(screen.container.querySelectorAll("[data-slot=settings-row]")).toHaveLength(1);
   await screen.getByRole("switch", { name: "Enable plugins" }).click();
   await vi.waitFor(() =>

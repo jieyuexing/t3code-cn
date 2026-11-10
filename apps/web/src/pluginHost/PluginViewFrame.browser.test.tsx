@@ -10,6 +10,7 @@ import { PluginViewFrame } from "./PluginViewFrame";
 const fixture = vi.hoisted(() => ({
   pageUrl: "",
   calls: [] as unknown[],
+  echoes: 0,
 }));
 
 vi.mock("../state/session", () => ({
@@ -27,7 +28,10 @@ vi.mock("./usePluginHost", () => ({
     }
     if (input.handler === "view:clock:now")
       return AsyncResult.success({ value: { text: "12:34:56" } });
-    return AsyncResult.success({ value: { echo: (input.input as { message: string }).message } });
+    fixture.echoes += 1;
+    return AsyncResult.success({
+      value: { echo: (input.input as { message: string }).message, n: fixture.echoes },
+    });
   },
 }));
 
@@ -38,6 +42,9 @@ const pluginId = PluginId.make("example.echo-clock");
 // extended with a script that clicks its button once enabled and reports what it shows.
 const OBSERVER = `<script>
   const report = (what, text) => parent.postMessage({ type: "test-observe", what, text }, "*");
+  window.addEventListener("message", (event) => {
+    if (event.source === parent && event.data?.type === "test-click") document.getElementById("echo").click();
+  });
   new MutationObserver(() => {
     const echo = document.getElementById("echo");
     if (!echo.disabled && !echo.dataset.clicked) {
@@ -52,6 +59,7 @@ const OBSERVER = `<script>
 
 function setup(html: string) {
   fixture.calls = [];
+  fixture.echoes = 0;
   const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
   fixture.pageUrl = url;
   const seen: string[] = [];
@@ -69,20 +77,19 @@ function setup(html: string) {
   };
 }
 
-const frame = (
-  <PluginViewFrame
-    environmentId={environmentId}
-    pluginId={pluginId}
-    viewId="clock"
-    title="Echo Clock"
-    generation={1}
-    onReload={() => {}}
-  />
-);
+const frameProps = {
+  environmentId,
+  pluginId,
+  viewId: "clock",
+  title: "Echo Clock",
+  generation: 1,
+  onReload: () => {},
+};
+const frame = <PluginViewFrame {...frameProps} />;
 
 it("hands the page a port, sends its calls to the host with the view prefix and returns the results", async () => {
   using observed = setup(echoClockView.replace("</body>", `${OBSERVER}</body>`));
-  await using _screen = await render(frame, { router: false });
+  await using screen = await render(frame, { router: false });
 
   // The page enables its button only after the host's `init`, so this proves the handshake.
   await vi.waitFor(() => expect(observed.seen).toContain("enabled:"));
@@ -94,7 +101,12 @@ it("hands the page a port, sends its calls to the host with the view prefix and 
     input: null,
   });
 
-  await vi.waitFor(() => expect(observed.seen).toContain('reply:{"echo":"hello"}'));
+  await vi.waitFor(() => expect(observed.seen).toContain('reply:{"echo":"hello","n":1}'));
+
+  // The port survives a re-render: a second call still gets its answer.
+  await screen.rerender(<PluginViewFrame {...frameProps} />);
+  screen.container.querySelector("iframe")?.contentWindow?.postMessage({ type: "test-click" }, "*");
+  await vi.waitFor(() => expect(observed.seen).toContain('reply:{"echo":"hello","n":2}'));
   expect(fixture.calls).toContainEqual({
     _tag: "invoke",
     pluginId,

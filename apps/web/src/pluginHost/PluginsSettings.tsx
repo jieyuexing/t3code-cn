@@ -265,7 +265,7 @@ function PluginRow(props: {
             Remove
           </Button>
           <Switch
-            checked={plugin.enabled}
+            checked={plugin.enabled && plugin.consent === "granted"}
             disabled={!canManage || plugin.problem !== undefined}
             aria-label={`Enable ${plugin.name}`}
             onCheckedChange={toggle}

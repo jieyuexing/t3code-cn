@@ -61,7 +61,9 @@ export function PluginViewFrame(props: {
   }, [call, httpBaseUrl, pluginId, viewId, generation]);
 
   // The page must announce itself within the timeout, or the view is shown as not started.
-  const attachFrame = (frame: HTMLIFrameElement | null) => {
+  // A ref callback whose identity changed would be detached and attached again on a re-render,
+  // closing the page's port, so it is held stable.
+  const attachFrame = useStableCallback((frame: HTMLIFrameElement | null) => {
     if (frame === null) return;
     const handshakeTimer = setTimeout(() => setState({ _tag: "silent" }), HANDSHAKE_TIMEOUT_MS);
     const detach = attachPluginViewBridge({
@@ -90,7 +92,7 @@ export function PluginViewFrame(props: {
       window.removeEventListener("message", clearHandshake);
       detach();
     };
-  };
+  });
 
   if (state._tag === "ready") {
     return (
