@@ -15,6 +15,8 @@ const Target = { pluginId: PluginId };
 
 /** Plugins run as trusted code, so every operation here needs the same scope as maintenance. */
 export const PluginHostCallInput = Schema.Union([
+  /** The environment-wide switch, off by default; while off, every other operation is refused. */
+  Schema.TaggedStruct("setHostEnabled", { enabled: Schema.Boolean }),
   Schema.TaggedStruct("invoke", {
     ...Target,
     handler: Schema.String.check(Schema.isMaxLength(128)),
@@ -46,6 +48,7 @@ export const PluginHostCallResult = Schema.Struct({ value: Schema.Json });
 export type PluginHostCallResult = typeof PluginHostCallResult.Type;
 
 export const PluginHostErrorReason = Schema.Literals([
+  "host-disabled",
   "not-found",
   "already-registered",
   "invalid-plugin",

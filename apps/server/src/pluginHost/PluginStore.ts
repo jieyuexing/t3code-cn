@@ -15,6 +15,12 @@ const RegistryRecord = Schema.Struct({
 export type RegistryRecord = typeof RegistryRecord.Type;
 
 const isRegistryRecord = Schema.is(RegistryRecord);
+const isRegistryFile = Schema.is(
+  Schema.Struct({
+    enabled: Schema.optionalKey(Schema.Boolean),
+    plugins: Schema.Array(Schema.Unknown),
+  }),
+);
 const isJsonObject = Schema.is(Schema.Record(Schema.String, Schema.String));
 const decodeData = Schema.decodeUnknownOption(PluginDataFile);
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -65,7 +71,11 @@ export const makePluginStore = Effect.fn("PluginStore.make")(function* (stateDir
   );
 
   const readRegistry = readJson(registryPath).pipe(
-    Effect.map((value) => (Array.isArray(value) ? value.filter(isRegistryRecord) : [])),
+    Effect.map((value) =>
+      isRegistryFile(value)
+        ? { enabled: value.enabled === true, plugins: value.plugins.filter(isRegistryRecord) }
+        : { enabled: false, plugins: [] },
+    ),
   );
 
   const readConsent = readJson(consentPath).pipe(
@@ -82,7 +92,10 @@ export const makePluginStore = Effect.fn("PluginStore.make")(function* (stateDir
 
   return {
     readRegistry,
-    writeRegistry: (records: ReadonlyArray<RegistryRecord>) => writeJson(registryPath, records),
+    writeRegistry: (registry: {
+      readonly enabled: boolean;
+      readonly plugins: ReadonlyArray<RegistryRecord>;
+    }) => writeJson(registryPath, registry),
     readConsent,
     writeConsent: (consent: Readonly<Record<string, string>>) => writeJson(consentPath, consent),
     readData,

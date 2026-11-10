@@ -213,7 +213,11 @@ const layerConfigSources = Layer.mergeAll(
 );
 
 interface PluginSnapshotShape {
-  readonly plugins: ReadonlyArray<{ readonly state: { readonly _tag: string } }>;
+  readonly hostEnabled: boolean;
+  readonly plugins: ReadonlyArray<{
+    readonly state: { readonly _tag: string };
+    readonly pid?: number;
+  }>;
   readonly views: ReadonlyArray<unknown>;
   readonly commands: ReadonlyArray<unknown>;
 }
@@ -301,23 +305,27 @@ it.live("plugin host: enable, invoke and disable through the websocket layer, ga
       };
     });
     const readOnly = yield* connect(["orchestration:read"]);
-    const denied = yield* readOnly.call({ _tag: "add", path: pluginDirectory });
+    const denied = yield* readOnly.call({ _tag: "setHostEnabled", enabled: true });
     assert.equal(denied._tag, "Failure");
 
     const client = yield* connect(["environment:maintain", "orchestration:read"]);
-    assert.deepEqual((yield* client.nextSnapshot).plugins, []);
+    const initial = yield* client.nextSnapshot;
+    assert.deepEqual([initial.hostEnabled, initial.plugins], [false, []]);
     const pluginId = "example.echo-clock";
+    assert.equal((yield* client.call({ _tag: "setHostEnabled", enabled: true }))._tag, "Success");
     assert.equal((yield* client.call({ _tag: "add", path: pluginDirectory }))._tag, "Success");
     assert.equal(
       (yield* client.call({ _tag: "enable", pluginId, grantConsent: true }))._tag,
       "Success",
     );
-    const running = yield* client.waitFor(
-      (snapshot) => snapshot.plugins[0]?.state._tag === "running",
+    const standby = yield* client.waitFor(
+      (snapshot) => snapshot.plugins[0]?.state._tag === "standby",
     );
-    assert.equal(running.views.length, 1);
-    assert.equal(running.commands.length, 1);
+    assert.equal(standby.views.length, 1);
+    assert.equal(standby.commands.length, 1);
+    assert.isUndefined(standby.plugins[0]?.pid);
 
+    // The first call starts the process; the call itself returns the echo.
     const echoed = yield* client.call({
       _tag: "invoke",
       pluginId,
@@ -325,6 +333,11 @@ it.live("plugin host: enable, invoke and disable through the websocket layer, ga
       input: { a: 1 },
     });
     assert.deepEqual(Exit.isSuccess(echoed) ? echoed.value : undefined, { value: { a: 1 } });
+    const running = yield* client.waitFor(
+      (snapshot) => snapshot.plugins[0]?.state._tag === "running",
+    );
+    assert.isNumber(running.plugins[0]?.pid);
+    assert.equal(running.views.length, 1);
 
     assert.equal((yield* client.call({ _tag: "disable", pluginId }))._tag, "Success");
     const stopped = yield* client.waitFor((snapshot) => snapshot.plugins[0]?.state._tag === "idle");
