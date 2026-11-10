@@ -31,6 +31,8 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Cause from "effect/Cause";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
@@ -1627,4 +1629,152 @@ it.effect("thread resume at its own high-water below the pruned boundary skips t
     // A snapshot load dies with "snapshot", so success means the resume replayed nothing.
     assert.isTrue(Exit.isSuccess(exit));
   }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
+);
+
+interface PluginSnapshotShape {
+  readonly plugins: ReadonlyArray<{ readonly state: { readonly _tag: string } }>;
+  readonly views: ReadonlyArray<unknown>;
+  readonly commands: ReadonlyArray<unknown>;
+}
+
+it.live("plugin host: enable, invoke and disable through the websocket layer, gated by scope", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-ws-" });
+    const pluginDirectory = path.join(root, "echo-clock");
+    yield* fs.copy(
+      `${import.meta.dirname}/../../../plugin-host-examples/echo-clock`,
+      pluginDirectory,
+    );
+    const host = yield* PluginHost.make({
+      stateDir: path.join(root, "state"),
+      command: process.execPath,
+      args: [`${import.meta.dirname}/pluginHost/child.mjs`],
+    });
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+      Layer.succeed(PluginHost.PluginHost, host),
+    );
+    const serverBrowser = yield* ServerBrowser.ServerBrowser;
+
+    const connect = Effect.fn("connect")(function* (
+      scopes: ReadonlyArray<"environment:maintain" | "orchestration:read">,
+    ) {
+      const snapshots = yield* Queue.unbounded<PluginSnapshotShape>();
+      const exits = yield* Queue.unbounded<Exit.Exit<{ readonly value: unknown }, unknown>>();
+      const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+        ...WS_RPC_SERVER_OPTIONS,
+        onFromServer: (response) =>
+          response._tag === "Chunk"
+            ? Effect.forEach(response.values, (value) => Queue.offer(snapshots, value as never), {
+                discard: true,
+              })
+            : response._tag === "Exit"
+              ? Queue.offer(exits, response.exit as never)
+              : Effect.void,
+      }).pipe(
+        Effect.provide(
+          layerWsRpc(
+            {
+              sessionId: AuthSessionId.make("plugin-host-test"),
+              subject: "plugin-host-test",
+              method: "browser-session-cookie",
+              scopes: [...scopes],
+            },
+            {},
+            serverBrowser,
+            () => Effect.void,
+            { secretReferences: true },
+          ).pipe(Layer.provide(services), Layer.merge(RpcAuthorization.layer([...scopes]))),
+        ),
+      );
+      const requestId = RpcMessage.RequestId("snapshots");
+      const acknowledge = server.write(0, { _tag: "Ack", requestId });
+      yield* server.write(0, {
+        _tag: "Request",
+        id: requestId,
+        tag: WS_METHODS.pluginHostSubscribe,
+        payload: {},
+        headers: Headers.empty,
+      });
+      let calls = 0;
+      const nextSnapshot = Queue.take(snapshots).pipe(Effect.tap(() => acknowledge));
+      return {
+        nextSnapshot,
+        waitFor: Effect.fn("waitFor")(function* (
+          predicate: (snapshot: PluginSnapshotShape) => boolean,
+        ) {
+          while (true) {
+            const snapshot = yield* nextSnapshot;
+            if (predicate(snapshot)) return snapshot;
+          }
+        }),
+        call: Effect.fn("call")(function* (payload: object) {
+          yield* server.write(0, {
+            _tag: "Request",
+            id: RpcMessage.RequestId(`call-${(calls += 1)}`),
+            tag: WS_METHODS.pluginHostCall,
+            payload,
+            headers: Headers.empty,
+          });
+          return yield* Queue.take(exits);
+        }),
+      };
+    });
+    const readOnly = yield* connect(["orchestration:read"]);
+    const denied = yield* readOnly.call({ _tag: "add", path: pluginDirectory });
+    assert.equal(denied._tag, "Failure");
+
+    const client = yield* connect(["environment:maintain", "orchestration:read"]);
+    assert.deepEqual((yield* client.nextSnapshot).plugins, []);
+    const pluginId = "example.echo-clock";
+    assert.equal((yield* client.call({ _tag: "add", path: pluginDirectory }))._tag, "Success");
+    assert.equal(
+      (yield* client.call({ _tag: "enable", pluginId, grantConsent: true }))._tag,
+      "Success",
+    );
+    const running = yield* client.waitFor(
+      (snapshot) => snapshot.plugins[0]?.state._tag === "running",
+    );
+    assert.equal(running.views.length, 1);
+    assert.equal(running.commands.length, 1);
+
+    const echoed = yield* client.call({
+      _tag: "invoke",
+      pluginId,
+      handler: "echo",
+      input: { a: 1 },
+    });
+    assert.deepEqual(Exit.isSuccess(echoed) ? echoed.value : undefined, { value: { a: 1 } });
+
+    assert.equal((yield* client.call({ _tag: "disable", pluginId }))._tag, "Success");
+    const stopped = yield* client.waitFor((snapshot) => snapshot.plugins[0]?.state._tag === "idle");
+    assert.deepEqual([stopped.views, stopped.commands], [[], []]);
+    const afterStop = yield* client.call({
+      _tag: "invoke",
+      pluginId,
+      handler: "echo",
+      input: null,
+    });
+    assert.equal(afterStop._tag, "Failure");
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
+  ),
 );
