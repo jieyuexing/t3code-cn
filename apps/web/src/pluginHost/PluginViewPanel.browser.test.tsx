@@ -1,0 +1,113 @@
+import { EnvironmentId, PluginId, type PluginHostSnapshot } from "@t3tools/contracts";
+import { expect, it, vi } from "vite-plus/test";
+
+import { render } from "../../test/render";
+import type { RightPanelSurface } from "../rightPanelStore";
+import { PluginViewPanel } from "./PluginViewPanel";
+
+const fixture = vi.hoisted(() => ({
+  snapshot: null as PluginHostSnapshot | null,
+  canCall: true,
+}));
+
+vi.mock("./usePluginHost", () => ({
+  usePluginHostSnapshot: () => ({ snapshot: fixture.snapshot, failed: false }),
+  useCanCallPluginHost: () => fixture.canCall,
+}));
+vi.mock("./PluginViewFrame", () => ({
+  PluginViewFrame: (props: { generation: number }) => (
+    <div data-testid="frame">{`frame generation ${props.generation}`}</div>
+  ),
+}));
+
+const environmentId = EnvironmentId.make("environment-a");
+const pluginId = PluginId.make("example.echo-clock");
+const surface: Extract<RightPanelSurface, { kind: "plugin" }> = {
+  id: "plugin:example.echo-clock:clock",
+  kind: "plugin",
+  pluginId,
+  viewId: "clock",
+  title: "Echo Clock",
+};
+
+function setup(generation: number | null, canCall = true) {
+  fixture.canCall = canCall;
+  fixture.snapshot = {
+    hostEnabled: true,
+    registered: 1,
+    plugins: [],
+    commands: [],
+    views:
+      generation === null
+        ? []
+        : [
+            {
+              pluginId,
+              pluginName: "Echo Clock",
+              generation,
+              viewId: "clock",
+              title: "Echo Clock",
+              placement: "side-panel",
+            },
+          ],
+  };
+}
+
+const panel = (visible: boolean, onCloseSurface = vi.fn()) => (
+  <PluginViewPanel
+    surface={surface}
+    environmentId={environmentId}
+    visible={visible}
+    onCloseSurface={onCloseSurface}
+  />
+);
+
+it("mounts the page while visible and unmounts it when the view's generation changes", async () => {
+  setup(1);
+  await using screen = await render(panel(true), { router: "/" });
+  await expect.element(screen.getByTestId("frame")).toHaveTextContent("frame generation 1");
+
+  setup(2);
+  await screen.rerender(panel(true));
+  await expect
+    .element(screen.getByText('Plugin "Echo Clock" is unavailable', { exact: false }))
+    .toBeVisible();
+  expect(screen.container.querySelector("[data-testid=frame]")).toBeNull();
+
+  // It does not come back by itself; the tab is closed and opened again.
+  setup(3);
+  await screen.rerender(panel(true));
+  await expect.element(screen.getByText("is unavailable", { exact: false })).toBeVisible();
+});
+
+it("shows the unavailable state when the view leaves the snapshot, with a way to close or open settings", async () => {
+  setup(1);
+  const onCloseSurface = vi.fn();
+  await using screen = await render(panel(true, onCloseSurface), { router: "/" });
+  await expect.element(screen.getByTestId("frame")).toBeVisible();
+
+  setup(null);
+  await screen.rerender(panel(true, onCloseSurface));
+  await screen.getByRole("button", { name: "Close this tab" }).click();
+  expect(onCloseSurface).toHaveBeenCalledWith(surface);
+
+  await screen.getByRole("button", { name: "Open plugin settings" }).click();
+  await vi.waitFor(() => {
+    expect(screen.router?.state.location.pathname).toBe("/settings/plugins");
+    expect(screen.router?.state.location.search).toEqual({ machine: environmentId });
+  });
+});
+
+it("keeps the page out of the document while the tab is hidden and without the grant", async () => {
+  setup(1);
+  await using screen = await render(panel(false), { router: "/" });
+  expect(screen.container.querySelector("[data-testid=frame]")).toBeNull();
+
+  await screen.rerender(panel(true));
+  await expect.element(screen.getByTestId("frame")).toBeVisible();
+
+  setup(1, false);
+  await screen.rerender(panel(true));
+  await expect.element(screen.getByText("cannot use plugin views", { exact: false })).toBeVisible();
+  expect(screen.container.querySelector("[data-testid=frame]")).toBeNull();
+});
