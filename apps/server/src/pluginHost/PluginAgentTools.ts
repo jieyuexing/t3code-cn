@@ -58,7 +58,7 @@ const PluginCallTool = Tool.make("plugin_call", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false);
 
-export const PluginToolkit = Toolkit.make(PluginServicesTool, PluginCallTool);
+const PluginToolkit = Toolkit.make(PluginServicesTool, PluginCallTool);
 
 const isJson = Schema.is(Schema.Json);
 

@@ -61,7 +61,7 @@ const hasJsonType = (value: Json, type: Json | undefined) => {
  * The top level of the input against the method's JSON Schema: its own type, the required
  * fields and the types of the fields it names. The plugin checks the rest.
  */
-export const inputProblem = (schema: Json | undefined, input: Json): string | undefined => {
+const inputProblem = (schema: Json | undefined, input: Json): string | undefined => {
   if (!isObject(schema)) return undefined;
   if (!hasJsonType(input, schema.type)) return `The input must be of type ${String(schema.type)}.`;
   if (!isObject(input)) return undefined;
