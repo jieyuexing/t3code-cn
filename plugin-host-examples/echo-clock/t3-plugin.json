@@ -1,0 +1,12 @@
+{
+  "id": "example.echo-clock",
+  "name": "Echo Clock",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "entry": "index.mjs",
+  "capabilities": ["settings", "views", "x.commands"],
+  "inject": ["settings", "log", "handle"],
+  "views": [{ "id": "clock", "title": "Echo Clock", "placement": "side-panel", "script": "view.js" }],
+  "commands": [{ "id": "echo-now", "title": "Echo the current time" }],
+  "settings": [{ "type": "text", "key": "prefix", "label": "Prefix", "default": "Now" }]
+}
