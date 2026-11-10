@@ -72,7 +72,7 @@ export function PluginServicePanel(props: {
       }
     >
       {ui?.available === true ? null : (
-        <div className="flex flex-col items-start gap-3 border-b border-border/60 px-4 py-3 text-sm text-muted-foreground">
+        <div className="flex flex-col items-start gap-3 border-b border-border/60 px-2 py-3 text-sm text-muted-foreground">
           <p>{`Service ${service} is unavailable. Calls work again once it is back.`}</p>
           <div className="flex gap-2">
             <Button
@@ -92,7 +92,7 @@ export function PluginServicePanel(props: {
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {ui === null ? null : ui.methods.length === 0 ? (
-          <p className="px-3 py-3 text-xs text-muted-foreground">
+          <p className="px-2 py-3 text-xs text-muted-foreground">
             This service offers no methods to the interface.
           </p>
         ) : (

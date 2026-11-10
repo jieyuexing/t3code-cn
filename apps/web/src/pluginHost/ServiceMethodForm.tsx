@@ -240,7 +240,7 @@ export function ServiceMethodForm(props: {
   return (
     <div className="border-b border-border/60" data-method={method.name}>
       <Collapsible open={draft.open} onOpenChange={(open) => patch(key, { open })}>
-        <CollapsibleTrigger className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs">
+        <CollapsibleTrigger className="flex h-9 w-full items-center gap-2 px-2 text-left text-xs">
           <ChevronRightIcon
             aria-hidden
             className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${draft.open ? "rotate-90" : ""}`}
@@ -258,7 +258,7 @@ export function ServiceMethodForm(props: {
         <CollapsiblePanel>
           <form
             ref={formRef}
-            className="space-y-3 px-3 pt-1 pb-3"
+            className="space-y-3 px-2 pt-1 pb-3"
             onSubmit={onSubmit}
             onKeyDown={onKeyDown}
             noValidate

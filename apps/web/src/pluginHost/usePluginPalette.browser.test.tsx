@@ -106,10 +106,10 @@ it("lists the ui methods of available services with their service name, and not 
     .toBeVisible();
   expect(group.getByRole("button", { name: /Internal/ }).elements()).toHaveLength(0);
   await expect
-    .element(group.getByRole("button", { name: "Open service panel  · example.clock" }))
+    .element(group.getByRole("button", { name: "Open example.clock  · Echo Clock" }))
     .toBeVisible();
   await expect
-    .element(group.getByRole("button", { name: "Open service panel  · example.greeter" }))
+    .element(group.getByRole("button", { name: "Open example.greeter  · Greeter" }))
     .toBeVisible();
 });
 
@@ -172,7 +172,7 @@ it("lists only methods without required input when no thread is open", async () 
     .element(screen.getByRole("button", { name: "Current time · example.clock" }))
     .toBeVisible();
   expect(screen.getByRole("button", { name: /Greet/ }).elements()).toHaveLength(0);
-  expect(screen.getByRole("button", { name: /Open service panel/ }).elements()).toHaveLength(0);
+  expect(screen.getByRole("button", { name: /Open example\./ }).elements()).toHaveLength(0);
 });
 
 it("drops a service's entries when the snapshot no longer lists it as available, though its plugin still declares it", async () => {
@@ -220,8 +220,8 @@ it("opens a view in the thread's panel and sends settings to the thread's enviro
     "Current time  · example.clock",
     "Greet…  · example.greeter",
     "Set tone… Modifies · example.greeter",
-    "Open service panel  · example.clock",
-    "Open service panel  · example.greeter",
+    "Open example.clock  · Echo Clock",
+    "Open example.greeter  · Greeter",
     "Open Echo Clock  · Echo Clock",
   ]);
   await screen.getByRole("button", { name: "Open Echo Clock · Echo Clock" }).click();

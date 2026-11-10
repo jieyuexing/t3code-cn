@@ -69,9 +69,9 @@ export function usePluginPaletteItems(
 
   const items: CommandPaletteActionItem[] = [];
   if (environmentId !== null && snapshot !== null && canCall) {
-    const providers = new Map<string, string>();
+    const providers = new Map<string, { readonly id: string; readonly name: string }>();
     for (const entry of availableUiMethods(snapshot)) {
-      providers.set(entry.service, entry.provider.id);
+      providers.set(entry.service, { id: entry.provider.id, name: entry.provider.name });
       const needsInput = methodNeedsInput(entry.method);
       if (needsInput && !thread) continue;
       const title = needsInput ? `${entry.title}…` : entry.title;
@@ -137,15 +137,15 @@ export function usePluginPaletteItems(
       });
     }
     if (thread) {
-      for (const [service, providerId] of providers) {
+      for (const [service, provider] of providers) {
         items.push({
           kind: "action",
           value: `plugin-service:${service}`,
-          searchTerms: [service, "plugin", "service", "panel"],
-          title: "Open service panel",
-          timestamp: service,
+          searchTerms: [service, provider.name, "plugin", "service", "panel"],
+          title: `Open ${service}`,
+          timestamp: provider.name,
           icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
-          run: async () => openServicePanel(thread, providerId, service),
+          run: async () => openServicePanel(thread, provider.id, service),
         });
       }
       for (const view of snapshot.views) {
