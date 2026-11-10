@@ -151,6 +151,12 @@ export const loadPluginDirectory = Effect.fn("PluginManifestLoader.loadPluginDir
     .pipe(Effect.mapError(() => fail(`${PLUGIN_MANIFEST_FILE} is missing.`)));
   if (info.type !== "File" || Number(info.size) > PLUGIN_MANIFEST_MAX_BYTES)
     return yield* fail(`${PLUGIN_MANIFEST_FILE} must be a file of at most 64 KiB.`);
+  const realManifest = yield* fs
+    .realPath(manifestPath)
+    .pipe(Effect.mapError(() => fail(`${PLUGIN_MANIFEST_FILE} is not readable.`)));
+  const inside = path.relative(realDirectory, realManifest);
+  if (inside === ".." || inside.startsWith(`..${path.sep}`) || path.isAbsolute(inside))
+    return yield* fail(`${PLUGIN_MANIFEST_FILE} resolves outside the plugin directory.`);
   const raw = yield* fs
     .readFileString(manifestPath)
     .pipe(Effect.mapError(() => fail(`${PLUGIN_MANIFEST_FILE} is not readable.`)));

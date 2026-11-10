@@ -13,6 +13,7 @@ import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { MCP_APP_MAX_HTML_BYTES } from "@t3tools/shared/mcpApp";
+import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
 import * as PluginHost from "./PluginHost.ts";
 import { spawnPluginProcess } from "./PluginProcess.ts";
@@ -495,6 +496,22 @@ describe("PluginHost", () => {
       expect([error.reason, error.detail]).toEqual([
         "invalid-plugin",
         expect.stringContaining("plugin.json is missing"),
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live.skipIf(!symlinksSupported)("rejects a plugin.json that resolves outside the plugin", () =>
+    Effect.gen(function* () {
+      const { fs, path, root, host, copyExample } = yield* setup();
+      const directory = yield* copyExample("linked");
+      const outside = path.join(root, "outside.json");
+      yield* fs.copyFile(path.join(directory, "plugin.json"), outside);
+      yield* fs.remove(path.join(directory, "plugin.json"));
+      yield* fs.symlink(outside, path.join(directory, "plugin.json"));
+      const error = yield* call(host, { _tag: "add", path: directory }).pipe(Effect.flip);
+      expect([error.reason, error.detail]).toEqual([
+        "invalid-plugin",
+        expect.stringContaining("resolves outside"),
       ]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
