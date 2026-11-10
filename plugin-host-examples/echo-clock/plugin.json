@@ -7,7 +7,7 @@
     "com.jieyuexing.t3code": {
       "apiVersion": 1,
       "entry": "./index.mjs",
-      "capabilities": ["settings", "views", "x.commands"],
+      "capabilities": ["settings", "views", "commands"],
       "inject": ["settings", "log", "handle"],
       "views": [
         { "id": "clock", "title": "Echo Clock", "placement": "side-panel", "html": "./view.html" }

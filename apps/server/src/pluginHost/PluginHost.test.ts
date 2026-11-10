@@ -349,7 +349,7 @@ describe("PluginHost", () => {
         }),
         traversal: yield* mutate("traversal", (text) => text.replace('"./index.mjs"', '"../x.js"')),
         capability: yield* mutate("capability", (text) =>
-          text.replace('"views", "x.commands"', '"views", "x.commands", "tools"'),
+          text.replace('"views", "commands"', '"views", "commands", "tools"'),
         ),
         oversize: yield* mutate("oversize", (text) =>
           text.replace(

@@ -12,7 +12,7 @@ const PLUGIN_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.
 export const PLUGIN_EXTENSION_NAMESPACE = "com.jieyuexing.t3code";
 
 /** Capability names this host serves; the `x.` prefix marks fork-only ones. */
-export const PLUGIN_HOST_CAPABILITIES = ["settings", "views", "x.commands"] as const;
+export const PLUGIN_HOST_CAPABILITIES = ["settings", "views", "commands"] as const;
 
 /** The only top-level fields the specification permits in `plugin.json`. */
 export const PLUGIN_MANIFEST_FIELDS = [

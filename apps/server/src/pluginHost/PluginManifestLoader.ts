@@ -200,7 +200,7 @@ export const loadPluginDirectory = Effect.fn("PluginManifestLoader.loadPluginDir
       : undefined;
   const missingCapability =
     needs("views", extension.views.length, "views") ??
-    needs("x.commands", extension.commands.length, "commands") ??
+    needs("commands", extension.commands.length, "commands") ??
     needs("settings", extension.settings.length, "settings");
   if (missingCapability) return yield* missingCapability;
   for (const [what, ids] of [
