@@ -12,7 +12,7 @@ const PLUGIN_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.
 export const PLUGIN_EXTENSION_NAMESPACE = "com.jieyuexing.t3code";
 
 /** Capability names this host serves; the `x.` prefix marks fork-only ones. */
-export const PLUGIN_HOST_CAPABILITIES = ["settings", "views", "commands"] as const;
+export const PLUGIN_HOST_CAPABILITIES = ["settings", "views"] as const;
 
 /** The only top-level fields the specification permits in `plugin.json`. */
 export const PLUGIN_MANIFEST_FIELDS = [
@@ -80,13 +80,6 @@ const PluginViewDeclaration = Schema.Struct({
 });
 export type PluginViewDeclaration = typeof PluginViewDeclaration.Type;
 
-const PluginCommandDeclaration = Schema.Struct({
-  id: Schema.String.check(Schema.isMaxLength(64), Schema.isPattern(/^[a-z][a-z0-9-]*$/)),
-  title: TrimmedNonEmptyString.check(Schema.isMaxLength(60)),
-  description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(240))),
-});
-export type PluginCommandDeclaration = typeof PluginCommandDeclaration.Type;
-
 /** Names `inject` uses for the host's own services; every other name is a service another plugin provides. */
 export const PLUGIN_HOST_SERVICE_NAMES = ["settings", "storage", "log", "handle"] as const;
 
@@ -105,12 +98,14 @@ const PluginServiceMethod = Schema.Struct({
   name: Schema.String.check(Schema.isMaxLength(64), Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]*$/)),
   title: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(60))),
   description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(240))),
-  /** JSON Schemas, kept for later use and not checked against calls yet. */
+  /** JSON Schemas. The input one draws the service panel's form; neither is checked against calls yet. */
   input: Schema.optionalKey(Schema.Json),
   output: Schema.optionalKey(Schema.Json),
   readOnly: Schema.optionalKey(Schema.Boolean),
   /** Whether agents may call the method through T3's MCP tools; off unless set. */
   agent: Schema.optionalKey(Schema.Boolean),
+  /** Whether the command palette and the service panel offer the method; off unless set. */
+  ui: Schema.optionalKey(Schema.Boolean),
 });
 
 const PluginServiceDeclaration = Schema.Struct({
@@ -119,8 +114,6 @@ const PluginServiceDeclaration = Schema.Struct({
 });
 export type PluginServiceDeclaration = typeof PluginServiceDeclaration.Type;
 
-/** The plugin handler a command runs; plugins register it with `context.handle`. */
-export const pluginCommandHandler = (commandId: string) => `command:${commandId}`;
 /** The plugin handler a view's call reaches. */
 export const pluginViewHandler = (viewId: string, handler: string) => `view:${viewId}:${handler}`;
 
@@ -156,6 +149,8 @@ export type PluginSettingValue = typeof PluginSettingValue.Type;
 /** The contents of `extensions[PLUGIN_EXTENSION_NAMESPACE]`; other keys are ignored. */
 export const PluginHostExtension = Schema.Struct({
   apiVersion: Schema.Int,
+  /** The name people see; the plugin id is shown when absent. */
+  title: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(60))),
   entry: assetPath(/\.m?js$/),
   capabilities: Schema.Array(PluginCapabilityName)
     .check(Schema.isMaxLength(32))
@@ -169,9 +164,6 @@ export const PluginHostExtension = Schema.Struct({
     .pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   views: Schema.Array(PluginViewDeclaration)
     .check(Schema.isMaxLength(8))
-    .pipe(Schema.withDecodingDefault(Effect.succeed([]))),
-  commands: Schema.Array(PluginCommandDeclaration)
-    .check(Schema.isMaxLength(32))
     .pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   settings: Schema.Array(PluginSettingField)
     .check(Schema.isMaxLength(32))

@@ -3,8 +3,56 @@
   <head>
     <meta charset="utf-8" />
     <title>Greeter</title>
+    <style>
+      body {
+        font:
+          14px system-ui,
+          sans-serif;
+        margin: 16px;
+        color-scheme: light dark;
+      }
+    </style>
   </head>
   <body>
-    <p>Greeter needs the example.clock service, which another plugin provides.</p>
+    <p id="time">Loading…</p>
+    <script>
+      // The host bridge: announce `ready` to the parent, receive one MessagePort, then exchange JSON strings on it.
+      // `callService` reaches a service this plugin injects; the host checks the plugin's `inject`.
+      const parentWindow = window.parent;
+      const pending = new Map();
+      let port = null;
+      let nextId = 1;
+      const callService = (service, method, input) =>
+        new Promise((resolve, reject) => {
+          const id = nextId++;
+          pending.set(id, { resolve, reject });
+          port.postMessage(
+            JSON.stringify({ _tag: "callService", id, service, method, input: input ?? null }),
+          );
+        });
+      window.addEventListener("message", (event) => {
+        const data = event.data;
+        if (event.source !== parentWindow || data?.type !== "t3-view:connect" || port) return;
+        port = event.ports[0];
+        port.onmessage = (message) => {
+          const body = JSON.parse(message.data);
+          if (body._tag === "ping") port.postMessage(JSON.stringify({ _tag: "pong", n: body.n }));
+          else if (body._tag === "result") pending.get(body.id)?.resolve(body.value);
+          else if (body._tag === "error") pending.get(body.id)?.reject(new Error(body.message));
+          if (body._tag === "result" || body._tag === "error") pending.delete(body.id);
+          if (body._tag === "init") start();
+        };
+      });
+      const start = async () => {
+        const show = async () => {
+          document.getElementById("time").textContent = (
+            await callService("example.clock", "now", {})
+          ).text;
+        };
+        await show();
+        setInterval(show, 1000);
+      };
+      parentWindow.postMessage({ type: "t3-view:ready" }, "*");
+    </script>
   </body>
 </html>

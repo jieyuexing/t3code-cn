@@ -6,9 +6,9 @@ import { PluginId, PluginSettingField, PluginSettingValue } from "./manifest.ts"
 const FailureReason = Schema.String.check(Schema.isMaxLength(1000));
 
 /**
- * `idle` plugins are not enabled; `standby` ones are enabled and offer their views
- * and commands, and start a process on the first call. Views and commands are offered
- * in `standby`, `starting` and `running`, and withdrawn in `waiting`, `backoff` and `quarantined`.
+ * `idle` plugins are not enabled; `standby` ones are enabled and offer their views,
+ * and start a process on the first call. Views are offered in `standby`, `starting`
+ * and `running`, and withdrawn in `waiting`, `backoff` and `quarantined`.
  */
 export const PluginHostState = Schema.Union([
   Schema.TaggedStruct("idle", {}),
@@ -28,6 +28,7 @@ export type PluginHostState = typeof PluginHostState.Type;
 
 export const PluginHostEntry = Schema.Struct({
   id: PluginId,
+  /** The title the manifest gives, or the id. */
   name: Schema.String,
   version: Schema.String,
   directory: Schema.String,
@@ -58,8 +59,11 @@ export const PluginHostEntry = Schema.Struct({
           name: Schema.String,
           title: Schema.optionalKey(Schema.String),
           description: Schema.optionalKey(Schema.String),
+          /** The declared JSON Schema of the input, which the service panel's form follows. */
+          input: Schema.optionalKey(Schema.Json),
           readOnly: Schema.optionalKey(Schema.Boolean),
           agent: Schema.optionalKey(Schema.Boolean),
+          ui: Schema.optionalKey(Schema.Boolean),
         }),
       ),
     }),
@@ -79,15 +83,6 @@ export const PluginHostView = Schema.Struct({
 });
 export type PluginHostView = typeof PluginHostView.Type;
 
-export const PluginHostCommand = Schema.Struct({
-  pluginId: PluginId,
-  pluginName: Schema.String,
-  commandId: Schema.String,
-  title: Schema.String,
-  description: Schema.optionalKey(Schema.String),
-});
-export type PluginHostCommand = typeof PluginHostCommand.Type;
-
 /**
  * Every plugin and what the active ones contribute; each frame replaces the last.
  * While the host switch is off nothing is parsed, so only the registered count is known.
@@ -97,7 +92,6 @@ export const PluginHostSnapshot = Schema.Struct({
   registered: NonNegativeInt,
   plugins: Schema.Array(PluginHostEntry),
   views: Schema.Array(PluginHostView),
-  commands: Schema.Array(PluginHostCommand),
   /** Every service an enabled plugin provides, with its provider; `available` while that plugin is active and not quarantined. */
   services: Schema.Array(
     Schema.Struct({ name: Schema.String, provider: PluginId, available: Schema.Boolean }),

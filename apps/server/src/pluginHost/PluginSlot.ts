@@ -2,7 +2,6 @@
 import {
   PLUGIN_HOST_SERVICE_NAMES,
   PluginHostError,
-  type PluginHostCommand,
   type PluginHostState,
   type PluginHostView,
   type PluginId,
@@ -29,7 +28,7 @@ export interface Slot {
   running: PluginProcess | undefined;
   /** Open while the plugin is active; closing it stops the process and withdraws everything. */
   scope: Scope.Closeable | undefined;
-  /** Holds the offered views and commands; closed while the plugin cannot serve them. */
+  /** Holds the offered views; closed while the plugin cannot serve them. */
   offer: Scope.Closeable | undefined;
   /** The delivered copy of each offered view's page, by view id. */
   readonly viewFiles: Map<string, string>;
@@ -43,7 +42,6 @@ export interface Slot {
   readonly startLock: Semaphore.Semaphore;
   settingValues: Record<string, PluginSettingValue>;
   readonly views: Array<Omit<PluginHostView, "generation">>;
-  readonly commands: Array<PluginHostCommand>;
 }
 
 export const makeSlot = (record: RegistryRecord): Slot => ({
@@ -66,7 +64,6 @@ export const makeSlot = (record: RegistryRecord): Slot => ({
   startLock: Semaphore.makeUnsafe(1),
   settingValues: {},
   views: [],
-  commands: [],
 });
 
 export const fail = (reason: PluginHostError["reason"], detail?: string) =>

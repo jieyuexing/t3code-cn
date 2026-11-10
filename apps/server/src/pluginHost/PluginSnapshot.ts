@@ -3,12 +3,16 @@ import type { PluginHostEntry, PluginHostSnapshot } from "@t3tools/contracts";
 import { serviceOwners } from "./PluginReconcile.ts";
 import { serviceAvailable, type Slot } from "./PluginSlot.ts";
 
+/** The name people see for a plugin: the manifest's title, or its id. */
+export const displayName = (slot: Slot) =>
+  slot.registration?.manifest.title ?? slot.registration?.manifest.name ?? slot.id;
+
 const entryOf = (slot: Slot): PluginHostEntry => {
   const registration = slot.registration;
   const problem = slot.problem ?? slot.conflict;
   return {
     id: slot.id,
-    name: registration?.manifest.name ?? slot.id,
+    name: displayName(slot),
     version: registration?.manifest.version ?? "",
     directory: registration?.directory ?? slot.path,
     enabled: slot.enabled,
@@ -25,12 +29,14 @@ const entryOf = (slot: Slot): PluginHostEntry => {
     settingValues: slot.settingValues,
     provides: (registration?.manifest.provides ?? []).map((service) => ({
       name: service.name,
-      methods: service.methods.map(({ name, title, description, readOnly, agent }) => ({
+      methods: service.methods.map(({ name, title, description, input, readOnly, agent, ui }) => ({
         name,
         ...(title === undefined ? {} : { title }),
         ...(description === undefined ? {} : { description }),
+        ...(input === undefined ? {} : { input }),
         ...(readOnly === undefined ? {} : { readOnly }),
         ...(agent === undefined ? {} : { agent }),
+        ...(ui === undefined ? {} : { ui }),
       })),
     })),
     waitingFor: slot.waitingFor,
@@ -58,6 +64,5 @@ export const buildSnapshot = (input: {
     views: active.flatMap((slot) =>
       slot.views.map((view) => ({ ...view, generation: slot.generation })),
     ),
-    commands: active.flatMap((slot) => slot.commands),
   };
 };

@@ -220,7 +220,6 @@ interface PluginSnapshotShape {
     readonly pid?: number;
   }>;
   readonly views: ReadonlyArray<unknown>;
-  readonly commands: ReadonlyArray<unknown>;
 }
 
 it.live("plugin host: enable, invoke and disable through the websocket layer, gated by scope", () =>
@@ -325,7 +324,6 @@ it.live("plugin host: enable, invoke and disable through the websocket layer, ga
       (snapshot) => snapshot.plugins[0]?.state._tag === "standby",
     );
     assert.equal(standby.views.length, 1);
-    assert.equal(standby.commands.length, 1);
     assert.isUndefined(standby.plugins[0]?.pid);
 
     // The first call starts the process; the call itself returns the echo.
@@ -344,7 +342,7 @@ it.live("plugin host: enable, invoke and disable through the websocket layer, ga
 
     assert.equal((yield* client.call({ _tag: "disable", pluginId }))._tag, "Success");
     const stopped = yield* client.waitFor((snapshot) => snapshot.plugins[0]?.state._tag === "idle");
-    assert.deepEqual([stopped.views, stopped.commands], [[], []]);
+    assert.deepEqual(stopped.views, []);
     const afterStop = yield* client.call({
       _tag: "invoke",
       pluginId,

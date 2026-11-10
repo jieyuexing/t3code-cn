@@ -6,13 +6,34 @@
   "extensions": {
     "com.jieyuexing.t3code": {
       "apiVersion": 1,
+      "title": "Greeter",
       "entry": "./index.mjs",
-      "capabilities": ["views", "commands"],
+      "capabilities": ["views"],
       "inject": ["example.clock", "log"],
       "views": [
         { "id": "greeting", "title": "Greeter", "placement": "side-panel", "html": "./view.html" }
       ],
-      "commands": [{ "id": "greet-now", "title": "Greet with the time" }]
+      "provides": [
+        {
+          "name": "example.greeter",
+          "methods": [
+            {
+              "name": "greet",
+              "title": "Greet",
+              "description": "Greets by name and adds the time from example.clock.",
+              "readOnly": true,
+              "ui": true,
+              "input": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "description": "Who to greet." }
+                },
+                "required": ["name"]
+              }
+            }
+          ]
+        }
+      ]
     }
   }
 }

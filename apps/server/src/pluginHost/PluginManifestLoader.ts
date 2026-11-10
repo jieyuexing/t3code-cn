@@ -193,6 +193,10 @@ export const loadPluginDirectory = Effect.fn("PluginManifestLoader.loadPluginDir
     return yield* fail(
       `it targets plugin API version ${extension.apiVersion}; this host implements version ${PLUGIN_HOST_API_VERSION}.`,
     );
+  if ("commands" in namespace || extension.capabilities.includes("commands"))
+    return yield* fail(
+      'it declares commands, which this host no longer has; provide a service and set "ui": true on the methods that should be commands.',
+    );
   const supported: ReadonlyArray<string> = PLUGIN_HOST_CAPABILITIES;
   const unsupported = extension.capabilities.filter((name) => !supported.includes(name));
   if (unsupported.length > 0)
@@ -203,12 +207,10 @@ export const loadPluginDirectory = Effect.fn("PluginManifestLoader.loadPluginDir
       : undefined;
   const missingCapability =
     needs("views", extension.views.length, "views") ??
-    needs("commands", extension.commands.length, "commands") ??
     needs("settings", extension.settings.length, "settings");
   if (missingCapability) return yield* missingCapability;
   for (const [what, ids] of [
     ["view", extension.views.map((view) => view.id)],
-    ["command", extension.commands.map((command) => command.id)],
     ["setting", extension.settings.map((field) => field.key)],
   ] as const) {
     const repeated = duplicate(ids);

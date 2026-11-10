@@ -1,5 +1,5 @@
 // Each plugin owns a Scope that holds everything it registered, in the manner of Cordis contexts:
-// closing it stops the process and withdraws the views and commands, so nothing outlives a disable or reload.
+// closing it stops the process and withdraws the views, so nothing outlives a disable or reload.
 import {
   PluginHostError,
   type PluginHostCallInput,
@@ -36,7 +36,7 @@ import {
   planReconcile,
   serviceOwners,
 } from "./PluginReconcile.ts";
-import { buildSnapshot } from "./PluginSnapshot.ts";
+import { buildSnapshot, displayName } from "./PluginSnapshot.ts";
 import { resolveSettings, settingProblem } from "./PluginSettings.ts";
 import { makeServiceCalls, type AgentServiceMethod } from "./PluginServiceCall.ts";
 import {
@@ -137,7 +137,6 @@ export const make = Effect.fn("PluginHost.make")(function* (
     registered: 0,
     plugins: [],
     views: [],
-    commands: [],
     services: [],
   });
 
@@ -250,7 +249,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
       }),
     ).pipe(Effect.catchTags({ PluginProcessError: (error) => Effect.succeed(error.reason) }));
 
-  /** Offers the manifest's views and commands until `slot.offer` closes. */
+  /** Offers the manifest's views until `slot.offer` closes. */
   const offer = Effect.fn("PluginHost.offer")(function* (
     slot: Slot,
     registration: PluginRegistration,
@@ -263,18 +262,10 @@ export const make = Effect.fn("PluginHost.make")(function* (
       for (const view of manifest.views)
         yield* contribute(slot.views, {
           pluginId: slot.id,
-          pluginName: manifest.name,
+          pluginName: displayName(slot),
           viewId: view.id,
           title: view.title,
           placement: view.placement,
-        });
-      for (const command of manifest.commands)
-        yield* contribute(slot.commands, {
-          pluginId: slot.id,
-          pluginName: manifest.name,
-          commandId: command.id,
-          title: command.title,
-          ...(command.description === undefined ? {} : { description: command.description }),
         });
     }).pipe(Effect.provideService(Scope.Scope, scope));
   });
@@ -360,7 +351,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
     );
   });
 
-  /** Offers the plugin's views and commands; the process starts on the first call. */
+  /** Offers the plugin's views; the process starts on the first call. */
   const start = Effect.fn("PluginHost.start")(function* (slot: Slot) {
     const registration = slot.registration;
     if (!hostEnabled || slot.scope !== undefined || registration === undefined || !eligible(slot))
@@ -666,6 +657,12 @@ export const make = Effect.fn("PluginHost.make")(function* (
         return yield* mutate(setHostEnabled(input.enabled)).pipe(Effect.andThen(none));
       case "invoke":
         return { value: yield* invoke(yield* slotOf(input.pluginId), input.handler, input.input) };
+      case "callService":
+        return { value: yield* serviceCalls.callFromUi(input) };
+      case "callViewService":
+        return {
+          value: yield* serviceCalls.callFromView(yield* slotOf(input.pluginId), input),
+        };
       case "readView":
         return {
           value: yield* readViewBundle(

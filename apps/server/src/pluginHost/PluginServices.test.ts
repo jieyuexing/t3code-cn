@@ -39,6 +39,12 @@ const latest = (host: Host) =>
 
 const PING = [{ name: "ping" }];
 
+/** The snapshot's services in name order, as `name provider available`. */
+const servicesOf = (snapshot: PluginHostSnapshot | undefined) =>
+  (snapshot?.services ?? [])
+    .map((service) => `${service.name} ${service.provider} ${service.available}`)
+    .toSorted();
+
 /** A plugin directory whose service methods are all `ping`, with a handler that calls another plugin's service. */
 const pluginSource = (provides: ReadonlyArray<string>) => `
 export function activate(context) {
@@ -101,6 +107,7 @@ const setup = Effect.fn("setup")(function* () {
       readonly inject?: ReadonlyArray<string>;
       readonly source?: string;
       readonly declares?: ReadonlyArray<string>;
+      readonly methods?: ReadonlyArray<Record<string, unknown>>;
     } = {},
   ) {
     const directory = path.join(root, name);
@@ -118,7 +125,7 @@ const setup = Effect.fn("setup")(function* () {
             inject: spec.inject ?? [],
             provides: (spec.declares ?? provides).map((service) => ({
               name: service,
-              methods: PING,
+              methods: spec.methods ?? PING,
             })),
           },
         },
@@ -131,7 +138,10 @@ const setup = Effect.fn("setup")(function* () {
     yield* call({ _tag: "add", path: directory });
     return directory;
   });
-  return { host, spawns, transitions, next, call, enable, invoke, addExample, addGenerated };
+  /** The greeter's `greet`, called as the interface does. */
+  const greet = (name: string) =>
+    call({ _tag: "callService", service: "example.greeter", method: "greet", input: { name } });
+  return { host, spawns, transitions, next, call, enable, invoke, greet, addExample, addGenerated };
 });
 
 const kill = (pid: number) => process.kill(pid, "SIGKILL");
@@ -141,7 +151,7 @@ describe("plugin services", () => {
     "a dependent waits for its service, starts when it appears, and calls it across processes",
     () =>
       Effect.gen(function* () {
-        const { host, spawns, enable, invoke, addExample } = yield* setup();
+        const { host, spawns, enable, greet, addExample } = yield* setup();
         yield* addExample("greeter");
         yield* addExample("echo-clock");
 
@@ -151,7 +161,7 @@ describe("plugin services", () => {
         expect(greeter.state._tag).toBe("waiting");
         expect(greeter.waitingFor).toEqual(["example.clock"]);
         expect(greeter.pid).toBeUndefined();
-        expect([waiting?.views, waiting?.commands]).toEqual([[], []]);
+        expect(waiting?.views).toEqual([]);
         expect(spawns.count).toBe(0);
 
         yield* enable(CLOCK);
@@ -159,12 +169,13 @@ describe("plugin services", () => {
         expect(entryOf(standby, GREETER)?.state._tag).toBe("standby");
         expect(entryOf(standby, GREETER)?.waitingFor).toEqual([]);
         expect(standby?.views.map((view) => view.viewId).toSorted()).toEqual(["clock", "greeting"]);
-        expect(standby?.services).toEqual([
-          { name: "example.clock", provider: CLOCK, available: true },
+        expect(servicesOf(standby)).toEqual([
+          `example.clock ${CLOCK} true`,
+          `example.greeter ${GREETER} true`,
         ]);
         expect(spawns.count).toBe(0);
 
-        const greeting = yield* invoke(GREETER, "greet", { name: "Ada" });
+        const greeting = yield* greet("Ada");
         expect(JSON.stringify(greeting.value)).toContain("Hello, Ada!");
         expect(JSON.stringify(greeting.value)).toContain("Now: ");
         expect(spawns.count).toBe(2);
@@ -178,12 +189,12 @@ describe("plugin services", () => {
 
   it.live("stopping the provider stops the dependent, and bringing it back restores it", () =>
     Effect.gen(function* () {
-      const { host, spawns, transitions, call, enable, invoke, addExample } = yield* setup();
+      const { host, spawns, transitions, call, enable, greet, addExample } = yield* setup();
       yield* addExample("greeter");
       yield* addExample("echo-clock");
       yield* enable(CLOCK);
       yield* enable(GREETER);
-      yield* invoke(GREETER, "greet", { name: "Ada" });
+      yield* greet("Ada");
       const before = yield* latest(host);
       const greeterPid = entryOf(before, GREETER)!.pid!;
       expect(pidAlive(greeterPid)).toBe(true);
@@ -197,12 +208,11 @@ describe("plugin services", () => {
       expect(transitions).toEqual([`stop ${GREETER}`, `stop ${CLOCK}`]);
       // No entry point of the dependent is left in the snapshot.
       expect(off?.views.filter((view) => view.pluginId === GREETER)).toEqual([]);
-      expect(off?.commands.filter((command) => command.pluginId === GREETER)).toEqual([]);
-      expect(off?.services).toEqual([]);
-      const refused = yield* invoke(GREETER, "greet", { name: "Ada" }).pipe(Effect.flip);
+      expect(servicesOf(off)).toEqual([`example.greeter ${GREETER} false`]);
+      const refused = yield* greet("Ada").pipe(Effect.flip);
       expect([refused.reason, refused.detail]).toEqual([
         "not-running",
-        `${GREETER} is waiting for example.clock.`,
+        `${GREETER} provides example.greeter but is waiting for example.clock.`,
       ]);
       const spawned = spawns.count;
 
@@ -210,9 +220,7 @@ describe("plugin services", () => {
       const back = yield* latest(host);
       expect(entryOf(back, GREETER)?.state._tag).toBe("standby");
       expect(back?.views.some((view) => view.pluginId === GREETER)).toBe(true);
-      expect(JSON.stringify((yield* invoke(GREETER, "greet", { name: "Bo" })).value)).toContain(
-        "Hello, Bo!",
-      );
+      expect(JSON.stringify((yield* greet("Bo")).value)).toContain("Hello, Bo!");
       expect(spawns.count).toBe(spawned + 2);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -263,8 +271,9 @@ describe("plugin services", () => {
       }
       const waiting = yield* next((s) => entryOf(s, GREETER)?.state._tag === "waiting");
       expect(entryOf(waiting, GREETER)?.waitingFor).toEqual(["example.clock"]);
-      expect(waiting.services).toEqual([
-        { name: "example.clock", provider: CLOCK, available: false },
+      expect(servicesOf(waiting)).toEqual([
+        `example.clock ${CLOCK} false`,
+        `example.greeter ${GREETER} false`,
       ]);
 
       yield* call({ _tag: "resume", pluginId: CLOCK as never });
@@ -280,12 +289,12 @@ describe("plugin services", () => {
     "a provider that crashes once but is not quarantined keeps its dependent, and the next call revives it",
     () =>
       Effect.gen(function* () {
-        const { host, next, enable, invoke, addExample } = yield* setup();
+        const { host, next, enable, greet, addExample } = yield* setup();
         yield* addExample("greeter");
         yield* addExample("echo-clock");
         yield* enable(CLOCK);
         yield* enable(GREETER);
-        yield* invoke(GREETER, "greet", { name: "Ada" });
+        yield* greet("Ada");
         const running = yield* latest(host);
         const greeterPid = entryOf(running, GREETER)!.pid;
         const clockPid = entryOf(running, CLOCK)!.pid!;
@@ -296,9 +305,7 @@ describe("plugin services", () => {
         expect(entryOf(standby, GREETER)?.state._tag).toBe("running");
         expect(entryOf(standby, GREETER)?.pid).toBe(greeterPid);
 
-        expect(JSON.stringify((yield* invoke(GREETER, "greet", { name: "Bo" })).value)).toContain(
-          "Hello, Bo!",
-        );
+        expect(JSON.stringify((yield* greet("Bo")).value)).toContain("Hello, Bo!");
         expect(entryOf(yield* latest(host), CLOCK)?.pid).not.toBe(clockPid);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -463,5 +470,137 @@ export function activate(context) {
         ]);
       }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+const UI_SERVICE = "svc.ui";
+const UI_PROVIDER = "ui.provider";
+
+/** A provider whose methods report who called them, with one the interface offers and one it does not. */
+const uiProvider = {
+  provides: [UI_SERVICE],
+  methods: [{ name: "shown", ui: true }, { name: "hidden" }, { name: "boom", ui: true }],
+  source: `export function activate(context) {
+  context.provide(${JSON.stringify(UI_SERVICE)}, {
+    shown: (input, meta) => ({ caller: meta.caller, input }),
+    hidden: (input, meta) => ({ caller: meta.caller }),
+    boom: () => { throw new Error("it broke"); },
+  });
+}
+`,
+};
+
+const callService = (service: string, method: string, input: unknown = {}) =>
+  ({ _tag: "callService", service, method, input }) as PluginHostCallInput;
+const callViewService = (pluginId: string, service: string, method: string, input: unknown = {}) =>
+  ({ _tag: "callViewService", pluginId, service, method, input }) as PluginHostCallInput;
+
+describe("service calls from the interface and from views", () => {
+  it.live("the interface reaches only methods marked ui, and the provider sees t3:user", () =>
+    Effect.gen(function* () {
+      const { host, spawns, call, enable, addGenerated } = yield* setup();
+      yield* addGenerated(UI_PROVIDER, uiProvider);
+      yield* enable(UI_PROVIDER);
+
+      const hidden = yield* call(callService(UI_SERVICE, "hidden")).pipe(Effect.flip);
+      expect([hidden.reason, hidden.detail]).toEqual([
+        "not-found",
+        `${UI_SERVICE}.hidden is not a method the interface offers.`,
+      ]);
+      const missing = yield* call(callService(UI_SERVICE, "nope")).pipe(Effect.flip);
+      expect(missing.reason).toBe("not-found");
+      expect(spawns.count).toBe(0);
+
+      const shown = yield* call(callService(UI_SERVICE, "shown", { a: 1 }));
+      expect(shown.value).toEqual({ caller: "t3:user", input: { a: 1 } });
+      expect(spawns.count).toBe(1);
+      const snapshot = yield* latest(host);
+      const methods = entryOf(snapshot, UI_PROVIDER)?.provides[0]?.methods;
+      expect(methods?.map((method) => [method.name, method.ui])).toEqual([
+        ["shown", true],
+        ["hidden", undefined],
+        ["boom", true],
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("a failing method comes back marked with its service and provider", () =>
+    Effect.gen(function* () {
+      const { call, enable, addGenerated } = yield* setup();
+      yield* addGenerated(UI_PROVIDER, uiProvider);
+      yield* enable(UI_PROVIDER);
+
+      const failed = yield* call(callService(UI_SERVICE, "boom")).pipe(Effect.flip);
+      expect(failed.reason).toBe("call-failed");
+      expect(failed.detail).toContain(`${UI_SERVICE} (${UI_PROVIDER}): `);
+      expect(failed.detail).toContain("it broke");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("a service whose provider is off is not available to the interface", () =>
+    Effect.gen(function* () {
+      const { call, enable, addGenerated } = yield* setup();
+      yield* addGenerated(UI_PROVIDER, uiProvider);
+
+      const unknown = yield* call(callService("svc.none", "shown")).pipe(Effect.flip);
+      expect([unknown.reason, unknown.detail]).toEqual([
+        "not-found",
+        "No plugin provides the service svc.none.",
+      ]);
+      const off = yield* call(callService(UI_SERVICE, "shown")).pipe(Effect.flip);
+      expect([off.reason, off.detail]).toEqual([
+        "not-running",
+        `${UI_PROVIDER} provides ${UI_SERVICE} but is not enabled.`,
+      ]);
+      yield* enable(UI_PROVIDER);
+      yield* call({ _tag: "disable", pluginId: UI_PROVIDER as never });
+      const disabled = yield* call(callService(UI_SERVICE, "shown")).pipe(Effect.flip);
+      expect(disabled.reason).toBe("not-running");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live(
+    "a view calls what its plugin injects, not what ui marks, and the provider sees the plugin",
+    () =>
+      Effect.gen(function* () {
+        const { spawns, call, enable, addGenerated } = yield* setup();
+        yield* addGenerated(UI_PROVIDER, uiProvider);
+        yield* addGenerated("ui.dependent", { inject: [UI_SERVICE] });
+        yield* addGenerated("ui.outsider", {});
+        yield* addGenerated("ui.waiting", { inject: [UI_SERVICE, "svc.absent"] });
+        yield* enable(UI_PROVIDER);
+        yield* enable("ui.dependent");
+        yield* enable("ui.outsider");
+        yield* enable("ui.waiting");
+
+        // Refusals come first, so the probe also shows the provider was not started by them.
+        const notInjected = yield* call(callViewService("ui.outsider", UI_SERVICE, "hidden")).pipe(
+          Effect.flip,
+        );
+        expect([notInjected.reason, notInjected.detail]).toEqual([
+          "not-found",
+          `Plugin ui.outsider does not declare a dependency on ${UI_SERVICE}.`,
+        ]);
+        const undeclared = yield* call(callViewService("ui.dependent", UI_SERVICE, "nope")).pipe(
+          Effect.flip,
+        );
+        expect([undeclared.reason, undeclared.detail]).toEqual([
+          "not-found",
+          `The service ${UI_SERVICE} has no method nope.`,
+        ]);
+        const inactive = yield* call(callViewService("ui.waiting", UI_SERVICE, "hidden")).pipe(
+          Effect.flip,
+        );
+        expect(inactive.reason).toBe("not-running");
+        const unknown = yield* call(callViewService("no.such", UI_SERVICE, "hidden")).pipe(
+          Effect.flip,
+        );
+        expect(unknown.reason).toBe("not-found");
+        expect(spawns.count).toBe(0);
+
+        const hidden = yield* call(callViewService("ui.dependent", UI_SERVICE, "hidden"));
+        expect(hidden.value).toEqual({ caller: "ui.dependent" });
+        expect(spawns.count).toBe(1);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

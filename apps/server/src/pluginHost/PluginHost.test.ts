@@ -1,7 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import {
-  pluginCommandHandler,
   pluginViewHandler,
   type PluginHostCallInput,
   type PluginHostSnapshot,
@@ -114,37 +113,51 @@ const pidAlive = (pid: number) => {
 };
 
 describe("PluginHost", () => {
-  it.live("offers views and commands on enable, starts the process on the first call only", () =>
-    Effect.gen(function* () {
-      const { host, copyExample, spawns, invoke } = yield* setup();
-      yield* call(host, { _tag: "add", path: yield* copyExample("echo") });
-      expect((yield* latest(host))?.views).toEqual([]);
+  it.live(
+    "offers views on enable under the manifest title, starts the process on the first call only",
+    () =>
+      Effect.gen(function* () {
+        const { host, copyExample, spawns, invoke } = yield* setup();
+        yield* call(host, { _tag: "add", path: yield* copyExample("echo") });
+        expect((yield* latest(host))?.views).toEqual([]);
 
-      yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
-      const standby = yield* latest(host);
-      expect(stateOf(standby)).toBe("standby");
-      expect(entryOf(standby!)?.pid).toBeUndefined();
-      expect(standby?.views.map((view) => view.viewId)).toEqual(["clock"]);
-      expect(standby?.commands.map((command) => command.commandId)).toEqual(["echo-now"]);
-      expect(spawns.count).toBe(0);
+        yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
+        const standby = yield* latest(host);
+        expect(stateOf(standby)).toBe("standby");
+        expect(entryOf(standby!)?.pid).toBeUndefined();
+        expect(standby?.views.map((view) => view.viewId)).toEqual(["clock"]);
+        expect([entryOf(standby!)?.name, standby?.views[0]?.pluginName]).toEqual([
+          "Echo Clock",
+          "Echo Clock",
+        ]);
+        expect(spawns.count).toBe(0);
 
-      expect(yield* invoke("echo", { a: 1 })).toEqual({ value: { a: 1 } });
-      expect(spawns.count).toBe(1);
-      const running = yield* latest(host);
-      const pid = entryOf(running!)?.pid;
-      expect(stateOf(running)).toBe("running");
-      expect(pidAlive(pid!)).toBe(true);
-      expect(JSON.stringify(yield* invoke(pluginCommandHandler("echo-now")))).toContain("Now: ");
-      expect(spawns.count).toBe(1);
+        expect(yield* invoke("echo", { a: 1 })).toEqual({ value: { a: 1 } });
+        expect(spawns.count).toBe(1);
+        const running = yield* latest(host);
+        const pid = entryOf(running!)?.pid;
+        expect(stateOf(running)).toBe("running");
+        expect(pidAlive(pid!)).toBe(true);
+        expect(
+          JSON.stringify(
+            yield* call(host, {
+              _tag: "callService",
+              service: "example.clock",
+              method: "now",
+              input: {},
+            }),
+          ),
+        ).toContain("Now: ");
+        expect(spawns.count).toBe(1);
 
-      yield* call(host, { _tag: "disable", pluginId });
-      const stopped = yield* latest(host);
-      expect(stateOf(stopped)).toBe("idle");
-      expect([stopped?.views, stopped?.commands]).toEqual([[], []]);
-      expect(pidAlive(pid!)).toBe(false);
-      const refused = yield* invoke("echo").pipe(Effect.flip);
-      expect(refused.reason).toBe("not-running");
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+        yield* call(host, { _tag: "disable", pluginId });
+        const stopped = yield* latest(host);
+        expect(stateOf(stopped)).toBe("idle");
+        expect(stopped?.views).toEqual([]);
+        expect(pidAlive(pid!)).toBe(false);
+        const refused = yield* invoke("echo").pipe(Effect.flip);
+        expect(refused.reason).toBe("not-running");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.live("concurrent first calls share one process", () =>
@@ -257,7 +270,7 @@ describe("PluginHost", () => {
 
       const manifestPath = path.join(directory, "plugin.json");
       const manifest = (yield* fs.readFileString(manifestPath))
-        .replace('"title": "Echo Clock"', '"title": "Renamed Clock"')
+        .replaceAll('"title": "Echo Clock"', '"title": "Renamed Clock"')
         .replace('"version": "0.1.0"', '"version": "0.2.0"');
       yield* fs.writeFileString(manifestPath, manifest);
       yield* call(host, { _tag: "reload", pluginId });
@@ -270,7 +283,11 @@ describe("PluginHost", () => {
       ]);
       expect(entry.pid).toBeUndefined();
       expect(entry.generation).toBeGreaterThan(before.generation);
-      expect(reloaded?.views[0]?.title).toBe("Renamed Clock");
+      expect([entry.name, reloaded?.views[0]?.title, reloaded?.views[0]?.pluginName]).toEqual([
+        "Renamed Clock",
+        "Renamed Clock",
+        "Renamed Clock",
+      ]);
       expect(reloaded?.views[0]?.generation).toBe(entry.generation);
       expect(spawns.count).toBe(1);
 
@@ -346,7 +363,17 @@ describe("PluginHost", () => {
         }),
         traversal: yield* mutate("traversal", (text) => text.replace('"./index.mjs"', '"../x.js"')),
         capability: yield* mutate("capability", (text) =>
-          text.replace('"views", "commands"', '"views", "commands", "tools"'),
+          text.replace('"settings", "views"', '"settings", "views", "tools"'),
+        ),
+        "commands-field": yield* mutate("commands-field", (text) =>
+          editExtension(text, (extension) => {
+            extension.commands = [{ id: "echo-now", title: "Echo" }];
+          }),
+        ),
+        "commands-capability": yield* mutate("commands-capability", (text) =>
+          editExtension(text, (extension) => {
+            extension.capabilities = [...extension.capabilities, "commands"];
+          }),
         ),
         oversize: yield* mutate("oversize", (text) =>
           text.replace(
@@ -370,6 +397,8 @@ describe("PluginHost", () => {
         "extensions-not-object": "contributes nothing to the T3 host",
         traversal: "entry",
         capability: "does not support tools",
+        "commands-field": '"ui": true',
+        "commands-capability": '"ui": true',
         oversize: "64 KiB",
         injection: "Not A Service",
       } as const;
@@ -537,12 +566,7 @@ describe("PluginHost", () => {
       yield* call(host, { _tag: "remove", pluginId });
       const after = yield* latest(host);
       expect(pidAlive(running.pid!)).toBe(false);
-      expect([after?.plugins, after?.views, after?.commands, after?.registered]).toEqual([
-        [],
-        [],
-        [],
-        0,
-      ]);
+      expect([after?.plugins, after?.views, after?.registered]).toEqual([[], [], 0]);
       expect(yield* fs.readFileString(registryPath)).not.toContain(PLUGIN_ID);
       expect(yield* fs.readFileString(consentPath)).not.toContain(PLUGIN_ID);
       expect(yield* fs.exists(deliveredFile)).toBe(false);
@@ -601,7 +625,6 @@ describe("PluginHost", () => {
         registered: 2,
         plugins: [],
         views: [],
-        commands: [],
         services: [],
       });
       const refused = yield* call(host, { _tag: "add", path: good }).pipe(Effect.flip);
@@ -628,7 +651,6 @@ describe("PluginHost", () => {
         registered: 2,
         plugins: [],
         views: [],
-        commands: [],
         services: [],
       });
       const afterOff = yield* call(host, {
@@ -652,7 +674,7 @@ describe("PluginHost", () => {
         const running = yield* latest(host);
         process.kill(entryOf(running!)!.pid!, "SIGKILL");
         const after = yield* next((s) => ["backoff", "quarantined"].includes(stateOf(s) ?? ""));
-        expect([after.views, after.commands]).toEqual([[], []]);
+        expect(after.views).toEqual([]);
         if (kill < 3) {
           expect(stateOf(after)).toBe("backoff");
           yield* next((s) => stateOf(s) === "standby");
@@ -675,7 +697,6 @@ describe("PluginHost", () => {
         registered: 0,
         plugins: [],
         views: [],
-        commands: [],
         services: [],
       });
       expect(spawns.count).toBe(0);

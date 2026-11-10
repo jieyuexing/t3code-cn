@@ -22,6 +22,19 @@ export const PluginHostCallInput = Schema.Union([
     handler: Schema.String.check(Schema.isMaxLength(128)),
     input: Schema.Json,
   }),
+  /** A service method the interface offers (`ui: true`); the provider sees the caller `t3:user`. */
+  Schema.TaggedStruct("callService", {
+    service: TrimmedNonEmptyString,
+    method: TrimmedNonEmptyString,
+    input: Schema.Json,
+  }),
+  /** A call a plugin's own view makes on a service that plugin injects; the provider sees that plugin as the caller. */
+  Schema.TaggedStruct("callViewService", {
+    ...Target,
+    service: TrimmedNonEmptyString,
+    method: TrimmedNonEmptyString,
+    input: Schema.Json,
+  }),
   Schema.TaggedStruct("readView", {
     ...Target,
     viewId: TrimmedNonEmptyString,
@@ -43,7 +56,7 @@ export const PluginHostCallInput = Schema.Union([
 ]);
 export type PluginHostCallInput = typeof PluginHostCallInput.Type;
 
-/** `invoke` returns the handler's value, `readView` the bundle; other operations return null. */
+/** `invoke` and the service calls return the value, `readView` the bundle; other operations return null. */
 export const PluginHostCallResult = Schema.Struct({ value: Schema.Json });
 export type PluginHostCallResult = typeof PluginHostCallResult.Type;
 

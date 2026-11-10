@@ -1,4 +1,5 @@
-// Calls into plugin services: from another plugin, through the host's checks, and from an agent.
+// Calls into plugin services: from another plugin or one of its views, from the interface and from an agent.
+// Every source takes the same way to the provider and differs only in who the provider sees and what it may call.
 import type { PluginHostError, PluginId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -18,8 +19,9 @@ import {
 
 const decodeServiceCall = Schema.decodeUnknownEffect(ServiceCallInput);
 
-/** Who the provider sees as the caller when an agent made the call; not a valid plugin name. */
+/** Who the provider sees as the caller of an agent or of the interface; neither is a valid plugin name. */
 const AGENT_CALLER = "t3:agent";
+const USER_CALLER = "t3:user";
 
 /** A service method an agent may call. */
 export interface AgentServiceMethod {
@@ -90,9 +92,68 @@ export interface ServiceCallDependencies {
   >;
 }
 
+interface ServiceRequest {
+  readonly service: string;
+  readonly method: string;
+  readonly input: Json;
+}
+
+const failureText = (error: PluginHostError) => error.detail ?? error.reason;
+
 export const makeServiceCalls = (dependencies: ServiceCallDependencies) => {
   const { slots, hostEnabled, claims, ensureRunning } = dependencies;
   const owners = () => serviceOwners(slots(), claims);
+
+  /** Why a service has no available provider, with what its provider waits for. */
+  const unavailable = (service: string) => {
+    const declaring = [...slots()].find((slot) => providedServices(slot).includes(service));
+    if (declaring === undefined)
+      return fail("not-found", `No plugin provides the service ${service}.`);
+    const state = declaring.state;
+    const why = !declaring.enabled
+      ? "is not enabled"
+      : declaring.consent !== "granted"
+        ? "needs consent again"
+        : state._tag === "waiting"
+          ? `is waiting for ${declaring.waitingFor.join(", ")}`
+          : state._tag === "quarantined"
+            ? `is quarantined: ${state.reason}`
+            : (declaring.problem ?? declaring.conflict ?? "is not active");
+    return fail("not-running", `${declaring.id} provides ${service} but ${why}.`);
+  };
+
+  /** The available provider of a service and the method it declares, if it does. */
+  const reach = Effect.fn("PluginServiceCall.reach")(function* (service: string, method: string) {
+    const provider = owners().get(service);
+    if (provider === undefined || !serviceAvailable(provider)) return yield* unavailable(service);
+    const declared = provider.registration?.manifest.provides
+      .find((candidate) => candidate.name === service)
+      ?.methods.find((candidate) => candidate.name === method);
+    return { provider, declared };
+  });
+
+  /** Starts the provider if it is not running and invokes the method; a call error carries the provider's own text. */
+  const forward = Effect.fn("PluginServiceCall.forward")(function* (
+    provider: Slot,
+    request: ServiceRequest,
+    caller: string,
+  ) {
+    const { process } = yield* ensureRunning(provider);
+    return yield* process
+      .invoke(serviceHandler(request.service, request.method), { input: request.input, caller })
+      .pipe(
+        Effect.mapError((error) =>
+          fail(
+            "call-failed",
+            error.detail === undefined ? error.reason : `${error.reason}: ${error.detail}`,
+          ),
+        ),
+      );
+  });
+
+  /** Names the service and its provider, so the caller can tell whose error it is. */
+  const withOrigin = (service: string, provider: Slot) => (error: PluginHostError) =>
+    fail(error.reason, `${service} (${provider.id}): ${failureText(error)}`);
 
   /** Forwards a call from `caller` to a service method, after checking everything the host can check. */
   const callFromPlugin = Effect.fn("PluginServiceCall.fromPlugin")(function* (
@@ -105,20 +166,33 @@ export const makeServiceCalls = (dependencies: ServiceCallDependencies) => {
     const { service, method } = request;
     if (!injectedServices(caller).includes(service))
       return yield* Effect.fail(`Plugin ${caller.id} does not declare a dependency on ${service}.`);
-    const provider = owners().get(service);
-    if (provider === undefined || !serviceAvailable(provider))
-      return yield* Effect.fail(`The service ${service} is not available.`);
-    const declared = provider.registration?.manifest.provides
-      .find((candidate) => candidate.name === service)
-      ?.methods.some((candidate) => candidate.name === method);
-    if (declared !== true)
+    const { provider, declared } = yield* reach(service, method).pipe(Effect.mapError(failureText));
+    if (declared === undefined)
       return yield* Effect.fail(`The service ${service} has no method ${method}.`);
-    const { process } = yield* ensureRunning(provider).pipe(
-      Effect.mapError((error) => `${service} (${provider.id}): ${error.message}`),
+    return yield* forward(provider, request, caller.id).pipe(
+      Effect.mapError((error) => failureText(withOrigin(service, provider)(error))),
     );
-    return yield* process
-      .invoke(serviceHandler(service, method), { input: request.input, caller: caller.id })
-      .pipe(Effect.mapError((error) => `${service}.${method}: ${error.message}`));
+  });
+
+  /** The same call, made by a view of `caller` on its behalf; the view sees only what the plugin injects. */
+  const callFromView = Effect.fn("PluginServiceCall.fromView")(function* (
+    caller: Slot,
+    request: ServiceRequest,
+  ) {
+    if (caller.offer === undefined)
+      return yield* fail("not-running", `${caller.id} does not offer views right now.`);
+    const { service, method } = request;
+    if (!injectedServices(caller).includes(service))
+      return yield* fail(
+        "not-found",
+        `Plugin ${caller.id} does not declare a dependency on ${service}.`,
+      );
+    const { provider, declared } = yield* reach(service, method);
+    if (declared === undefined)
+      return yield* fail("not-found", `The service ${service} has no method ${method}.`);
+    return yield* forward(provider, request, caller.id).pipe(
+      Effect.mapError(withOrigin(service, provider)),
+    );
   });
 
   /** The methods an agent may call now: marked `agent` in the manifest, on an available service. */
@@ -142,36 +216,11 @@ export const makeServiceCalls = (dependencies: ServiceCallDependencies) => {
     );
   });
 
-  /** Why a service has no available provider, with what its provider waits for. */
-  const unavailable = (service: string) => {
-    const declaring = [...slots()].find((slot) => providedServices(slot).includes(service));
-    if (declaring === undefined)
-      return fail("not-found", `No plugin provides the service ${service}.`);
-    const state = declaring.state;
-    const why = !declaring.enabled
-      ? "is not enabled"
-      : declaring.consent !== "granted"
-        ? "needs consent again"
-        : state._tag === "waiting"
-          ? `is waiting for ${declaring.waitingFor.join(", ")}`
-          : state._tag === "quarantined"
-            ? `is quarantined: ${state.reason}`
-            : (declaring.problem ?? declaring.conflict ?? "is not active");
-    return fail("not-running", `${declaring.id} provides ${service} but ${why}.`);
-  };
-
-  const callFromAgent = Effect.fn("PluginServiceCall.fromAgent")(function* (request: {
-    readonly service: string;
-    readonly method: string;
-    readonly input: Json;
-  }) {
+  const callFromAgent = Effect.fn("PluginServiceCall.fromAgent")(function* (
+    request: ServiceRequest,
+  ) {
     if (!hostEnabled()) return yield* fail("host-disabled");
-    const provider = owners().get(request.service);
-    if (provider === undefined || !serviceAvailable(provider))
-      return yield* unavailable(request.service);
-    const declared = provider.registration?.manifest.provides
-      .find((candidate) => candidate.name === request.service)
-      ?.methods.find((candidate) => candidate.name === request.method);
+    const { provider, declared } = yield* reach(request.service, request.method);
     if (declared === undefined || declared.agent !== true)
       return yield* fail(
         "not-found",
@@ -179,21 +228,22 @@ export const makeServiceCalls = (dependencies: ServiceCallDependencies) => {
       );
     const problem = inputProblem(declared.input, request.input);
     if (problem !== undefined) return yield* fail("invalid-input", problem);
-    const { process } = yield* ensureRunning(provider);
-    return yield* process
-      .invoke(serviceHandler(request.service, request.method), {
-        input: request.input,
-        caller: AGENT_CALLER,
-      })
-      .pipe(
-        Effect.mapError((error) =>
-          fail(
-            "call-failed",
-            error.detail === undefined ? error.reason : `${error.reason}: ${error.detail}`,
-          ),
-        ),
-      );
+    return yield* forward(provider, request, AGENT_CALLER);
   });
 
-  return { callFromPlugin, agentMethods, callFromAgent };
+  /** A method the interface offers: marked `ui` in the manifest, on an available service. */
+  const callFromUi = Effect.fn("PluginServiceCall.fromUi")(function* (request: ServiceRequest) {
+    if (!hostEnabled()) return yield* fail("host-disabled");
+    const { provider, declared } = yield* reach(request.service, request.method);
+    if (declared === undefined || declared.ui !== true)
+      return yield* fail(
+        "not-found",
+        `${request.service}.${request.method} is not a method the interface offers.`,
+      );
+    return yield* forward(provider, request, USER_CALLER).pipe(
+      Effect.mapError(withOrigin(request.service, provider)),
+    );
+  });
+
+  return { callFromPlugin, callFromView, callFromUi, agentMethods, callFromAgent };
 };
