@@ -107,4 +107,6 @@ it("needs input only for a non-object schema or required fields", () => {
   );
   expect(methodNeedsInput(method(schema))).toBe(true);
   expect(methodNeedsInput(method({ type: "string" }))).toBe(true);
+  // A required name the schema does not describe draws no field, so there is nothing to ask for.
+  expect(methodNeedsInput(method({ type: "object", required: ["ghost"] }))).toBe(false);
 });

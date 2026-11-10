@@ -4,7 +4,7 @@ import { AsyncResult } from "effect/reactivity";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useRightPanelStore, type ThreadRightPanelState } from "../rightPanelStore";
-import { serviceViewId } from "./serviceMethods";
+import { serviceOfViewId, serviceViewId } from "./serviceMethods";
 import { pluginHostEnvironment } from "./state";
 
 type ByThreadKey = Record<string, ThreadRightPanelState>;
@@ -14,12 +14,16 @@ export function prunePluginSurfaces(
   byThreadKey: ByThreadKey,
   environmentId: EnvironmentId,
   availableSurfaceIds: ReadonlySet<string>,
+  keepServicePanels = false,
 ): ByThreadKey {
   let next: ByThreadKey | null = null;
   for (const [threadKey, current] of Object.entries(byThreadKey)) {
     if (parseScopedThreadKey(threadKey)?.environmentId !== environmentId) continue;
     const surfaces = current.surfaces.filter(
-      (surface) => surface.kind !== "plugin" || availableSurfaceIds.has(surface.id),
+      (surface) =>
+        surface.kind !== "plugin" ||
+        availableSurfaceIds.has(surface.id) ||
+        (keepServicePanels && serviceOfViewId(surface.viewId) !== null),
     );
     if (surfaces.length === current.surfaces.length) continue;
     const activeStillExists = surfaces.some((surface) => surface.id === current.activeSurfaceId);
@@ -59,7 +63,13 @@ export function startPluginSurfacePruning(): void {
         ),
       ]);
       useRightPanelStore.setState((state) => ({
-        byThreadKey: prunePluginSurfaces(state.byThreadKey, environmentId, available),
+        // While the host switch is off the snapshot lists no plugins, so a service panel is unavailable, not removed.
+        byThreadKey: prunePluginSurfaces(
+          state.byThreadKey,
+          environmentId,
+          available,
+          !result.value.hostEnabled,
+        ),
       }));
     });
   }

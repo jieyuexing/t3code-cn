@@ -106,10 +106,10 @@ it("lists the ui methods of available services with their service name, and not 
     .toBeVisible();
   expect(group.getByRole("button", { name: /Internal/ }).elements()).toHaveLength(0);
   await expect
-    .element(group.getByRole("button", { name: "Open service panel · example.clock" }))
+    .element(group.getByRole("button", { name: "Open service panel  · example.clock" }))
     .toBeVisible();
   await expect
-    .element(group.getByRole("button", { name: "Open service panel · example.greeter" }))
+    .element(group.getByRole("button", { name: "Open service panel  · example.greeter" }))
     .toBeVisible();
 });
 
@@ -213,6 +213,17 @@ it("opens a view in the thread's panel and sends settings to the thread's enviro
     ],
   });
   await using screen = await render(<Probe />, { router: "/" });
+  // Methods first, then the service panels, then the plugins' own views.
+  expect(
+    [...screen.container.querySelectorAll("section button")].map((button) => button.textContent),
+  ).toEqual([
+    "Current time  · example.clock",
+    "Greet…  · example.greeter",
+    "Set tone… Modifies · example.greeter",
+    "Open service panel  · example.clock",
+    "Open service panel  · example.greeter",
+    "Open Echo Clock  · Echo Clock",
+  ]);
   await screen.getByRole("button", { name: "Open Echo Clock · Echo Clock" }).click();
   const state = Object.values(useRightPanelStore.getState().byThreadKey)[0];
   expect(state?.activeSurfaceId).toBe("plugin:example.echo-clock:clock");

@@ -1,5 +1,7 @@
 import type { PluginHostEntry, PluginHostSnapshot, PluginId } from "@t3tools/contracts";
 
+import { formShape } from "./serviceForm";
+
 /** The prefix of a service panel's `viewId`; a plugin's own view ids never contain a colon. */
 const SERVICE_VIEW_PREFIX = "service:";
 
@@ -24,14 +26,12 @@ const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * Whether a call must be given something to run. A schema that is not an object, or an object
- * with required fields, needs input; a method with no schema, or only optional fields, does not.
+ * Whether a call must be given something: the form has a required field, or the whole input is
+ * not an object. A method with no schema, or only optional fields, can be called as it is.
  */
 export function methodNeedsInput(method: DeclaredMethod): boolean {
-  const schema = method.input;
-  if (!isObject(schema)) return false;
-  if (typeof schema.type === "string" && schema.type !== "object") return true;
-  return Array.isArray(schema.required) && schema.required.length > 0;
+  const shape = formShape(method.input);
+  return shape.kind === "json" ? shape.required : shape.fields.some((field) => field.required);
 }
 
 /** What a call without a form sends: nothing, or an empty object for a method that takes optional fields. */

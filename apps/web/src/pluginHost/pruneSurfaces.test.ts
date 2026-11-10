@@ -130,4 +130,19 @@ describe("startPluginSurfacePruning", () => {
       "plugin:example.echo-clock:service:example.clock",
     ]);
   });
+
+  it("keeps service panels while the host switch is off, since no plugin is listed then", () => {
+    const store = useRightPanelStore.getState();
+    store.openPlugin(refFirst, {
+      kind: "plugin",
+      pluginId: "example.greeter",
+      viewId: "service:example.greeter",
+      title: "example.greeter",
+    });
+    store.openPlugin(refFirst, clock);
+
+    startPluginSurfacePruning();
+    publish(first, { hostEnabled: false, registered: 2, plugins: [], views: [], services: [] });
+    expect(ids(refFirst)).toEqual(["plugin:example.greeter:service:example.greeter"]);
+  });
 });

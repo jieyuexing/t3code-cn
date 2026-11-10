@@ -69,28 +69,6 @@ export function usePluginPaletteItems(
 
   const items: CommandPaletteActionItem[] = [];
   if (environmentId !== null && snapshot !== null && canCall) {
-    if (thread) {
-      for (const view of snapshot.views) {
-        items.push({
-          kind: "action",
-          value: `plugin-view:${view.pluginId}:${view.viewId}`,
-          searchTerms: [view.title, view.pluginName, "plugin", "panel", "view"],
-          title: `Open ${view.title}`,
-          timestamp: view.pluginName,
-          icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
-          run: async () => {
-            useRightPanelStore
-              .getState()
-              .openPlugin(scopeThreadRef(thread.environmentId, thread.id), {
-                kind: "plugin",
-                pluginId: view.pluginId,
-                viewId: view.viewId,
-                title: view.title,
-              });
-          },
-        });
-      }
-    }
     const providers = new Map<string, string>();
     for (const entry of availableUiMethods(snapshot)) {
       providers.set(entry.service, entry.provider.id);
@@ -168,6 +146,26 @@ export function usePluginPaletteItems(
           timestamp: service,
           icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
           run: async () => openServicePanel(thread, providerId, service),
+        });
+      }
+      for (const view of snapshot.views) {
+        items.push({
+          kind: "action",
+          value: `plugin-view:${view.pluginId}:${view.viewId}`,
+          searchTerms: [view.title, view.pluginName, "plugin", "panel", "view"],
+          title: `Open ${view.title}`,
+          timestamp: view.pluginName,
+          icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            useRightPanelStore
+              .getState()
+              .openPlugin(scopeThreadRef(thread.environmentId, thread.id), {
+                kind: "plugin",
+                pluginId: view.pluginId,
+                viewId: view.viewId,
+                title: view.title,
+              });
+          },
         });
       }
     }
