@@ -63,6 +63,15 @@ const until = (
 const isRunning = (snapshot: PluginHostSnapshot, id = PLUGIN_ID) =>
   entryOf(snapshot, id)?.state._tag === "running";
 
+const dropViews = (manifestText: string) => {
+  const manifest = JSON.parse(manifestText);
+  return JSON.stringify({
+    ...manifest,
+    views: [],
+    capabilities: manifest.capabilities.filter((name: string) => name !== "views"),
+  });
+};
+
 const pidAlive = (pid: number) => {
   try {
     process.kill(pid, 0);
@@ -171,36 +180,59 @@ describe("PluginHost", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.live(
-    "reload applies a new manifest title, bumps the generation and asks for consent again",
-    () =>
-      Effect.gen(function* () {
-        const { fs, path, host, copyExample } = yield* setup;
-        const directory = yield* copyExample("echo");
-        yield* call(host, { _tag: "add", path: directory });
-        yield* call(host, { _tag: "enable", pluginId: PLUGIN_ID as never, grantConsent: true });
-        const before = entryOf((yield* until(host, isRunning))!)!;
+  it.live("reload applies a new title and keeps the consent, bumping the generation", () =>
+    Effect.gen(function* () {
+      const { fs, path, host, copyExample } = yield* setup;
+      const directory = yield* copyExample("echo");
+      yield* call(host, { _tag: "add", path: directory });
+      yield* call(host, { _tag: "enable", pluginId: PLUGIN_ID as never, grantConsent: true });
+      const before = entryOf((yield* until(host, isRunning))!)!;
 
-        const manifestPath = path.join(directory, "t3-plugin.json");
-        const manifest = (yield* fs.readFileString(manifestPath)).replace(
-          '"title": "Echo Clock"',
-          '"title": "Renamed Clock"',
-        );
-        yield* fs.writeFileString(
-          manifestPath,
-          manifest.replace('"name": "Echo Clock"', '"name": "Renamed"'),
-        );
+      const manifestPath = path.join(directory, "t3-plugin.json");
+      const manifest = (yield* fs.readFileString(manifestPath))
+        .replace('"title": "Echo Clock"', '"title": "Renamed Clock"')
+        .replace('"name": "Echo Clock"', '"name": "Renamed"');
+      yield* fs.writeFileString(manifestPath, manifest);
+      yield* call(host, { _tag: "reload", pluginId: PLUGIN_ID as never });
+      const after = yield* until(host, (s) => isRunning(s) && entryOf(s)?.name === "Renamed");
+      expect(after?.views[0]?.title).toBe("Renamed Clock");
+      expect(entryOf(after!)?.consent).toBe("granted");
+      expect(entryOf(after!)!.generation).toBeGreaterThan(before.generation);
+      expect(entryOf(after!)!.pid).not.toBe(before.pid);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("reload asks for consent again when the entry or the capabilities change", () =>
+    Effect.gen(function* () {
+      const { fs, path, host, copyExample } = yield* setup;
+      const directory = yield* copyExample("echo");
+      yield* call(host, { _tag: "add", path: directory });
+      yield* call(host, { _tag: "enable", pluginId: PLUGIN_ID as never, grantConsent: true });
+      yield* until(host, isRunning);
+      const manifestPath = path.join(directory, "t3-plugin.json");
+      const original = yield* fs.readFileString(manifestPath);
+      const reloadWith = Effect.fn("reloadWith")(function* (text: string) {
+        yield* fs.writeFileString(manifestPath, text);
         yield* call(host, { _tag: "reload", pluginId: PLUGIN_ID as never });
-        const reloaded = yield* until(host, (s) => entryOf(s)?.name === "Renamed");
-        expect(entryOf(reloaded!)?.consent).toBe("required");
-        expect(entryOf(reloaded!)?.state._tag).toBe("idle");
+        return entryOf((yield* until(host, (s) => entryOf(s)?.state._tag !== "starting"))!)!;
+      });
 
-        yield* call(host, { _tag: "enable", pluginId: PLUGIN_ID as never, grantConsent: true });
-        const after = yield* until(host, isRunning);
-        expect(after?.views[0]?.title).toBe("Renamed Clock");
-        expect(entryOf(after!)!.generation).toBeGreaterThan(before.generation);
-        expect(entryOf(after!)!.pid).not.toBe(before.pid);
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+      yield* fs.copyFile(path.join(directory, "index.mjs"), path.join(directory, "other.mjs"));
+      const entryChanged = yield* reloadWith(original.replace('"index.mjs"', '"other.mjs"'));
+      expect([entryChanged.consent, entryChanged.state._tag]).toEqual(["required", "idle"]);
+
+      const withoutViews = dropViews(original);
+      const capabilitiesChanged = yield* reloadWith(withoutViews);
+      expect(capabilitiesChanged.problem).toBeUndefined();
+      expect([capabilitiesChanged.consent, capabilitiesChanged.state._tag]).toEqual([
+        "required",
+        "idle",
+      ]);
+
+      const restored = yield* reloadWith(original);
+      expect(restored.consent).toBe("granted");
+      expect(isRunning((yield* until(host, isRunning))!)).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.live("refuses bad manifests and leaves a good plugin untouched", () =>

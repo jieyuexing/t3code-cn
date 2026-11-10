@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- The consent digest is a plain SHA-256 of the manifest bytes.
+// @effect-diagnostics nodeBuiltinImport:off -- The consent digest is a plain SHA-256.
 import * as NodeCrypto from "node:crypto";
 
 import {
@@ -12,6 +12,21 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+/** Consent covers what decides which code runs and what it may use; titles and settings do not. */
+const consentDigest = (manifest: PluginManifest) =>
+  NodeCrypto.createHash("sha256")
+    .update(
+      encodeJson({
+        id: manifest.id,
+        entry: manifest.entry,
+        capabilities: manifest.capabilities.toSorted(),
+        inject: manifest.inject.toSorted(),
+      }),
+    )
+    .digest("hex");
 
 const decodeManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(PluginManifest));
 
@@ -31,7 +46,7 @@ export interface PluginRegistration {
   readonly directory: string;
   /** Real path of the entry module, inside `directory`. */
   readonly entryPath: string;
-  /** SHA-256 of the manifest bytes; consent lasts only while it is unchanged. */
+  /** Consent lasts only while this digest of id, entry, capabilities and inject is unchanged. */
   readonly digest: string;
 }
 
@@ -140,6 +155,6 @@ export const loadPluginDirectory = Effect.fn("PluginManifestLoader.loadPluginDir
     if (view.style !== undefined) yield* resolve(view.style, `style of view ${view.id}`);
   }
 
-  const digest = NodeCrypto.createHash("sha256").update(raw).digest("hex");
+  const digest = consentDigest(manifest);
   return { manifest, directory: realDirectory, entryPath, digest } satisfies PluginRegistration;
 });
