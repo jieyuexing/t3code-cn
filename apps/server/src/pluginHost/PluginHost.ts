@@ -32,15 +32,16 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import { ServerConfig } from "../config.ts";
 import { HostCallInput, jsonBytes, type Json, type PluginDataFile } from "./PluginIpc.ts";
-import {
-  loadPluginDirectory,
-  resolveInsideDirectory,
-  type PluginRegistration,
-} from "./PluginManifestLoader.ts";
+import { loadPluginDirectory, type PluginRegistration } from "./PluginManifestLoader.ts";
 import { spawnPluginProcess, type PluginProcess } from "./PluginProcess.ts";
 import { makePluginStore, type PluginStore, type RegistryRecord } from "./PluginStore.ts";
+import {
+  issueViewUrl,
+  makePluginViewDelivery,
+  type PluginViewDeliveryOptions,
+} from "./PluginViewDelivery.ts";
 
-export interface PluginHostOptions {
+export interface PluginHostOptions extends PluginViewDeliveryOptions {
   readonly stateDir: string;
   /** What starts a plugin process; the default is this executable's hidden `__plugin-host` command. */
   readonly command: string;
@@ -58,8 +59,6 @@ export interface PluginHostOptions {
 }
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
-const MAX_VIEW_SCRIPT_BYTES = 1024 * 1024;
-const MAX_VIEW_STYLE_BYTES = 256 * 1024;
 const MAX_STORAGE_VALUE_BYTES = 256 * 1024;
 
 export class PluginHost extends Context.Service<
@@ -89,6 +88,8 @@ interface Slot {
   scope: Scope.Closeable | undefined;
   /** Holds the offered views and commands; closed while the plugin cannot serve them. */
   offer: Scope.Closeable | undefined;
+  /** The delivered copy of each offered view's page, by view id. */
+  readonly viewFiles: Map<string, string>;
   /** Makes concurrent first calls share one process start. */
   readonly startLock: Semaphore.Semaphore;
   settingValues: Record<string, PluginSettingValue>;
@@ -130,11 +131,12 @@ const resolveSettings = (
 };
 
 export const make = Effect.fn("PluginHost.make")(function* (
-  overrides: Partial<PluginHostOptions> & { readonly stateDir: string },
+  overrides: Partial<PluginHostOptions> & PluginViewDeliveryOptions & { readonly stateDir: string },
 ) {
   const fs = yield* FileSystem.FileSystem;
   const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
   const store: PluginStore = yield* makePluginStore(overrides.stateDir);
+  const delivery = yield* makePluginViewDelivery(overrides);
   const load = (directory: string) => loadPluginDirectory(directory).pipe(Effect.provide(platform));
   const self = yield* resolveSelfInvocation();
   const options: PluginHostOptions = {
@@ -186,6 +188,8 @@ export const make = Effect.fn("PluginHost.make")(function* (
       state: slot.state,
       ...(slot.running?.pid === undefined ? {} : { pid: slot.running.pid }),
       ...(slot.problem === undefined ? {} : { problem: slot.problem }),
+      ignoredFields: registration?.ignored ?? [],
+      rejectedViews: registration?.rejectedViews ?? [],
       settings: registration?.manifest.settings ?? [],
       settingValues: slot.settingValues,
     };
@@ -414,6 +418,8 @@ export const make = Effect.fn("PluginHost.make")(function* (
     slot.scope = undefined;
     slot.offer = undefined;
     if (scope !== undefined) yield* Scope.close(scope, Exit.void);
+    yield* delivery.discard(slot.viewFiles.values());
+    slot.viewFiles.clear();
     yield* setState(slot, { _tag: "idle" });
   });
 
@@ -430,6 +436,9 @@ export const make = Effect.fn("PluginHost.make")(function* (
     }
     const registration = loaded.value;
     slot.registration = registration;
+    yield* Effect.forEach(registration.ignored, (note) =>
+      Effect.logWarning(`Plugin ${slot.id}: ignored ${note}.`),
+    );
     slot.problem =
       registration.manifest.id === slot.id
         ? undefined
@@ -454,6 +463,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
     running: undefined,
     scope: undefined,
     offer: undefined,
+    viewFiles: new Map(),
     startLock: Semaphore.makeUnsafe(1),
     settingValues: {},
     views: [],
@@ -480,6 +490,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
     return slot === undefined ? Effect.fail(fail("not-found", pluginId)) : Effect.succeed(slot);
   };
 
+  /** Delivers a view's page as a signed URL; the page never travels over the socket. */
   const readViewBundle = Effect.fn("PluginHost.readView")(function* (
     slot: Slot,
     viewId: string,
@@ -490,20 +501,22 @@ export const make = Effect.fn("PluginHost.make")(function* (
       return yield* fail("not-running", `${slot.id} does not offer views right now.`);
     if (generation !== slot.generation) return yield* fail("stale-generation");
     const view = registration.manifest.views.find((candidate) => candidate.id === viewId);
-    if (view === undefined) return yield* fail("not-found", viewId);
-    const read = (relative: string, limit: number) =>
-      resolveInsideDirectory(registration.directory, relative).pipe(
-        Effect.provide(platform),
-        Effect.flatMap((file) => fs.readFileString(file)),
-        Effect.mapError(() => fail("io-failed", `${relative} cannot be read.`)),
-        Effect.filterOrFail(
-          (text) => Buffer.byteLength(text) <= limit,
-          () => fail("io-failed", `${relative} is too large.`),
-        ),
-      );
-    const script = yield* read(view.script, MAX_VIEW_SCRIPT_BYTES);
-    const style = view.style === undefined ? null : yield* read(view.style, MAX_VIEW_STYLE_BYTES);
-    return { generation, script, style };
+    if (view === undefined) {
+      const rejected = registration.rejectedViews.find((candidate) => candidate.viewId === viewId);
+      return yield* rejected === undefined
+        ? fail("not-found", viewId)
+        : fail("view-rejected", rejected.reason);
+    }
+    const delivered = yield* delivery.deliver({
+      pluginId: slot.id,
+      viewId,
+      directory: registration.directory,
+      html: view.html,
+    });
+    const previous = slot.viewFiles.get(viewId);
+    if (previous !== undefined && previous !== delivered.file) yield* delivery.discard([previous]);
+    slot.viewFiles.set(viewId, delivered.file);
+    return { generation, url: delivered.url, expiresAt: delivered.expiresAt };
   });
 
   const invoke = Effect.fn("PluginHost.invoke")(function* (
@@ -615,6 +628,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
 
   const activateAll = Effect.fn("PluginHost.activateAll")(function* () {
     consent = yield* store.readConsent.pipe(Effect.orElseSucceed(() => ({})));
+    yield* delivery.sweep;
     for (const slot of slots.values()) {
       yield* refresh(slot);
       yield* start(slot);
@@ -724,6 +738,10 @@ export const layer = Layer.effect(
   PluginHost,
   Effect.gen(function* () {
     const config = yield* ServerConfig;
-    return yield* make({ stateDir: config.stateDir });
+    return yield* make({
+      stateDir: config.stateDir,
+      attachmentsDir: config.attachmentsDir,
+      issueUrl: issueViewUrl,
+    });
   }),
 );

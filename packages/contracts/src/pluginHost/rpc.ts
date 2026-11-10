@@ -52,6 +52,7 @@ export const PluginHostErrorReason = Schema.Literals([
   "not-found",
   "already-registered",
   "invalid-plugin",
+  "view-rejected",
   "consent-required",
   "not-running",
   "stale-generation",

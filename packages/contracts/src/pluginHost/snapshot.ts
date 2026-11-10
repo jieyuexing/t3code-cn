@@ -41,6 +41,10 @@ export const PluginHostEntry = Schema.Struct({
   pid: Schema.optionalKey(NonNegativeInt),
   /** Why the plugin cannot be loaded or started; absent when it can. */
   problem: Schema.optionalKey(Schema.String),
+  /** Manifest content the host reported and ignored, such as unknown top-level fields. */
+  ignoredFields: Schema.Array(Schema.String),
+  /** Views left out because their page is missing, outside the plugin or too large; the rest of the plugin loads. */
+  rejectedViews: Schema.Array(Schema.Struct({ viewId: Schema.String, reason: Schema.String })),
   settings: Schema.Array(PluginSettingField),
   settingValues: Schema.Record(Schema.String, PluginSettingValue),
 });

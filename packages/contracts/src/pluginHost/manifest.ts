@@ -1,23 +1,62 @@
-// The shape follows the upstream plugin proposal so plugins can move between hosts.
-// Fields this host does not implement (tools, actions, ...) are ignored on decode; capabilities it does not implement are refused by the loader.
+// Agent Plugins 1.0 (https://agent-plugins.org/specification): a root `plugin.json` whose host-specific part
+// lives under `extensions[PLUGIN_EXTENSION_NAMESPACE]`. This host reads nothing else from the manifest.
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { TrimmedNonEmptyString } from "../baseSchemas.ts";
 
 export const PLUGIN_HOST_API_VERSION = 1;
-export const PLUGIN_MANIFEST_FILE = "t3-plugin.json";
+export const PLUGIN_MANIFEST_FILE = "plugin.json";
 export const PLUGIN_MANIFEST_MAX_BYTES = 64 * 1024;
+export const PLUGIN_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+export const PLUGIN_EXTENSION_NAMESPACE = "com.jieyuexing.t3code";
 
 /** Capability names this host serves; the `x.` prefix marks fork-only ones. */
 export const PLUGIN_HOST_CAPABILITIES = ["settings", "views", "x.commands"] as const;
 
-/** Owner-qualified id such as `acme.notifier`: two or more lowercase dot segments. */
+/** The only top-level fields the specification permits in `plugin.json`. */
+export const PLUGIN_MANIFEST_FIELDS = [
+  "$schema",
+  "name",
+  "version",
+  "description",
+  "author",
+  "homepage",
+  "repository",
+  "license",
+  "keywords",
+  "extensions",
+] as const;
+
+/** The specification's plugin name: 1-64 of a-z, 0-9, `-` and `.`, alphanumeric at both ends, no `--` or `..`. */
 export const PluginId = TrimmedNonEmptyString.check(
-  Schema.isMaxLength(128),
-  Schema.isPattern(/^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+$/),
+  Schema.isMaxLength(64),
+  Schema.isPattern(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/),
+  Schema.makeFilter((name) => !/--|\.\./.test(name) || "A plugin name has no `--` or `..`."),
 ).pipe(Schema.brand("PluginId"));
 export type PluginId = typeof PluginId.Type;
+
+const PluginAuthor = Schema.Record(Schema.String, Schema.String).check(
+  Schema.makeFilter(
+    (author) =>
+      Object.keys(author).every((key) => ["name", "email", "url"].includes(key)) ||
+      "An author has only name, email and url.",
+  ),
+);
+
+/** The portable part of `plugin.json`; unknown top-level fields are reported by the loader, not rejected. */
+export const PluginStandardManifest = Schema.Struct({
+  $schema: Schema.Literal(PLUGIN_SCHEMA_ID),
+  name: PluginId,
+  version: Schema.optionalKey(Schema.String),
+  description: Schema.optionalKey(Schema.String),
+  author: Schema.optionalKey(PluginAuthor),
+  homepage: Schema.optionalKey(Schema.String),
+  repository: Schema.optionalKey(Schema.String),
+  license: Schema.optionalKey(Schema.String),
+  keywords: Schema.optionalKey(Schema.Array(Schema.String)),
+  extensions: Schema.optionalKey(Schema.Unknown),
+});
 
 const PluginCapabilityName = Schema.String.check(
   Schema.isMaxLength(64),
@@ -36,8 +75,8 @@ const PluginViewDeclaration = Schema.Struct({
   id: Schema.String.check(Schema.isMaxLength(32), Schema.isPattern(/^[a-z][a-z0-9-]*$/)),
   title: TrimmedNonEmptyString.check(Schema.isMaxLength(60)),
   placement: Schema.Literal("side-panel"),
-  script: assetPath(/\.js$/),
-  style: Schema.optionalKey(assetPath(/\.css$/)),
+  /** A whole HTML page inside the plugin directory; the loader checks it per view, so one bad page rejects only that view. */
+  html: Schema.String.check(Schema.isMaxLength(256)),
 });
 export type PluginViewDeclaration = typeof PluginViewDeclaration.Type;
 
@@ -50,7 +89,7 @@ export type PluginCommandDeclaration = typeof PluginCommandDeclaration.Type;
 
 /** The plugin handler a command runs; plugins register it with `context.handle`. */
 export const pluginCommandHandler = (commandId: string) => `command:${commandId}`;
-/** The plugin handler a view's call reaches, named as in the upstream proposal. */
+/** The plugin handler a view's call reaches. */
 export const pluginViewHandler = (viewId: string, handler: string) => `view:${viewId}:${handler}`;
 
 const settingBase = {
@@ -82,11 +121,8 @@ export type PluginSettingField = typeof PluginSettingField.Type;
 export const PluginSettingValue = Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]);
 export type PluginSettingValue = typeof PluginSettingValue.Type;
 
-export const PluginManifest = Schema.Struct({
-  id: PluginId,
-  name: TrimmedNonEmptyString.check(Schema.isMaxLength(100)),
-  version: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
-  description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(500))),
+/** The contents of `extensions[PLUGIN_EXTENSION_NAMESPACE]`; other keys are ignored. */
+export const PluginHostExtension = Schema.Struct({
   apiVersion: Schema.Int,
   entry: assetPath(/\.m?js$/),
   capabilities: Schema.Array(PluginCapabilityName)
@@ -106,4 +142,4 @@ export const PluginManifest = Schema.Struct({
     .check(Schema.isMaxLength(32))
     .pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
-export type PluginManifest = typeof PluginManifest.Type;
+export type PluginHostExtension = typeof PluginHostExtension.Type;

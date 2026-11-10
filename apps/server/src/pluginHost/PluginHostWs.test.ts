@@ -236,6 +236,9 @@ it.live("plugin host: enable, invoke and disable through the websocket layer, ga
       stateDir: path.join(root, "state"),
       command: process.execPath,
       args: [`${import.meta.dirname}/child.mjs`],
+      attachmentsDir: path.join(root, "attachments"),
+      issueUrl: (attachmentId) =>
+        Effect.succeed({ relativeUrl: `/api/assets/test/${attachmentId}`, expiresAt: 1 }),
     });
     const services = Layer.mergeAll(layerRpcServices, Layer.succeed(PluginHost.PluginHost, host));
     const serverBrowser = yield* ServerBrowser.ServerBrowser;

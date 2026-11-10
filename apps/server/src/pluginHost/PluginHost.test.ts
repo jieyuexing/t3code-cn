@@ -12,6 +12,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import { MCP_APP_MAX_HTML_BYTES } from "@t3tools/shared/mcpApp";
 
 import * as PluginHost from "./PluginHost.ts";
 import { spawnPluginProcess } from "./PluginProcess.ts";
@@ -26,8 +27,16 @@ const pluginId = PLUGIN_ID as never;
 
 type Host = PluginHost.PluginHost["Service"];
 
-const makeOptions = (spawnCounter: { count: number }) => ({
+/** Stands in for the signed asset route; the route itself is tested in PluginHostViews.test.ts. */
+const viewOptions = (root: string) => ({
+  attachmentsDir: `${root}/attachments`,
+  issueUrl: (attachmentId: string) =>
+    Effect.succeed({ relativeUrl: `/api/assets/test/${attachmentId}`, expiresAt: 1 }),
+});
+
+const makeOptions = (spawnCounter: { count: number }, root: string) => ({
   ...CHILD,
+  ...viewOptions(root),
   maxFailures: 3,
   restartBackoff: Duration.millis(1),
   maxRestartBackoff: Duration.millis(1),
@@ -61,7 +70,7 @@ const setup = Effect.fn("setup")(function* (options?: { readonly hostEnabled?: b
     return directory;
   });
   const spawns = { count: 0 };
-  const host = yield* PluginHost.make({ stateDir, ...makeOptions(spawns) });
+  const host = yield* PluginHost.make({ stateDir, ...makeOptions(spawns, root) });
   if (options?.hostEnabled !== false) yield* call(host, { _tag: "setHostEnabled", enabled: true });
   // Every snapshot from now on, in order, so a test waits for a transition instead of polling.
   const snapshots = yield* Queue.unbounded<PluginHostSnapshot>();
@@ -82,14 +91,20 @@ const setup = Effect.fn("setup")(function* (options?: { readonly hostEnabled?: b
 
 const stateOf = (snapshot: PluginHostSnapshot | undefined) => entryOf(snapshot!)?.state._tag;
 
-const dropViews = (manifestText: string) => {
+const NAMESPACE = "com.jieyuexing.t3code";
+
+/** Edits the host extension of a copied echo-clock manifest. */
+const editExtension = (manifestText: string, change: (extension: Record<string, any>) => void) => {
   const manifest = JSON.parse(manifestText);
-  return JSON.stringify({
-    ...manifest,
-    views: [],
-    capabilities: manifest.capabilities.filter((name: string) => name !== "views"),
-  });
+  change(manifest.extensions[NAMESPACE]);
+  return JSON.stringify(manifest);
 };
+
+const dropViews = (manifestText: string) =>
+  editExtension(manifestText, (extension) => {
+    extension.views = [];
+    extension.capabilities = extension.capabilities.filter((name: string) => name !== "views");
+  });
 
 const pidAlive = (pid: number) => {
   try {
@@ -183,14 +198,28 @@ describe("PluginHost", () => {
 
   it.live("serves settings, storage and view bundles to the plugin and its views", () =>
     Effect.gen(function* () {
-      const { host, copyExample, invoke } = yield* setup();
+      const { fs, root, host, copyExample, spawns, invoke } = yield* setup();
       yield* call(host, { _tag: "add", path: yield* copyExample("echo") });
       yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
       const generation = entryOf((yield* latest(host))!)!.generation;
 
-      // A view's script needs no process, only the activation it was offered under.
-      const bundle = yield* call(host, { _tag: "readView", pluginId, viewId: "clock", generation });
-      expect(JSON.stringify(bundle)).toContain("textContent");
+      // A view's page needs no process, only the activation it was offered under.
+      const delivered = yield* call(host, {
+        _tag: "readView",
+        pluginId,
+        viewId: "clock",
+        generation,
+      });
+      expect(spawns.count).toBe(0);
+      const { url } = (delivered.value ?? {}) as { url: string };
+      expect(url).toMatch(/^\/api\/assets\/test\/plugin-view-[0-9a-f-]{36}-html$/);
+      const page = yield* fs.readFileString(`${root}/attachments/${url.split("/").at(-1)}.html`);
+      expect(page).toContain("Content-Security-Policy");
+      expect(page).toContain("default-src 'none'");
+      expect(page).toContain("t3-view:ready");
+      expect(
+        yield* call(host, { _tag: "readView", pluginId, viewId: "clock", generation }),
+      ).toEqual(delivered);
       const stale = yield* call(host, {
         _tag: "readView",
         pluginId,
@@ -228,16 +257,16 @@ describe("PluginHost", () => {
       const before = entryOf((yield* latest(host))!)!;
       expect(spawns.count).toBe(1);
 
-      const manifestPath = path.join(directory, "t3-plugin.json");
+      const manifestPath = path.join(directory, "plugin.json");
       const manifest = (yield* fs.readFileString(manifestPath))
         .replace('"title": "Echo Clock"', '"title": "Renamed Clock"')
-        .replace('"name": "Echo Clock"', '"name": "Renamed"');
+        .replace('"version": "0.1.0"', '"version": "0.2.0"');
       yield* fs.writeFileString(manifestPath, manifest);
       yield* call(host, { _tag: "reload", pluginId });
       const reloaded = yield* latest(host);
       const entry = entryOf(reloaded!)!;
-      expect([entry.name, entry.consent, entry.state._tag]).toEqual([
-        "Renamed",
+      expect([entry.version, entry.consent, entry.state._tag]).toEqual([
+        "0.2.0",
         "granted",
         "standby",
       ]);
@@ -259,7 +288,7 @@ describe("PluginHost", () => {
       const directory = yield* copyExample("echo");
       yield* call(host, { _tag: "add", path: directory });
       yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
-      const manifestPath = path.join(directory, "t3-plugin.json");
+      const manifestPath = path.join(directory, "plugin.json");
       const original = yield* fs.readFileString(manifestPath);
       const reloadWith = Effect.fn("reloadWith")(function* (text: string) {
         yield* fs.writeFileString(manifestPath, text);
@@ -268,7 +297,7 @@ describe("PluginHost", () => {
       });
 
       yield* fs.copyFile(path.join(directory, "index.mjs"), path.join(directory, "other.mjs"));
-      const entryChanged = yield* reloadWith(original.replace('"index.mjs"', '"other.mjs"'));
+      const entryChanged = yield* reloadWith(original.replace('"./index.mjs"', '"./other.mjs"'));
       expect([entryChanged.consent, entryChanged.state._tag]).toEqual(["required", "idle"]);
 
       const capabilitiesChanged = yield* reloadWith(dropViews(original));
@@ -285,9 +314,9 @@ describe("PluginHost", () => {
 
   it.live("refuses bad manifests and leaves a good plugin untouched", () =>
     Effect.gen(function* () {
-      const { fs, path, stateDir, host, copyExample } = yield* setup();
+      const { fs, path, root, stateDir, host, copyExample } = yield* setup();
       const good = yield* copyExample("good");
-      const manifestOf = (directory: string) => path.join(directory, "t3-plugin.json");
+      const manifestOf = (directory: string) => path.join(directory, "plugin.json");
       const mutate = Effect.fn("mutate")(function* (
         name: string,
         change: (text: string) => string,
@@ -300,7 +329,24 @@ describe("PluginHost", () => {
         return directory;
       });
       const badPaths = {
-        traversal: yield* mutate("traversal", (text) => text.replace('"index.mjs"', '"../x.js"')),
+        "no-schema": yield* mutate("no-schema", (text) =>
+          text.replace(/\s*"\$schema": "[^"]*",/, ""),
+        ),
+        "wrong-schema": yield* mutate("wrong-schema", (text) => text.replace("/1.0.0/", "/2.0.0/")),
+        "name-case": yield* mutate("name-case", (text) =>
+          text.replace('"name": "example.echo-clock"', '"name": "Example.Echo"'),
+        ),
+        "name-dots": yield* mutate("name-dots", (text) =>
+          text.replace('"name": "example.echo-clock"', '"name": "example..echo"'),
+        ),
+        "no-namespace": yield* mutate("no-namespace", (text) =>
+          text.replace(NAMESPACE, "com.other.client"),
+        ),
+        "extensions-not-object": yield* mutate("extensions-not-object", (text) => {
+          const manifest = JSON.parse(text);
+          return JSON.stringify({ ...manifest, extensions: "nope" });
+        }),
+        traversal: yield* mutate("traversal", (text) => text.replace('"./index.mjs"', '"../x.js"')),
         capability: yield* mutate("capability", (text) =>
           text.replace('"views", "x.commands"', '"views", "x.commands", "tools"'),
         ),
@@ -318,6 +364,12 @@ describe("PluginHost", () => {
         ),
       };
       const expectedProblem = {
+        "no-schema": "$schema",
+        "wrong-schema": "$schema",
+        "name-case": "name",
+        "name-dots": "name",
+        "no-namespace": "contributes nothing to the T3 host",
+        "extensions-not-object": "contributes nothing to the T3 host",
         traversal: "entry",
         capability: "does not support tools",
         oversize: "64 KiB",
@@ -351,6 +403,7 @@ describe("PluginHost", () => {
       const second = yield* PluginHost.make({
         stateDir,
         ...CHILD,
+        ...viewOptions(root),
         stopGrace: Duration.millis(500),
       });
       const snapshot = yield* latest(second);
@@ -366,6 +419,123 @@ describe("PluginHost", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.live("rejects only the view whose page is outside the plugin or too large", () =>
+    Effect.gen(function* () {
+      const { fs, path, host, copyExample, invoke } = yield* setup();
+      const directory = yield* copyExample("views");
+      const manifestPath = path.join(directory, "plugin.json");
+      yield* fs.writeFileString(
+        manifestPath,
+        editExtension(yield* fs.readFileString(manifestPath), (extension) => {
+          extension.views = [
+            ...extension.views,
+            { id: "outside", title: "Outside", placement: "side-panel", html: "../x.html" },
+            { id: "huge", title: "Huge", placement: "side-panel", html: "./huge.html" },
+            { id: "missing", title: "Missing", placement: "side-panel", html: "./missing.html" },
+          ];
+        }),
+      );
+      yield* fs.writeFile(
+        path.join(directory, "huge.html"),
+        new Uint8Array(MCP_APP_MAX_HTML_BYTES + 1).fill(120),
+      );
+      yield* call(host, { _tag: "add", path: directory });
+      yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
+
+      const snapshot = yield* latest(host);
+      expect(stateOf(snapshot)).toBe("standby");
+      expect(snapshot?.views.map((view) => view.viewId)).toEqual(["clock"]);
+      expect(entryOf(snapshot!)?.rejectedViews.map((view) => view.viewId)).toEqual([
+        "outside",
+        "huge",
+        "missing",
+      ]);
+      const generation = entryOf(snapshot!)!.generation;
+      for (const viewId of ["outside", "huge", "missing"]) {
+        const error = yield* call(host, { _tag: "readView", pluginId, viewId, generation }).pipe(
+          Effect.flip,
+        );
+        expect([viewId, error.reason]).toEqual([viewId, "view-rejected"]);
+      }
+      const clock = yield* call(host, { _tag: "readView", pluginId, viewId: "clock", generation });
+      expect((clock.value as { url: string }).url).toContain("plugin-view-");
+      expect(yield* invoke("echo", 1)).toEqual({ value: 1 });
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live(
+    "loads a manifest with unknown fields and other namespaces, and reports what it ignored",
+    () =>
+      Effect.gen(function* () {
+        const { fs, path, host, copyExample, invoke } = yield* setup();
+        const directory = yield* copyExample("extra");
+        const manifestPath = path.join(directory, "plugin.json");
+        const manifest = JSON.parse(yield* fs.readFileString(manifestPath));
+        manifest.hooks = { onStart: "./hook.sh" };
+        manifest.author = { name: "Someone", url: "https://example.com" };
+        manifest.keywords = ["clock"];
+        manifest.extensions["com.other.client"] = { anything: [1, 2, 3], nested: { ok: true } };
+        yield* fs.writeFileString(manifestPath, JSON.stringify(manifest));
+        yield* call(host, { _tag: "add", path: directory });
+        yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
+
+        const entry = entryOf((yield* latest(host))!)!;
+        expect(entry.problem).toBeUndefined();
+        expect(entry.ignoredFields).toEqual(['unknown top-level field "hooks"']);
+        expect(yield* invoke("echo", 2)).toEqual({ value: 2 });
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("does not recognise the old t3-plugin.json", () =>
+    Effect.gen(function* () {
+      const { fs, path, host, copyExample } = yield* setup();
+      const directory = yield* copyExample("legacy");
+      yield* fs.rename(path.join(directory, "plugin.json"), path.join(directory, "t3-plugin.json"));
+      const error = yield* call(host, { _tag: "add", path: directory }).pipe(Effect.flip);
+      expect([error.reason, error.detail]).toEqual([
+        "invalid-plugin",
+        expect.stringContaining("plugin.json is missing"),
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("remove stops the process, withdraws the registrations and forgets the plugin", () =>
+    Effect.gen(function* () {
+      const { fs, path, root, stateDir, host, copyExample, invoke } = yield* setup();
+      yield* call(host, { _tag: "add", path: yield* copyExample("echo") });
+      yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
+      yield* invoke("echo");
+      const running = entryOf((yield* latest(host))!)!;
+      const generation = running.generation;
+      const delivered = yield* call(host, {
+        _tag: "readView",
+        pluginId,
+        viewId: "clock",
+        generation,
+      });
+      const deliveredFile = `${root}/attachments/${(delivered.value as { url: string }).url.split("/").at(-1)}.html`;
+      expect(yield* fs.exists(deliveredFile)).toBe(true);
+      const registryPath = path.join(stateDir, "plugins", "registry.json");
+      const consentPath = path.join(stateDir, "plugins", "consent.json");
+      expect(yield* fs.readFileString(registryPath)).toContain(PLUGIN_ID);
+      expect(yield* fs.readFileString(consentPath)).toContain(PLUGIN_ID);
+
+      yield* call(host, { _tag: "remove", pluginId });
+      const after = yield* latest(host);
+      expect(pidAlive(running.pid!)).toBe(false);
+      expect([after?.plugins, after?.views, after?.commands, after?.registered]).toEqual([
+        [],
+        [],
+        [],
+        0,
+      ]);
+      expect(yield* fs.readFileString(registryPath)).not.toContain(PLUGIN_ID);
+      expect(yield* fs.readFileString(consentPath)).not.toContain(PLUGIN_ID);
+      expect(yield* fs.exists(deliveredFile)).toBe(false);
+      expect((yield* invoke("echo").pipe(Effect.flip)).reason).toBe("not-found");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.live("the host switch gates parsing and processes, and closing it stops everything", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -376,16 +546,16 @@ describe("PluginHost", () => {
         const directory = path.join(root, name);
         yield* fs.copy(EXAMPLE, directory);
         if (change) {
-          const manifestPath = path.join(directory, "t3-plugin.json");
+          const manifestPath = path.join(directory, "plugin.json");
           yield* fs.writeFileString(manifestPath, change(yield* fs.readFileString(manifestPath)));
         }
         return directory;
       });
       const good = yield* copy("good");
-      const bad = yield* copy("bad", (text) => text.replace('"index.mjs"', '"../x.js"'));
+      const bad = yield* copy("bad", (text) => text.replace('"./index.mjs"', '"../x.js"'));
 
       // Record the consent for the good plugin, then hand-edit the registry to switch off with both listed.
-      const first = yield* PluginHost.make({ stateDir, ...CHILD });
+      const first = yield* PluginHost.make({ stateDir, ...CHILD, ...viewOptions(root) });
       yield* call(first, { _tag: "setHostEnabled", enabled: true });
       yield* call(first, { _tag: "add", path: good });
       yield* call(first, { _tag: "enable", pluginId, grantConsent: true });
@@ -404,12 +574,12 @@ describe("PluginHost", () => {
       const countingFs: FileSystem.FileSystem = {
         ...fs,
         readFileString: (file, ...rest) => {
-          if (file.endsWith("t3-plugin.json")) manifestReads += 1;
+          if (file.endsWith("plugin.json")) manifestReads += 1;
           return fs.readFileString(file, ...rest);
         },
       };
       const spawns = { count: 0 };
-      const host = yield* PluginHost.make({ stateDir, ...makeOptions(spawns) }).pipe(
+      const host = yield* PluginHost.make({ stateDir, ...makeOptions(spawns, root) }).pipe(
         Effect.provideService(FileSystem.FileSystem, countingFs),
       );
       expect(yield* latest(host)).toEqual({
