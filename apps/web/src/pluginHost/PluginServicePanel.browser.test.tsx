@@ -209,3 +209,11 @@ it("shows a placeholder when the provider is gone or the grant is missing", asyn
     .element(screen.getByText("cannot use plugin services", { exact: false }))
     .toBeVisible();
 });
+
+it("is unavailable, and says nothing of its methods, while no plugin is listed at all", async () => {
+  setup();
+  fixture.snapshot = { hostEnabled: false, registered: 2, plugins: [], views: [], services: [] };
+  await using screen = await render(panel(), { router: "/" });
+  await expect.element(screen.getByText("is unavailable", { exact: false })).toBeVisible();
+  expect(screen.container.textContent).not.toContain("offers no methods");
+});

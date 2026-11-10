@@ -91,7 +91,7 @@ export function PluginServicePanel(props: {
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {ui === null || ui.methods.length === 0 ? (
+        {ui === null ? null : ui.methods.length === 0 ? (
           <p className="px-3 py-3 text-xs text-muted-foreground">
             This service offers no methods to the interface.
           </p>
