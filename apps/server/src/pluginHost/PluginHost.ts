@@ -133,7 +133,6 @@ const resolveSettings = (
 export const make = Effect.fn("PluginHost.make")(function* (
   overrides: Partial<PluginHostOptions> & PluginViewDeliveryOptions & { readonly stateDir: string },
 ) {
-  const fs = yield* FileSystem.FileSystem;
   const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
   const store: PluginStore = yield* makePluginStore(overrides.stateDir);
   const delivery = yield* makePluginViewDelivery(overrides);

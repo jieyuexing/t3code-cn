@@ -83,29 +83,30 @@ const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Resolves `relative` under `directory` after symlinks and refuses anything that escapes. */
-export const resolveInsideDirectory = Effect.fn("PluginManifestLoader.resolveInsideDirectory")(
-  function* (directory: string, relative: string) {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const fail = (reason: string) => new PluginManifestError({ directory, reason });
-    const real = yield* fs
-      .realPath(path.resolve(directory, relative))
-      .pipe(Effect.mapError(() => fail(`${relative} does not exist.`)));
-    const inside = path.relative(directory, real);
-    if (
-      inside === "" ||
-      inside === ".." ||
-      inside.startsWith(`..${path.sep}`) ||
-      path.isAbsolute(inside)
-    )
-      return yield* fail(`${relative} resolves outside the plugin directory.`);
-    const info = yield* fs
-      .stat(real)
-      .pipe(Effect.mapError(() => fail(`${relative} is not readable.`)));
-    if (info.type !== "File") return yield* fail(`${relative} is not a file.`);
-    return { path: real, size: Number(info.size) };
-  },
-);
+const resolveInsideDirectory = Effect.fn("PluginManifestLoader.resolveInsideDirectory")(function* (
+  directory: string,
+  relative: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const fail = (reason: string) => new PluginManifestError({ directory, reason });
+  const real = yield* fs
+    .realPath(path.resolve(directory, relative))
+    .pipe(Effect.mapError(() => fail(`${relative} does not exist.`)));
+  const inside = path.relative(directory, real);
+  if (
+    inside === "" ||
+    inside === ".." ||
+    inside.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(inside)
+  )
+    return yield* fail(`${relative} resolves outside the plugin directory.`);
+  const info = yield* fs
+    .stat(real)
+    .pipe(Effect.mapError(() => fail(`${relative} is not readable.`)));
+  if (info.type !== "File") return yield* fail(`${relative} is not a file.`);
+  return { path: real, size: Number(info.size) };
+});
 
 /** The page of a view: an HTML file inside the plugin directory, small enough to serve as an MCP app. */
 export const resolveViewPage = Effect.fn("PluginManifestLoader.resolveViewPage")(function* (

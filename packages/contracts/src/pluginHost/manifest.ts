@@ -8,7 +8,7 @@ import { TrimmedNonEmptyString } from "../baseSchemas.ts";
 export const PLUGIN_HOST_API_VERSION = 1;
 export const PLUGIN_MANIFEST_FILE = "plugin.json";
 export const PLUGIN_MANIFEST_MAX_BYTES = 64 * 1024;
-export const PLUGIN_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+const PLUGIN_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
 export const PLUGIN_EXTENSION_NAMESPACE = "com.jieyuexing.t3code";
 
 /** Capability names this host serves; the `x.` prefix marks fork-only ones. */
