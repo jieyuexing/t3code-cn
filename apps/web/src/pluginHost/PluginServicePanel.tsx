@@ -66,15 +66,13 @@ export function PluginServicePanel(props: {
             {ui === null ? service : `${ui.provider.name} · ${service}`}
           </span>
           {status === null ? null : (
-            <Badge variant={PLUGIN_STATUS_VARIANT_BY_KIND[status.kind]} size="sm">
-              {status.label}
-            </Badge>
+            <Badge variant={PLUGIN_STATUS_VARIANT_BY_KIND[status.kind]}>{status.label}</Badge>
           )}
         </>
       }
     >
       {ui?.available === true ? null : (
-        <div className="flex flex-col items-start gap-2 border-b border-border/60 px-3 py-2.5 text-xs text-muted-foreground">
+        <div className="flex flex-col items-start gap-3 border-b border-border/60 px-4 py-3 text-sm text-muted-foreground">
           <p>{`Service ${service} is unavailable. Calls work again once it is back.`}</p>
           <div className="flex gap-2">
             <Button

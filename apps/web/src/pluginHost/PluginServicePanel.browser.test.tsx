@@ -102,6 +102,8 @@ it("blocks a call with a required field empty, then calls with the typed value a
   expect(fixture.calls).toEqual([]);
 
   await userEvent.type(screen.getByRole("textbox", { name: "name" }), "Ada");
+  // The refusal goes away as soon as the field is edited.
+  expect(screen.container.textContent).not.toContain("Required");
   await screen.getByRole("button", { name: "Call" }).click();
   await vi.waitFor(() =>
     expect(screen.getByRole("status").element().textContent).toContain('"greeting": "Hello, Ada!"'),

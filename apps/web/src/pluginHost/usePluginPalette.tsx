@@ -118,11 +118,7 @@ export function usePluginPaletteItems(
         ...(entry.method.readOnly === true
           ? {}
           : {
-              titleTrailingContent: (
-                <Badge variant="outline" size="sm">
-                  Modifies
-                </Badge>
-              ),
+              titleTrailingContent: <Badge variant="outline">Modifies</Badge>,
             }),
         run: async () => {
           if (needsInput && thread) {

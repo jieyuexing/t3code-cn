@@ -30,7 +30,7 @@ import type { UiMethod } from "./serviceMethods";
 function errorText(error: FieldError) {
   switch (error.code) {
     case "required":
-      return "Required";
+      return <>Required</>;
     case "not-number":
       return "Not a number";
     case "not-integer":
@@ -66,7 +66,7 @@ function FieldRow(props: {
       {children}
       {error === undefined ? (
         description === undefined ? null : (
-          <p className="text-xs text-muted-foreground">{description}</p>
+          <p className="text-pretty text-xs leading-normal text-muted-foreground">{description}</p>
         )
       ) : (
         <p className="text-xs text-destructive">{errorText(error)}</p>
@@ -206,8 +206,12 @@ export function ServiceMethodForm(props: {
     clearFocus(key);
   }, [focusRequested, draft.open, clearFocus, key]);
 
-  const setValue = (name: string, value: string | boolean) =>
-    patch(key, { values: { ...values, [name]: value } });
+  const setValue = (name: string, value: string | boolean) => {
+    const errors = Object.fromEntries(
+      Object.entries(draft.errors).filter(([field]) => field !== name),
+    );
+    patch(key, { values: { ...values, [name]: value }, errors });
+  };
 
   const submit = async () => {
     if (!canCall || pending.current) return;
@@ -247,7 +251,7 @@ export function ServiceMethodForm(props: {
           <span className="min-w-0 shrink truncate font-mono text-muted-foreground">
             {method.name}
           </span>
-          <Badge variant="outline" size="sm" className="ml-auto">
+          <Badge variant="outline" className="ml-auto">
             {method.readOnly === true ? "Read only" : "Modifies"}
           </Badge>
         </CollapsibleTrigger>
@@ -260,7 +264,9 @@ export function ServiceMethodForm(props: {
             noValidate
           >
             {method.description === undefined ? null : (
-              <p className="text-xs text-muted-foreground">{method.description}</p>
+              <p className="text-pretty text-xs leading-normal text-muted-foreground">
+                {method.description}
+              </p>
             )}
             {shape.kind === "json" ? (
               <FieldRow
