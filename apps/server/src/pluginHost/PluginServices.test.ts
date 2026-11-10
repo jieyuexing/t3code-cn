@@ -393,9 +393,7 @@ describe("plugin services", () => {
         const { host, spawns, enable, invoke, addExample, addGenerated } = yield* setup();
         yield* addExample("echo-clock");
         // Talks to the host over the raw IPC channel, as a plugin that bypasses `context.services` would.
-        yield* addGenerated("rogue.probe", {
-          inject: ["example.clock"],
-          source: `
+        const probeSource = `
 export function activate(context) {
   context.handle("probe", ({ service, method }) => new Promise((resolve) => {
     const requestId = 9000;
@@ -407,29 +405,34 @@ export function activate(context) {
     process.on("message", listener);
     process.send({ _tag: "HostCall", requestId, method: "service.call", input: { service, method, input: null } });
   }));
-}`,
-        });
+}`;
+        yield* addGenerated("rogue.probe", { inject: ["example.clock"], source: probeSource });
+        yield* addGenerated("rogue.outsider", { source: probeSource });
         yield* enable(CLOCK);
         yield* enable("rogue.probe");
+        yield* enable("rogue.outsider");
 
-        const probe = (service: string, method: string) =>
-          invoke("rogue.probe", "probe", { service, method }).pipe(
+        const probe = (id: string, service: string, method: string) =>
+          invoke(id, "probe", { service, method }).pipe(
             Effect.map((result) => result.value as { tag: string; message: string | null }),
           );
-        const notInjected = yield* probe("example.other", "now");
-        expect(notInjected.tag).toBe("HostCallFailed");
+        // The service exists and is available, but this plugin never declared it.
+        const outsider = yield* probe("rogue.outsider", "example.clock", "now");
+        expect(outsider.tag).toBe("HostCallFailed");
+        expect(outsider.message).toContain("does not declare a dependency");
+        const notInjected = yield* probe("rogue.probe", "example.other", "now");
         expect(notInjected.message).toContain("does not declare a dependency");
-        const undeclared = yield* probe("example.clock", "nope");
+        const undeclared = yield* probe("rogue.probe", "example.clock", "nope");
         expect(undeclared.tag).toBe("HostCallFailed");
         expect(undeclared.message).toContain("has no method nope");
-        // Only the probing plugin started; the provider never saw a call.
-        expect(spawns.count).toBe(1);
+        // Only the two probing plugins started; the provider never saw a call.
+        expect(spawns.count).toBe(2);
         expect(entryOf(yield* latest(host), CLOCK)?.state._tag).toBe("standby");
 
         // The same channel does reach the provider when the call is allowed.
-        const allowed = yield* probe("example.clock", "now");
+        const allowed = yield* probe("rogue.probe", "example.clock", "now");
         expect(allowed.tag).toBe("HostCallSucceeded");
-        expect(spawns.count).toBe(2);
+        expect(spawns.count).toBe(3);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

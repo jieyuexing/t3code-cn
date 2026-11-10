@@ -791,19 +791,21 @@ export const make = Effect.fn("PluginHost.make")(function* (
   };
 
   /** Takes a plugin and everything that depends on it down, runs `change`, and lets reconciliation bring them back. */
-  const restarting = <A, E>(slot: Slot, change: Effect.Effect<A, E>) =>
-    Effect.gen(function* () {
+  const restarting = Effect.fn("PluginHost.restarting")(
+    function* <A, E>(slot: Slot, change: Effect.Effect<A, E>) {
       slot.suspended = true;
       yield* reconcile();
       return yield* change;
-    }).pipe(
+    },
+    (effect, slot) =>
       Effect.ensuring(
+        effect,
         Effect.suspend(() => {
           slot.suspended = false;
           return reconcile();
         }),
       ),
-    );
+  );
 
   const remove = Effect.fn("PluginHost.remove")(function* (slot: Slot) {
     slot.suspended = true;
