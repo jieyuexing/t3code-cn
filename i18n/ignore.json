@@ -1279,6 +1279,10 @@
     "category": "dev-only",
     "reason": "internal invariant error / debug label"
   },
+  "Invalid service or method name.": {
+    "category": "protocol",
+    "reason": "桥回给插件页面的错误消息，面向插件开发者，保持英文"
+  },
   "Invalid source control action target key ({0} characters).": {
     "category": "dev-only",
     "reason": "internal invariant error / debug label"

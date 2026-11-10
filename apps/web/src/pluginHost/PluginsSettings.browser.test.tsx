@@ -44,7 +44,7 @@ const entry = (
   enabled: true,
   consent: "granted",
   digest: "3f9a0000c21e0000",
-  capabilities: ["views", "commands"],
+  capabilities: ["views"],
   generation: 1,
   ignoredFields: [],
   rejectedViews: [],
@@ -61,7 +61,7 @@ function setup(options: { hostEnabled?: boolean; canCall?: boolean } = {}) {
   fixture.canCall = options.canCall ?? true;
   fixture.snapshot = {
     hostEnabled: options.hostEnabled ?? true,
-    registered: 8,
+    registered: 9,
     plugins: [
       entry("standby-plugin", { state: { _tag: "standby" } }),
       entry("running-plugin", { state: { _tag: "running" }, pid: 48213 }),
@@ -80,6 +80,10 @@ function setup(options: { hostEnabled?: boolean; canCall?: boolean } = {}) {
         state: { _tag: "waiting", reason: "waiting for example.clock" },
         waitingFor: ["example.clock"],
       }),
+      entry("cycle-plugin", {
+        state: { _tag: "waiting", reason: "dependency cycle: a → b → a" },
+        waitingFor: ["example.b"],
+      }),
       entry("approval-plugin", { enabled: false, consent: "required", state: { _tag: "idle" } }),
       // The manifest changed after it was enabled: still enabled, but the consent no longer holds.
       entry("changed-plugin", { enabled: true, consent: "required", state: { _tag: "idle" } }),
@@ -92,7 +96,6 @@ function setup(options: { hostEnabled?: boolean; canCall?: boolean } = {}) {
       }),
     ],
     views: [],
-    commands: [],
     services: [],
   };
 }
@@ -117,7 +120,8 @@ it("shows each state in its own word, with reasons for what was rejected or stop
   expect(badgeText("rejected-plugin")).toBe("Not enabled");
   await expect.element(screen.getByText("exited with code 1", { exact: false })).toBeVisible();
   await expect.element(screen.getByText("Retrying at", { exact: false })).toBeVisible();
-  await expect.element(screen.getByText("waiting for example.clock")).toBeVisible();
+  await expect.element(screen.getByText("Waiting for example.clock")).toBeVisible();
+  await expect.element(screen.getByText("dependency cycle: a → b → a")).toBeVisible();
   await expect
     .element(screen.getByText("leaves the plugin folder", { exact: false }))
     .toBeVisible();
@@ -185,7 +189,7 @@ it("adds a folder by path and removes a plugin after confirmation", async () => 
 it("shows only the switch and the registered count while plugins are off", async () => {
   setup({ hostEnabled: false });
   await using screen = await render(settings, { router: "/" });
-  await expect.element(screen.getByText("8 registered")).toBeVisible();
+  await expect.element(screen.getByText("9 registered")).toBeVisible();
   expect(screen.container.querySelectorAll("[data-slot=settings-row]")).toHaveLength(1);
   await screen.getByRole("switch", { name: "Enable plugins" }).click();
   await vi.waitFor(() =>

@@ -12,6 +12,9 @@ import {
 import { toastManager } from "../components/ui/toast";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useAtomCommand } from "../state/use-atom-command";
+import { Badge } from "../components/ui/badge";
+import { methodKey, useServicePanelStore } from "./servicePanelStore";
+import { availableUiMethods, emptyInput, methodNeedsInput, serviceViewId } from "./serviceMethods";
 import { pluginHostEnvironment } from "./state";
 import {
   pluginHostFailureMessage,
@@ -21,8 +24,25 @@ import {
 
 /**
  * Palette entries for the environment of the open thread (or the primary one): the built-in
- * command that opens plugin settings, and a "Plugins" group with each plugin's views and commands.
+ * command that opens plugin settings, and a "Plugins" group with each plugin's views, the service
+ * methods marked `ui` and a service panel entry per service. A method that needs input opens its form.
  */
+function openServicePanel(
+  thread: { readonly environmentId: EnvironmentId; readonly id: ThreadId },
+  providerId: string,
+  service: string,
+  method?: string,
+) {
+  useRightPanelStore.getState().openPlugin(scopeThreadRef(thread.environmentId, thread.id), {
+    kind: "plugin",
+    pluginId: providerId,
+    viewId: serviceViewId(service),
+    title: service,
+  });
+  if (method !== undefined)
+    useServicePanelStore.getState().requestFocus(methodKey(thread.environmentId, service, method));
+}
+
 export function usePluginPaletteItems(
   thread: { readonly environmentId: EnvironmentId; readonly id: ThreadId } | null | undefined,
   fallbackEnvironmentId: EnvironmentId | null,
@@ -71,32 +91,55 @@ export function usePluginPaletteItems(
         });
       }
     }
-    for (const command of snapshot.commands) {
+    const providers = new Map<string, string>();
+    for (const entry of availableUiMethods(snapshot)) {
+      providers.set(entry.service, entry.provider.id);
+      const needsInput = methodNeedsInput(entry.method);
+      if (needsInput && !thread) continue;
+      const title = needsInput ? `${entry.title}…` : entry.title;
       items.push({
         kind: "action",
-        value: `plugin-command:${command.pluginId}:${command.commandId}`,
+        value: `plugin-method:${entry.service}:${entry.method.name}`,
         searchTerms: [
-          command.title,
-          command.pluginName,
+          entry.title,
+          entry.service,
+          entry.method.name,
+          entry.provider.name,
           "plugin",
-          ...(command.description ? [command.description] : []),
+          ...(entry.method.description ? [entry.method.description] : []),
         ],
-        title: command.title,
-        timestamp: command.pluginName,
-        ...(command.description === undefined ? {} : { description: command.description }),
+        searchTitle: title,
+        title,
+        timestamp: entry.service,
+        ...(entry.method.description === undefined
+          ? {}
+          : { description: entry.method.description }),
         icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
+        ...(entry.method.readOnly === true
+          ? {}
+          : {
+              titleTrailingContent: (
+                <Badge variant="outline" size="sm">
+                  Modifies
+                </Badge>
+              ),
+            }),
         run: async () => {
+          if (needsInput && thread) {
+            openServicePanel(thread, entry.provider.id, entry.service, entry.method.name);
+            return;
+          }
           const result = await call({
             environmentId,
             input: {
-              _tag: "invoke",
-              pluginId: command.pluginId,
-              handler: `command:${command.commandId}`,
-              input: null,
+              _tag: "callService",
+              service: entry.service,
+              method: entry.method.name,
+              input: emptyInput(entry.method),
             },
           });
           if (result._tag === "Success") {
-            // Every run gets feedback; a plugin that returns nothing still ran.
+            // Every run gets feedback; a method that returns nothing still ran.
             const value = result.value.value;
             const description =
               value === null || value === undefined
@@ -106,18 +149,31 @@ export function usePluginPaletteItems(
                   : JSON.stringify(value).slice(0, 300);
             toastManager.add({
               type: "info",
-              title: command.title,
+              title: entry.title,
               ...(description === undefined ? {} : { description }),
             });
           } else if (!isAtomCommandInterrupted(result)) {
             toastManager.add({
               type: "error",
-              title: command.title,
+              title: entry.title,
               description: pluginHostFailureMessage(result),
             });
           }
         },
       });
+    }
+    if (thread) {
+      for (const [service, providerId] of providers) {
+        items.push({
+          kind: "action",
+          value: `plugin-service:${service}`,
+          searchTerms: [service, "plugin", "service", "panel"],
+          title: "Open service panel",
+          timestamp: service,
+          icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
+          run: async () => openServicePanel(thread, providerId, service),
+        });
+      }
     }
   }
   const groups: CommandPaletteGroup[] =

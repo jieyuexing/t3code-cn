@@ -24,6 +24,8 @@ const BRIDGE_MAX_PENDING_CALLS = 16;
 const BRIDGE_MAX_VIOLATIONS = 8;
 const BRIDGE_PING_INTERVAL_MS = 5_000;
 const HANDLER_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+const SERVICE_PATTERN = /^[a-z][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
+const METHOD_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const MAX_CALL_ID = 2 ** 31 - 1;
 
 export type BridgeTeardownReason = "unresponsive" | "violations";
@@ -42,6 +44,8 @@ export function attachPluginViewBridge(options: {
   readonly frame: HTMLIFrameElement;
   readonly init: { readonly pluginId: string; readonly viewId: string; readonly title: string };
   readonly call: (handler: string, input: unknown) => Promise<unknown>;
+  /** A call on a service the view's plugin injects; the plugin is the frame's, never the page's. */
+  readonly callService: (service: string, method: string, input: unknown) => Promise<unknown>;
   readonly onTeardown: (reason: BridgeTeardownReason) => void;
   readonly pingIntervalMs?: number;
 }): () => void {
@@ -66,6 +70,35 @@ export function attachPluginViewBridge(options: {
   const fail = (reason: BridgeTeardownReason) => {
     closeChannel();
     options.onTeardown(reason);
+  };
+
+  /** What a call message asks for: a handler of the plugin or a service it injects; `null` if it is neither. */
+  const callTarget = (body: {
+    readonly _tag?: unknown;
+    readonly handler?: unknown;
+    readonly service?: unknown;
+    readonly method?: unknown;
+  }):
+    | { readonly run: (input: unknown) => Promise<unknown> }
+    | { readonly refusal: string }
+    | null => {
+    if (body._tag === "call" && typeof body.handler === "string") {
+      const handler = body.handler;
+      return HANDLER_PATTERN.test(handler)
+        ? { run: (input) => options.call(handler, input) }
+        : { refusal: "Invalid handler name." };
+    }
+    if (
+      body._tag === "callService" &&
+      typeof body.service === "string" &&
+      typeof body.method === "string"
+    ) {
+      const { service, method } = body;
+      return SERVICE_PATTERN.test(service) && METHOD_PATTERN.test(method)
+        ? { run: (input) => options.callService(service, method, input) }
+        : { refusal: "Invalid service or method name." };
+    }
+    return null;
   };
 
   const connect = () => {
@@ -104,6 +137,8 @@ export function attachPluginViewBridge(options: {
         id?: unknown;
         n?: unknown;
         handler?: unknown;
+        service?: unknown;
+        method?: unknown;
         input?: unknown;
       };
       if (body._tag === "pong") {
@@ -119,9 +154,9 @@ export function attachPluginViewBridge(options: {
           reply({ _tag: "error", id, code: "cancelled", message: "Cancelled." });
         return;
       }
-      if (body._tag !== "call" || typeof body.handler !== "string") return violate("invalid");
-      if (!HANDLER_PATTERN.test(body.handler))
-        return refuse(id, "invalid", "Invalid handler name.");
+      const target = callTarget(body);
+      if (target === null) return violate("invalid");
+      if ("refusal" in target) return refuse(id, "invalid", target.refusal);
       if (pending.has(id)) return refuse(id, "invalid", "Call id is already in use.");
       if (exceedsDepth(body.input, 0))
         return refuse(id, "too-deep", "The input is nested too deeply.");
@@ -130,7 +165,7 @@ export function attachPluginViewBridge(options: {
         return;
       }
       pending.add(id);
-      options.call(body.handler, body.input ?? null).then(
+      target.run(body.input ?? null).then(
         (value) => {
           if (!pending.delete(id)) return;
           const encoded = JSON.stringify({ _tag: "result", id, value: value ?? null });

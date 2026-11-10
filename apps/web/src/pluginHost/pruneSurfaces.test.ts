@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { startPluginSurfacePruning } from "./pruneSurfaces";
+import { providerEntry, servicesSnapshot } from "./testing/snapshots";
 
 const fixture = vi.hoisted(() => ({
   atoms: new Map<string, unknown>(),
@@ -47,7 +48,6 @@ const frame = (viewIds: readonly string[]): PluginHostSnapshot => ({
   hostEnabled: true,
   registered: viewIds.length,
   plugins: [],
-  commands: [],
   services: [],
   views: viewIds.map((viewId) => ({
     pluginId: PluginId.make(viewId === "clock" ? "example.echo-clock" : "example.notes"),
@@ -98,5 +98,36 @@ describe("startPluginSurfacePruning", () => {
       "plugin:example.echo-clock:clock",
     ]);
     expect(ids(refSecond)).toEqual(["file:src/app.ts"]);
+  });
+
+  it("keeps the service panel of a provider that still declares the service, even off, and drops those whose provider or declaration is gone", () => {
+    const store = useRightPanelStore.getState();
+    const panel = (pluginId: string, service: string) => ({
+      kind: "plugin" as const,
+      pluginId,
+      viewId: `service:${service}`,
+      title: service,
+    });
+    store.openPlugin(refFirst, panel("example.greeter", "example.greeter"));
+    store.openPlugin(refFirst, panel("example.echo-clock", "example.clock"));
+    store.openPlugin(refFirst, panel("example.removed", "example.removed"));
+    store.openPlugin(refFirst, panel("example.echo-clock", "example.old"));
+
+    startPluginSurfacePruning();
+    // The greeter is off (its service is not listed) but its plugin still declares the service.
+    publish(
+      first,
+      servicesSnapshot(
+        [
+          { entry: providerEntry("example.greeter", "Greeter", "example.greeter", []) },
+          { entry: providerEntry("example.echo-clock", "Echo Clock", "example.clock", []) },
+        ],
+        false,
+      ),
+    );
+    expect(ids(refFirst)).toEqual([
+      "plugin:example.greeter:service:example.greeter",
+      "plugin:example.echo-clock:service:example.clock",
+    ]);
   });
 });

@@ -35,7 +35,6 @@ const snapshot = (name: string): PluginHostSnapshot => ({
       placement: "side-panel",
     },
   ],
-  commands: [],
   services: [],
 });
 

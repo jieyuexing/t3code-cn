@@ -14,6 +14,11 @@ vi.mock("./usePluginHost", () => ({
   usePluginHostSnapshot: () => ({ snapshot: fixture.snapshot, failed: false }),
   useCanCallPluginHost: () => fixture.canCall,
 }));
+vi.mock("./PluginServicePanel", () => ({
+  PluginServicePanel: (props: { service: string }) => (
+    <div data-testid="service-panel">{`service panel ${props.service}`}</div>
+  ),
+}));
 vi.mock("./PluginViewFrame", () => ({
   PluginViewFrame: (props: { generation: number }) => (
     <div data-testid="frame">{`frame generation ${props.generation}`}</div>
@@ -36,7 +41,6 @@ function setup(generation: number | null, canCall = true) {
     hostEnabled: true,
     registered: 1,
     plugins: [],
-    commands: [],
     services: [],
     views:
       generation === null
@@ -125,5 +129,28 @@ it("keeps the page out of the document while the tab is hidden and without the g
   setup(1, false);
   await screen.rerender(panel(true));
   await expect.element(screen.getByText("cannot use plugin views", { exact: false })).toBeVisible();
+  expect(screen.container.querySelector("[data-testid=frame]")).toBeNull();
+});
+
+it("draws a service: view id as the host's service panel, not as a plugin page", async () => {
+  setup(1);
+  const serviceSurface: Extract<RightPanelSurface, { kind: "plugin" }> = {
+    ...surface,
+    id: "plugin:example.echo-clock:service:example.clock",
+    viewId: "service:example.clock",
+    title: "example.clock",
+  };
+  await using screen = await render(
+    <PluginViewPanel
+      surface={serviceSurface}
+      environmentId={environmentId}
+      visible
+      onCloseSurface={vi.fn()}
+    />,
+    { router: "/" },
+  );
+  await expect
+    .element(screen.getByTestId("service-panel"))
+    .toHaveTextContent("service panel example.clock");
   expect(screen.container.querySelector("[data-testid=frame]")).toBeNull();
 });

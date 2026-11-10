@@ -164,6 +164,13 @@ function PluginList(props: {
   );
 }
 
+/** "Waiting for x, y" from the services the plugin lacks; other reasons, such as a dependency cycle, are shown as the host wrote them. */
+function waitingText(plugin: PluginHostEntry, reason: string) {
+  return reason.startsWith("waiting for ") && plugin.waitingFor.length > 0
+    ? `Waiting for ${plugin.waitingFor.join(", ")}`
+    : reason;
+}
+
 function PluginRow(props: {
   readonly environmentId: EnvironmentId;
   readonly plugin: PluginHostEntry;
@@ -175,7 +182,7 @@ function PluginRow(props: {
   const [confirming, setConfirming] = useState(false);
   const status = pluginStatus(plugin);
   const views = snapshot.views.filter((view) => view.pluginId === plugin.id).length;
-  const commands = snapshot.commands.filter((command) => command.pluginId === plugin.id).length;
+  const services = plugin.provides.length;
   const { state } = plugin;
 
   const toggle = (enabled: boolean) => {
@@ -215,12 +222,12 @@ function PluginRow(props: {
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant={PLUGIN_STATUS_VARIANT_BY_KIND[status.kind]}>{status.label}</Badge>
-            <span>{`${views} views · ${commands} commands${plugin.pid === undefined ? "" : ` · process ${plugin.pid}`}`}</span>
+            <span>{`${views} views · ${services} services${plugin.pid === undefined ? "" : ` · process ${plugin.pid}`}`}</span>
           </div>
           {state._tag === "backoff" ? (
             <p>{`Stopped after ${state.failures} failures. Retrying at ${new Date(state.retryAt).toLocaleTimeString()}. ${state.reason}`}</p>
           ) : null}
-          {state._tag === "waiting" ? <p>{state.reason}</p> : null}
+          {state._tag === "waiting" ? <p>{waitingText(plugin, state.reason)}</p> : null}
           {state._tag === "quarantined" ? (
             <p>{`Stopped after ${state.failures} failures and no longer restarted. ${state.reason}`}</p>
           ) : null}

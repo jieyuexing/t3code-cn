@@ -4,15 +4,38 @@ import { useState } from "react";
 
 import { Button } from "../components/ui/button";
 import type { PluginSurface, RightPanelSurface } from "../rightPanelStore";
+import { PluginServicePanel } from "./PluginServicePanel";
 import { PluginViewFrame } from "./PluginViewFrame";
+import { serviceOfViewId } from "./serviceMethods";
 import { useCanCallPluginHost, usePluginHostSnapshot } from "./usePluginHost";
 
 /**
- * The tab's content. A view that leaves the snapshot unmounts the frame and shows the unavailable
+ * The tab's content: a plugin's own view, or the service panel the host draws for a service
+ * (a `viewId` of `service:<name>`). A view that leaves the snapshot unmounts the frame and shows the unavailable
  * state; when it comes back the frame mounts again, a fresh page for a newer generation (the
  * plugin reloaded or was re-enabled), the same page key for a crashed plugin after its backoff.
  */
 export function PluginViewPanel(props: {
+  readonly surface: Extract<RightPanelSurface, { kind: "plugin" }>;
+  readonly environmentId: EnvironmentId;
+  readonly visible: boolean;
+  readonly onCloseSurface: (surface: RightPanelSurface) => void;
+}) {
+  const service = serviceOfViewId(props.surface.viewId);
+  return service === null ? (
+    <PluginViewTab {...props} />
+  ) : (
+    <PluginServicePanel
+      surface={props.surface}
+      service={service}
+      environmentId={props.environmentId}
+      visible={props.visible}
+      onCloseSurface={() => props.onCloseSurface(props.surface)}
+    />
+  );
+}
+
+function PluginViewTab(props: {
   readonly surface: Extract<RightPanelSurface, { kind: "plugin" }>;
   readonly environmentId: EnvironmentId;
   readonly visible: boolean;

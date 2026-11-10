@@ -4,6 +4,7 @@ import { AsyncResult } from "effect/reactivity";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useRightPanelStore, type ThreadRightPanelState } from "../rightPanelStore";
+import { serviceViewId } from "./serviceMethods";
 import { pluginHostEnvironment } from "./state";
 
 type ByThreadKey = Record<string, ThreadRightPanelState>;
@@ -35,8 +36,8 @@ export function prunePluginSurfaces(
 
 /**
  * Plugin tabs outlive a restart in the persisted panel state. Once an environment reports its
- * plugins for the first time, tabs whose view is gone are removed; after that a vanished view
- * shows as unavailable instead. Environments without plugin tabs are never subscribed.
+ * plugins for the first time, tabs whose view is gone, or whose service its provider no longer
+ * declares, are removed; after that a vanished view or an unavailable service shows as unavailable instead. Environments without plugin tabs are never subscribed.
  */
 export function startPluginSurfacePruning(): void {
   const environmentIds = new Set<EnvironmentId>();
@@ -51,9 +52,12 @@ export function startPluginSurfacePruning(): void {
     const unsubscribe = appAtomRegistry.subscribe(atom, (result) => {
       if (!AsyncResult.isSuccess(result)) return;
       unsubscribe();
-      const available = new Set(
-        result.value.views.map((view) => `plugin:${view.pluginId}:${view.viewId}`),
-      );
+      const available = new Set([
+        ...result.value.views.map((view) => `plugin:${view.pluginId}:${view.viewId}`),
+        ...result.value.plugins.flatMap((plugin) =>
+          plugin.provides.map((service) => `plugin:${plugin.id}:${serviceViewId(service.name)}`),
+        ),
+      ]);
       useRightPanelStore.setState((state) => ({
         byThreadKey: prunePluginSurfaces(state.byThreadKey, environmentId, available),
       }));

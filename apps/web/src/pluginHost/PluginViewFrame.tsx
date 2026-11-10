@@ -13,6 +13,15 @@ import { pluginHostFailureMessage, usePluginHostCall } from "./usePluginHost";
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const isPluginHostError = Schema.is(PluginHostError);
 
+/** The value of a successful call; a failure reaches the page with the host's reason as its code. */
+async function settle(pending: ReturnType<ReturnType<typeof usePluginHostCall>>) {
+  const result = await pending;
+  if (result._tag === "Success") return result.value.value;
+  const error = squashAtomCommandFailure(result);
+  const code: BridgeErrorCode = isPluginHostError(error) ? error.reason : "call-failed";
+  throw new BridgeCallError({ code, message: pluginHostFailureMessage(result) });
+}
+
 type FrameState =
   | { readonly _tag: "loading" }
   | { readonly _tag: "ready"; readonly src: string }
@@ -70,18 +79,17 @@ export function PluginViewFrame(props: {
       frame,
       init: { pluginId, viewId, title },
       onTeardown: () => setState({ _tag: "stopped" }),
-      call: async (handler, input) => {
-        const result = await call({
-          _tag: "invoke",
-          pluginId,
-          handler: `view:${viewId}:${handler}`,
-          input: input as never,
-        });
-        if (result._tag === "Success") return result.value.value;
-        const error = squashAtomCommandFailure(result);
-        const code: BridgeErrorCode = isPluginHostError(error) ? error.reason : "call-failed";
-        throw new BridgeCallError({ code, message: pluginHostFailureMessage(result) });
-      },
+      call: (handler, input) =>
+        settle(
+          call({
+            _tag: "invoke",
+            pluginId,
+            handler: `view:${viewId}:${handler}`,
+            input: input as never,
+          }),
+        ),
+      callService: (service, method, input) =>
+        settle(call({ _tag: "callViewService", pluginId, service, method, input: input as never })),
     });
     const clearHandshake = (event: MessageEvent) => {
       if (event.source === frame.contentWindow) clearTimeout(handshakeTimer);
