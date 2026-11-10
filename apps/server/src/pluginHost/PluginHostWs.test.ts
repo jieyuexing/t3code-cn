@@ -106,6 +106,7 @@ import * as ProjectEnrichment from "../project/ProjectEnrichmentService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { layerWsRpc, WS_RPC_SERVER_OPTIONS } from "../ws.ts";
 import * as PluginHost from "./PluginHost.ts";
+import { CHILD } from "./testChild.ts";
 
 // Fixture copied from ws.test.ts (layerUnusedConfigRpcServices, layerConfigSources); diff against it when ws.ts gains a service.
 const layerRpcServices = Layer.mergeAll(
@@ -234,8 +235,7 @@ it.live("plugin host: enable, invoke and disable through the websocket layer, ga
     );
     const host = yield* PluginHost.make({
       stateDir: path.join(root, "state"),
-      command: process.execPath,
-      args: [`${import.meta.dirname}/child.mjs`],
+      ...CHILD,
       attachmentsDir: path.join(root, "attachments"),
       issueUrl: (attachmentId) =>
         Effect.succeed({ relativeUrl: `/api/assets/test/${attachmentId}`, expiresAt: 1 }),

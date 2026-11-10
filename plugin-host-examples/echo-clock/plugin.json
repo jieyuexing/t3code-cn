@@ -39,6 +39,20 @@
               "name": "now",
               "title": "Current time",
               "description": "The prefixed ISO time.",
+              "readOnly": true,
+              "agent": true,
+              "input": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "name": "info",
+              "title": "Plugin info",
               "readOnly": true
             }
           ]

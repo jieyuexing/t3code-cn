@@ -9,6 +9,7 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 
 import * as PluginHost from "./PluginHost.ts";
+import { CHILD } from "./testChild.ts";
 import { spawnPluginProcess } from "./PluginProcess.ts";
 
 const EXAMPLES = `${import.meta.dirname}/../../../../plugin-host-examples`;
@@ -55,8 +56,7 @@ const setup = Effect.fn("setup")(function* () {
   const transitions: Array<string> = [];
   const host = yield* PluginHost.make({
     stateDir: path.join(root, "state"),
-    command: process.execPath,
-    args: [`${import.meta.dirname}/child.mjs`],
+    ...CHILD,
     attachmentsDir: path.join(root, "attachments"),
     issueUrl: (attachmentId) =>
       Effect.succeed({ relativeUrl: `/api/assets/test/${attachmentId}`, expiresAt: 1 }),
@@ -200,7 +200,10 @@ describe("plugin services", () => {
       expect(off?.commands.filter((command) => command.pluginId === GREETER)).toEqual([]);
       expect(off?.services).toEqual([]);
       const refused = yield* invoke(GREETER, "greet", { name: "Ada" }).pipe(Effect.flip);
-      expect(refused.reason).toBe("not-running");
+      expect([refused.reason, refused.detail]).toEqual([
+        "not-running",
+        `${GREETER} is waiting for example.clock.`,
+      ]);
       const spawned = spawns.count;
 
       yield* enable(CLOCK);

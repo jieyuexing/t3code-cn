@@ -331,6 +331,11 @@ export const make = Effect.fn("PluginHost.make")(function* (
     return yield* slot.startLock.withPermits(1)(
       Effect.gen(function* () {
         const { scope, registration } = slot;
+        if (slot.state._tag === "waiting")
+          return yield* fail(
+            "not-running",
+            `${slot.id} is waiting for ${slot.waitingFor.join(", ")}.`,
+          );
         if (scope === undefined || registration === undefined)
           return yield* fail("not-running", `${slot.id} is not enabled.`);
         const state = slot.state;

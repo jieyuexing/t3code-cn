@@ -17,12 +17,9 @@ import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
 import * as PluginHost from "./PluginHost.ts";
 import { spawnPluginProcess } from "./PluginProcess.ts";
+import { CHILD } from "./testChild.ts";
 
 const EXAMPLE = `${import.meta.dirname}/../../../../plugin-host-examples/echo-clock`;
-const CHILD = {
-  command: process.execPath,
-  args: [`${import.meta.dirname}/child.mjs`],
-} as const;
 const PLUGIN_ID = "example.echo-clock";
 const pluginId = PLUGIN_ID as never;
 

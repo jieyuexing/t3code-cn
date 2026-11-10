@@ -21,6 +21,7 @@ import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "../assets/NativeAppIconResolver.ts";
 import * as PluginHost from "./PluginHost.ts";
+import { CHILD } from "./testChild.ts";
 import { issueViewUrl } from "./PluginViewDelivery.ts";
 
 const EXAMPLE = `${import.meta.dirname}/../../../../plugin-host-examples/echo-clock`;
@@ -57,8 +58,7 @@ it.live("a view page is served by the signed asset route with the MCP app CSP", 
     yield* fs.copy(EXAMPLE, directory);
     const host = yield* PluginHost.make({
       stateDir: path.join(root, "state"),
-      command: process.execPath,
-      args: [`${import.meta.dirname}/child.mjs`],
+      ...CHILD,
       attachmentsDir: config.attachmentsDir,
       issueUrl: issueViewUrl,
     });
