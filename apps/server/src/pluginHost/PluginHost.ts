@@ -13,6 +13,7 @@ import {
   type PluginSettingField,
   type PluginSettingValue,
 } from "@t3tools/contracts";
+import { resolveSelfInvocation, selfInvocationArgs } from "@t3tools/shared/nodeRuntime";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -41,7 +42,7 @@ import { makePluginStore, type PluginStore, type RegistryRecord } from "./Plugin
 
 export interface PluginHostOptions {
   readonly stateDir: string;
-  /** What starts a plugin process; the default runs `child.mjs` with the server's own Node. */
+  /** What starts a plugin process; the default is this executable's hidden `__plugin-host` command. */
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   /** Consecutive failures that quarantine a plugin. */
@@ -126,13 +127,13 @@ export const make = Effect.fn("PluginHost.make")(function* (
   overrides: Partial<PluginHostOptions> & { readonly stateDir: string },
 ) {
   const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
   const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
   const store: PluginStore = yield* makePluginStore(overrides.stateDir);
   const load = (directory: string) => loadPluginDirectory(directory).pipe(Effect.provide(platform));
+  const self = yield* resolveSelfInvocation();
   const options: PluginHostOptions = {
-    command: process.execPath,
-    args: [path.join(import.meta.dirname, "child.mjs")],
+    command: self.command,
+    args: selfInvocationArgs(self, ["__plugin-host"]),
     maxFailures: 3,
     restartBackoff: Duration.seconds(1),
     maxRestartBackoff: Duration.seconds(30),

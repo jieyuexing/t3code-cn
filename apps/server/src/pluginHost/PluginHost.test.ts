@@ -16,6 +16,10 @@ import * as PluginHost from "./PluginHost.ts";
 import { spawnPluginProcess } from "./PluginProcess.ts";
 
 const EXAMPLE = `${import.meta.dirname}/../../../../plugin-host-examples/echo-clock`;
+const CHILD = {
+  command: process.execPath,
+  args: [`${import.meta.dirname}/child.mjs`],
+} as const;
 const PLUGIN_ID = "example.echo-clock";
 
 const setup = Effect.gen(function* () {
@@ -31,6 +35,7 @@ const setup = Effect.gen(function* () {
   let spawns = 0;
   const host = yield* PluginHost.make({
     stateDir,
+    ...CHILD,
     maxFailures: 3,
     restartBackoff: Duration.millis(1),
     maxRestartBackoff: Duration.millis(1),
@@ -302,6 +307,7 @@ describe("PluginHost", () => {
       );
       const second = yield* PluginHost.make({
         stateDir,
+        ...CHILD,
         restartBackoff: Duration.millis(1),
         stopGrace: Duration.millis(500),
       });
