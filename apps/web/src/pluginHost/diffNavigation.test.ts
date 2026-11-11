@@ -10,7 +10,7 @@ const ref = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-A"));
 const other = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-B"));
 
 beforeEach(() => {
-  useDiffPanelStore.setState({ byThreadKey: {}, keepSelectionOnOpenThreadKey: null });
+  useDiffPanelStore.setState({ byThreadKey: {} });
   useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
   useDiffRevealStore.setState({ byThreadKey: {} });
 });
@@ -21,19 +21,17 @@ const activePanel = (target: typeof ref) =>
   selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, target);
 
 describe("openThreadDiff", () => {
-  it("opens the closed diff panel on a commit and keeps that choice through the open", () => {
+  it("opens the closed diff panel on a commit", () => {
     openThreadDiff(ref, { kind: "commit", sha: "abc1234" });
     expect(selection(ref)).toMatchObject({ kind: "commit", sha: "abc1234" });
     expect(activePanel(ref)).toBe("diff");
-    expect(useDiffPanelStore.getState().consumeKeepSelectionOnOpen(ref)).toBe(true);
     expect(selection(other)).toMatchObject({ kind: "branch" });
   });
 
-  it("selects the uncommitted changes and keeps that choice when the panel was closed", () => {
+  it("opens the closed diff panel on the uncommitted changes", () => {
     openThreadDiff(ref, { kind: "working-tree" });
     expect(selection(ref)).toEqual({ kind: "unstaged" });
     expect(activePanel(ref)).toBe("diff");
-    expect(useDiffPanelStore.getState().keepSelectionOnOpenThreadKey).toBe(scopedThreadKey(ref));
   });
 
   it("asks the panel to reveal the named file, again for each request", () => {

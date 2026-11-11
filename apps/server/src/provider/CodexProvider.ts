@@ -50,7 +50,6 @@ import { makeUnavailableUsageLimits } from "@t3tools/provider-core/server/usageL
 import {
   codexRateLimitsFailureMessage,
   codexRateLimitsToLimits,
-  isCodexUsageAuthRequiredError,
   type CodexRateLimitSnapshot,
   type CodexResetCreditsSummary,
 } from "./codexUsageLimits.ts";
@@ -69,7 +68,45 @@ type CodexRateLimitsProbe =
       readonly resetCredits: CodexResetCreditsSummary | null | undefined;
       readonly accountId?: string | null | undefined;
     }
-  | { readonly failure: string; readonly authRequired?: true };
+  | { readonly failure: string };
+
+const CodexRoutingConfig = Schema.Struct({
+  model_provider: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  openai_base_url: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  model_providers: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({ base_url: Schema.optionalKey(Schema.NullOr(Schema.String)) }),
+    ),
+  ),
+});
+const decodeCodexRoutingConfig = Schema.decodeUnknownOption(CodexRoutingConfig);
+
+function routesToNativeOpenai(config: unknown): boolean {
+  const decoded = decodeCodexRoutingConfig(config);
+  if (Option.isNone(decoded)) return false;
+  const routing = decoded.value;
+  const providerId = routing.model_provider ?? "openai";
+  const provider = routing.model_providers?.[providerId];
+  if (providerId !== "openai" && !provider) return false;
+  const baseUrl =
+    providerId === "openai" ? routing.openai_base_url || undefined : provider?.base_url;
+  // A provider without an override uses Codex's auth-dependent OpenAI default.
+  if (baseUrl == null) return true;
+  if (!URL.canParse(baseUrl)) return false;
+  const url = new URL(baseUrl);
+  return (
+    url.protocol === "https:" &&
+    (url.hostname === "api.openai.com" || url.hostname === "chatgpt.com")
+  );
+}
+
+// A stored login does not mean this provider's traffic spends that login's quota.
+export const codexRoutesSpendNativeQuota = (
+  account: CodexSchema.V2GetAccountResponse,
+  config: unknown,
+): boolean =>
+  account.requiresOpenaiAuth && account.account?.type !== "apiKey" && routesToNativeOpenai(config);
 
 const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
 const CODEX_CATALOG_REFRESH_TIMEOUT_MS = 3_000;
@@ -91,6 +128,7 @@ const CODEX_PRESENTATION = {
 
 export interface CodexAppServerProviderSnapshot {
   readonly account: CodexSchema.V2GetAccountResponse;
+  readonly nativeUsage?: boolean;
   readonly rateLimits?: CodexRateLimitsProbe;
   readonly version: string | undefined;
   readonly models: ReadonlyArray<ServerProviderModel> | undefined;
@@ -527,6 +565,34 @@ export const withCodexAppServerClient = Effect.fn("withCodexAppServerClient")(fu
   return { client, initialize };
 });
 
+// Usage is an enrichment: a failure or a slow answer degrades to "no usage this
+// probe" rather than costing the account and models.
+const readCodexRateLimits = (
+  client: CodexClient.CodexAppServerClient["Service"],
+  deadlineMs: number,
+) =>
+  withCodexDiscoveryDeadline(
+    client.request("account/rateLimits/read", null),
+    deadlineMs,
+    RATE_LIMITS_PROBE_TIMEOUT_MS,
+  ).pipe(
+    Effect.map((response): CodexRateLimitsProbe =>
+      response
+        ? {
+            snapshot: response.rateLimits,
+            rateLimitsByLimitId: response.rateLimitsByLimitId,
+            resetCredits: response.rateLimitResetCredits,
+            accountId: response.accountId,
+          }
+        : { failure: "Codex did not answer the usage request." },
+    ),
+    Effect.catch((error) =>
+      Effect.logDebug("Codex rate-limit read failed.", { cause: error }).pipe(
+        Effect.as<CodexRateLimitsProbe>({ failure: codexRateLimitsFailureMessage(error) }),
+      ),
+    ),
+  );
+
 const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (input: {
   readonly binaryPath: string;
   readonly homePath?: string;
@@ -553,7 +619,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
 
   // Optional discovery must finish before the outer timeout can discard the account result.
   const deadlineMs = spawnedAtMs + CODEX_AUTH_PROBE_TIMEOUT_MS - CODEX_DISCOVERY_MARGIN_MS;
-  const [skillsResponse, models, serviceTier, rateLimits] = yield* Effect.all(
+  const [skillsResponse, models, { serviceTier, nativeUsage, rateLimits }] = yield* Effect.all(
     [
       withCodexDiscoveryDeadline(client.request("skills/list", { cwds: [input.cwd] }), deadlineMs),
       accountResponse.account?.type === "chatgpt"
@@ -570,43 +636,32 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
         deadlineMs,
         CODEX_CONFIG_PROBE_TIMEOUT_MS,
       ).pipe(
-        Effect.map((response) => response?.config.service_tier ?? undefined),
         Effect.catch(() => Effect.logDebug("Codex config read failed.").pipe(Effect.as(undefined))),
+        Effect.flatMap((config) => {
+          // Only a confirmed native route may probe or publish the login's quota.
+          const nativeUsage =
+            !input.skipNativeUsage &&
+            config !== undefined &&
+            codexRoutesSpendNativeQuota(accountResponse, config.config);
+          const readUsage: Effect.Effect<CodexRateLimitsProbe | undefined> = nativeUsage
+            ? readCodexRateLimits(client, deadlineMs)
+            : Effect.undefined;
+          return readUsage.pipe(
+            Effect.map((rateLimits) => ({
+              serviceTier: config?.config.service_tier ?? undefined,
+              nativeUsage,
+              rateLimits,
+            })),
+          );
+        }),
       ),
-      // Usage is an enrichment: a failure or a slow answer degrades to "no
-      // usage this probe" rather than costing the account and models.
-      input.skipNativeUsage
-        ? Effect.undefined
-        : withCodexDiscoveryDeadline(
-            client.request("account/rateLimits/read", null),
-            deadlineMs,
-            RATE_LIMITS_PROBE_TIMEOUT_MS,
-          ).pipe(
-            Effect.map((response): CodexRateLimitsProbe =>
-              response
-                ? {
-                    snapshot: response.rateLimits,
-                    rateLimitsByLimitId: response.rateLimitsByLimitId,
-                    resetCredits: response.rateLimitResetCredits,
-                    accountId: response.accountId,
-                  }
-                : { failure: "Codex did not answer the usage request." },
-            ),
-            Effect.catch((error) =>
-              Effect.logDebug("Codex rate-limit read failed.", { cause: error }).pipe(
-                Effect.as<CodexRateLimitsProbe>({
-                  failure: codexRateLimitsFailureMessage(error),
-                  ...(isCodexUsageAuthRequiredError(error) ? { authRequired: true as const } : {}),
-                }),
-              ),
-            ),
-          ),
     ],
     { concurrency: "unbounded" },
   );
 
   return {
     account: accountResponse,
+    nativeUsage,
     ...(rateLimits ? { rateLimits } : {}),
     version,
     models,
@@ -849,17 +904,9 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   const accountStatus = managedAuth
     ? { status: "ready" as const, auth: managedAuth, message: undefined }
     : accountProbeStatus(snapshot);
-  // Without an OpenAI account (e.g. a custom model_provider) Codex refuses the
-  // usage read. The same account shape can still read usage with native auth,
-  // so only that refusal means unsupported; any other failure stays transient.
-  const accountlessUsageRefused =
-    !snapshot.account.account &&
-    !snapshot.account.requiresOpenaiAuth &&
-    snapshot.rateLimits !== undefined &&
-    "failure" in snapshot.rateLimits &&
-    snapshot.rateLimits.authRequired === true;
+  // Sign-in guidance still applies when Codex itself says it needs an OpenAI login.
   const usageLimits =
-    snapshot.account.account?.type === "apiKey" || accountlessUsageRefused
+    !snapshot.nativeUsage && !accountStatus.message
       ? makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" })
       : snapshot.rateLimits === undefined || "failure" in snapshot.rateLimits
         ? makeUnavailableUsageLimits({
