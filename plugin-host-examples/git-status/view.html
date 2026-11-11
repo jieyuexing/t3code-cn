@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Git Status</title>
+    <style>
+      body {
+        font: 13px var(--font-sans, system-ui, sans-serif);
+        margin: 0;
+        padding: 12px;
+        background: var(--background, canvas);
+        color: var(--foreground, canvastext);
+      }
+      code {
+        font-family: var(--font-mono, ui-monospace, monospace);
+      }
+      ul {
+        padding-left: 18px;
+      }
+      button {
+        font: inherit;
+        color: var(--primary-foreground, canvastext);
+        background: var(--primary, buttonface);
+        border: 0;
+        border-radius: var(--radius, 4px);
+        padding: 4px 10px;
+      }
+      .error {
+        color: var(--destructive, red);
+      }
+    </style>
+  </head>
+  <body>
+    <p>Directory: <code id="cwd">…</code></p>
+    <p id="status">Loading…</p>
+    <ul id="files"></ul>
+    <button id="open" type="button" disabled>Open T3 diff</button>
+    <script>
+      // The host bridge: announce `ready` to the parent, receive one MessagePort, then exchange JSON strings on it.
+      // `init` and later `context` messages carry `{ cwd, theme: { scheme, vars } }`; `callHost` reaches the
+      // host's read-only Git calls and the diff panel, and needs the `host.vcs-read` capability.
+      const parentWindow = window.parent;
+      const pending = new Map();
+      let port = null;
+      let nextId = 1;
+      let firstFile = null;
+      const callHost = (method, input) =>
+        new Promise((resolve, reject) => {
+          const id = nextId++;
+          pending.set(id, { resolve, reject });
+          port.postMessage(JSON.stringify({ _tag: "callHost", id, method, input: input ?? null }));
+        });
+      const applyContext = (context) => {
+        document.documentElement.style.colorScheme = context.theme.scheme;
+        for (const [name, value] of Object.entries(context.theme.vars)) {
+          document.documentElement.style.setProperty(name, value);
+        }
+        document.getElementById("cwd").textContent = context.cwd ?? "(no thread)";
+        return context.cwd;
+      };
+      const show = async (cwd) => {
+        const status = document.getElementById("status");
+        const files = document.getElementById("files");
+        status.className = "";
+        files.replaceChildren();
+        if (cwd === null) {
+          status.textContent = "Open this view in a thread.";
+          return;
+        }
+        try {
+          const result = await callHost("vcs.status", { cwd });
+          status.textContent = result.isRepo
+            ? `${result.refName ?? "detached"}: ${result.workingTree.files.length} changed file(s)`
+            : "Not a Git repository.";
+          for (const file of result.workingTree.files) {
+            const item = document.createElement("li");
+            item.textContent = `${file.path} +${file.insertions} -${file.deletions}`;
+            files.append(item);
+          }
+          firstFile = result.workingTree.files[0]?.path ?? null;
+          document.getElementById("open").disabled = false;
+        } catch (error) {
+          status.textContent = `Could not read the status: ${error.message}`;
+          status.className = "error";
+        }
+      };
+      document.getElementById("open").addEventListener("click", () => {
+        callHost("t3.openDiff", {
+          kind: "working-tree",
+          ...(firstFile === null ? {} : { file: firstFile }),
+        });
+      });
+      window.addEventListener("message", (event) => {
+        const data = event.data;
+        if (event.source !== parentWindow || data?.type !== "t3-view:connect" || port) return;
+        port = event.ports[0];
+        port.onmessage = (message) => {
+          const body = JSON.parse(message.data);
+          if (body._tag === "ping") port.postMessage(JSON.stringify({ _tag: "pong", n: body.n }));
+          else if (body._tag === "result") pending.get(body.id)?.resolve(body.value);
+          else if (body._tag === "error") {
+            const failure = new Error(body.message);
+            failure.code = body.code;
+            pending.get(body.id)?.reject(failure);
+          } else if (body._tag === "init") void show(applyContext(body.context));
+          else if (body._tag === "context") void show(applyContext(body.context));
+          if (body._tag === "result" || body._tag === "error") pending.delete(body.id);
+        };
+      });
+      parentWindow.postMessage({ type: "t3-view:ready" }, "*");
+    </script>
+  </body>
+</html>

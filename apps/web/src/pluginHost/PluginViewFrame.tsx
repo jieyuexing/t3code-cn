@@ -1,14 +1,21 @@
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { PluginHostError, type EnvironmentId, type PluginId } from "@t3tools/contracts";
+import {
+  PluginHostError,
+  type EnvironmentId,
+  type PluginId,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/ui/button";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { usePreparedConnection } from "../state/session";
 import { attachPluginViewBridge, BridgeCallError, type BridgeErrorCode } from "./bridge";
+import { useHostApi } from "./useHostApi";
 import { pluginHostFailureMessage, usePluginHostCall } from "./usePluginHost";
+import { usePluginViewContext } from "./viewContext";
 
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const isPluginHostError = Schema.is(PluginHostError);
@@ -39,10 +46,34 @@ export function PluginViewFrame(props: {
   readonly viewId: string;
   readonly title: string;
   readonly generation: number;
+  /** The capabilities the plugin's manifest declares; they decide what `callHost` reaches. */
+  readonly capabilities: ReadonlyArray<string>;
+  /** The thread's working directory, shown to the page as its `context`. */
+  readonly cwd: string | null;
+  readonly threadRef: ScopedThreadRef | null;
   readonly onReload: () => void;
 }) {
-  const { environmentId, pluginId, viewId, title, generation, onReload } = props;
+  const {
+    environmentId,
+    pluginId,
+    viewId,
+    title,
+    generation,
+    capabilities,
+    cwd,
+    threadRef,
+    onReload,
+  } = props;
   const call = useStableCallback(usePluginHostCall(environmentId));
+  const callHost = useStableCallback(useHostApi({ environmentId, capabilities, threadRef }));
+  const context = usePluginViewContext(cwd);
+  const contextRef = useRef(context);
+  const bridgeRef = useRef<{ readonly pushContext: () => void } | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tells the page's open bridge that the thread's directory or the theme changed
+  useEffect(() => {
+    contextRef.current = context;
+    bridgeRef.current?.pushContext();
+  }, [context]);
   const connection = usePreparedConnection(environmentId);
   const httpBaseUrl = connection._tag === "Some" ? connection.value.httpBaseUrl : null;
   const [state, setState] = useState<FrameState>({ _tag: "loading" });
@@ -75,9 +106,11 @@ export function PluginViewFrame(props: {
   const attachFrame = useStableCallback((frame: HTMLIFrameElement | null) => {
     if (frame === null) return;
     const handshakeTimer = setTimeout(() => setState({ _tag: "silent" }), HANDSHAKE_TIMEOUT_MS);
-    const detach = attachPluginViewBridge({
+    const bridge = attachPluginViewBridge({
       frame,
       init: { pluginId, viewId, title },
+      context: () => contextRef.current,
+      callHost: (method, input) => callHost(method, input),
       onTeardown: () => setState({ _tag: "stopped" }),
       call: (handler, input) =>
         settle(
@@ -95,10 +128,12 @@ export function PluginViewFrame(props: {
       if (event.source === frame.contentWindow) clearTimeout(handshakeTimer);
     };
     window.addEventListener("message", clearHandshake);
+    bridgeRef.current = bridge;
     return () => {
+      bridgeRef.current = null;
       clearTimeout(handshakeTimer);
       window.removeEventListener("message", clearHandshake);
-      detach();
+      bridge.dispose();
     };
   });
 

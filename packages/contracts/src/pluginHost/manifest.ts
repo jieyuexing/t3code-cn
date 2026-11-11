@@ -11,8 +11,8 @@ export const PLUGIN_MANIFEST_MAX_BYTES = 64 * 1024;
 const PLUGIN_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
 export const PLUGIN_EXTENSION_NAMESPACE = "com.jieyuexing.t3code";
 
-/** Capability names this host serves; the `x.` prefix marks fork-only ones. */
-export const PLUGIN_HOST_CAPABILITIES = ["settings", "views"] as const;
+/** Capability names this host serves; `host.vcs-read` lets a view read Git through the host. */
+export const PLUGIN_HOST_CAPABILITIES = ["settings", "views", "host.vcs-read"] as const;
 
 /** The only top-level fields the specification permits in `plugin.json`. */
 export const PLUGIN_MANIFEST_FIELDS = [

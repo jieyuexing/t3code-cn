@@ -5,11 +5,21 @@ import * as Schema from "effect/Schema";
 export type BridgeErrorCode =
   | PluginHostErrorReason
   | "cancelled"
+  | "denied"
   | "busy"
   | "rate"
   | "too-deep"
   | "too-large"
   | "invalid";
+
+/** What the host tells a page about where it is shown: the thread's directory and T3's theme. */
+export interface PluginViewContext {
+  readonly cwd: string | null;
+  readonly theme: {
+    readonly scheme: "light" | "dark";
+    readonly vars: Readonly<Record<string, string>>;
+  };
+}
 
 /** A failed page call, carrying the code the page receives. */
 export class BridgeCallError extends Schema.TaggedError<BridgeCallError>()("BridgeCallError", {
@@ -26,6 +36,7 @@ const BRIDGE_PING_INTERVAL_MS = 5_000;
 const HANDLER_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
 const SERVICE_PATTERN = /^[a-z][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
 const METHOD_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const HOST_METHOD_MAX_CHARS = 64;
 const MAX_CALL_ID = 2 ** 31 - 1;
 
 export type BridgeTeardownReason = "unresponsive" | "violations";
@@ -38,7 +49,8 @@ function exceedsDepth(value: unknown, depth: number): boolean {
 
 /**
  * Answers `ready` messages from the frame's own window with one port, then serves page calls on it.
- * Returns a disposer that closes the port and stops listening.
+ * `dispose` closes the port and stops listening; `pushContext` sends the page the context again
+ * when it has changed since the page last got it.
  */
 export function attachPluginViewBridge(options: {
   readonly frame: HTMLIFrameElement;
@@ -46,10 +58,14 @@ export function attachPluginViewBridge(options: {
   readonly call: (handler: string, input: unknown) => Promise<unknown>;
   /** A call on a service the view's plugin injects; the plugin is the frame's, never the page's. */
   readonly callService: (service: string, method: string, input: unknown) => Promise<unknown>;
+  /** A call on the host itself; the host decides what the plugin may reach. */
+  readonly callHost: (method: string, input: unknown) => Promise<unknown>;
+  readonly context: () => PluginViewContext;
   readonly onTeardown: (reason: BridgeTeardownReason) => void;
   readonly pingIntervalMs?: number;
-}): () => void {
+}): { readonly dispose: () => void; readonly pushContext: () => void } {
   let port: MessagePort | null = null;
+  let sentContext = "";
   let pingTimer: ReturnType<typeof setInterval> | null = null;
   let pending = new Set<number>();
   let violations = 0;
@@ -97,6 +113,14 @@ export function attachPluginViewBridge(options: {
       return SERVICE_PATTERN.test(service) && METHOD_PATTERN.test(method)
         ? { run: (input) => options.callService(service, method, input) }
         : { refusal: "Invalid service or method name." };
+    }
+    if (
+      body._tag === "callHost" &&
+      typeof body.method === "string" &&
+      body.method.length <= HOST_METHOD_MAX_CHARS
+    ) {
+      const method = body.method;
+      return { run: (input) => options.callHost(method, input) };
     }
     return null;
   };
@@ -188,7 +212,9 @@ export function attachPluginViewBridge(options: {
       );
     };
 
-    send(mine, { _tag: "init", ...options.init });
+    const context = options.context();
+    sentContext = JSON.stringify(context);
+    send(mine, { _tag: "init", ...options.init, context });
     options.frame.contentWindow?.postMessage({ type: "t3-view:connect" }, "*", [channel.port2]);
     pingTimer = setInterval(() => {
       if (ping > answeredPing) return fail("unresponsive");
@@ -208,8 +234,17 @@ export function attachPluginViewBridge(options: {
     }
   };
   window.addEventListener("message", onWindowMessage);
-  return () => {
-    window.removeEventListener("message", onWindowMessage);
-    closeChannel();
+  return {
+    dispose: () => {
+      window.removeEventListener("message", onWindowMessage);
+      closeChannel();
+    },
+    pushContext: () => {
+      const context = options.context();
+      const encoded = JSON.stringify(context);
+      if (port === null || encoded === sentContext) return;
+      sentContext = encoded;
+      send(port, { _tag: "context", context });
+    },
   };
 }
