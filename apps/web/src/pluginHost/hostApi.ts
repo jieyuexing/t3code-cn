@@ -8,6 +8,7 @@ import type {
 import { BridgeCallError } from "./bridge";
 
 const VCS_READ_CAPABILITY = "host.vcs-read";
+const SETTINGS_CAPABILITY = "settings";
 
 export interface DiffTarget {
   readonly kind: "working-tree" | "commit";
@@ -24,6 +25,8 @@ export interface HostApiDeps {
     input: ReviewDiffFileContentsInput,
   ) => Promise<ReviewDiffFileContentsResult>;
   readonly openDiff: (target: DiffTarget) => void;
+  /** Opens the plugin settings page on the calling plugin's own entry; nothing names another plugin. */
+  readonly openPluginSettings: () => void;
 }
 
 const denied = (message: string) => new BridgeCallError({ code: "denied", message });
@@ -134,20 +137,32 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
     });
     return null;
   },
+  // Takes no input: the target is the caller, so a view cannot open another plugin's settings.
+  "t3.openPluginSettings": async (deps) => {
+    deps.openPluginSettings();
+    return null;
+  },
+};
+
+/** The capability a method needs; the Git and diff methods all need `host.vcs-read`. */
+const CAPABILITY_OF: Readonly<Record<string, string>> = {
+  "t3.openPluginSettings": SETTINGS_CAPABILITY,
 };
 
 /**
- * What a view's `callHost` reaches: a read-only slice of T3's Git, and the diff panel. A plugin
- * that did not declare `host.vcs-read` is denied everything, as is any method not listed here.
+ * What a view's `callHost` reaches: a read-only slice of T3's Git, the diff panel, and the
+ * caller's own settings page. A plugin that did not declare the capability a method needs is
+ * denied it, as is any method not listed here.
  */
 export function createHostApi(deps: HostApiDeps) {
   return async (method: string, input: unknown): Promise<unknown> => {
     const handler = Object.hasOwn(HANDLERS, method) ? HANDLERS[method] : undefined;
-    if (handler === undefined || !deps.capabilities.includes(VCS_READ_CAPABILITY)) {
+    const capability = CAPABILITY_OF[method] ?? VCS_READ_CAPABILITY;
+    if (handler === undefined || !deps.capabilities.includes(capability)) {
       throw denied(
         handler === undefined
           ? `The host does not offer "${method}".`
-          : `"${method}" needs the ${VCS_READ_CAPABILITY} capability.`,
+          : `"${method}" needs the ${capability} capability.`,
       );
     }
     return handler(deps, readObject(input));

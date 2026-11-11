@@ -1,6 +1,6 @@
 import type { EnvironmentId, PluginHostEntry, PluginHostSnapshot } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { requestConfirmDialog } from "../confirmDialog";
 import { Badge } from "../components/ui/badge";
@@ -13,6 +13,13 @@ import {
   SettingsSection,
 } from "../components/settings/settingsLayout";
 import { useSettingsScope } from "../components/settings/SettingsScopeContext";
+import { PluginSettingsForm } from "./PluginSettingsForm";
+import {
+  clearPluginSettingsReveal,
+  pluginSettingsKey,
+  setPluginSettingsOpen,
+  usePluginSettingsStore,
+} from "./pluginSettingsStore";
 import { PLUGIN_STATUS_VARIANT_BY_KIND, pluginStatus } from "./pluginStatus";
 import { useCanCallPluginHost, usePluginHostAction, usePluginHostSnapshot } from "./usePluginHost";
 
@@ -180,10 +187,23 @@ function PluginRow(props: {
   const { environmentId, plugin, snapshot, canManage } = props;
   const act = usePluginHostAction(environmentId);
   const [confirming, setConfirming] = useState(false);
+  const settingsKey = pluginSettingsKey(environmentId, plugin.id);
+  const settingsOpen = usePluginSettingsStore((state) => state.opened[settingsKey] === true);
+  const revealed = usePluginSettingsStore((state) => state.reveal === settingsKey);
+  const formRef = useRef<HTMLDivElement>(null);
   const status = pluginStatus(plugin);
   const views = snapshot.views.filter((view) => view.pluginId === plugin.id).length;
   const services = plugin.provides.length;
   const { state } = plugin;
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a view asked for this plugin's settings (`t3.openPluginSettings`): bring the row into view once its form is on screen, then take the request
+  useEffect(() => {
+    if (!revealed) return;
+    clearPluginSettingsReveal();
+    formRef.current
+      ?.closest("[data-slot=settings-row]")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [revealed]);
 
   const toggle = (enabled: boolean) => {
     if (!enabled)
@@ -222,7 +242,7 @@ function PluginRow(props: {
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant={PLUGIN_STATUS_VARIANT_BY_KIND[status.kind]}>{status.label}</Badge>
-            <span>{`${views} views · ${services} services${plugin.pid === undefined ? "" : ` · process ${plugin.pid}`}`}</span>
+            <span>{`${views} views · ${services} services${plugin.settings.length === 0 ? "" : ` · ${plugin.settings.length} settings`}${plugin.pid === undefined ? "" : ` · process ${plugin.pid}`}`}</span>
           </div>
           {state._tag === "backoff" ? (
             <p>{`Stopped after ${state.failures} failures. Retrying at ${new Date(state.retryAt).toLocaleTimeString()}. ${state.reason}`}</p>
@@ -243,6 +263,18 @@ function PluginRow(props: {
       }
       control={
         <>
+          {plugin.settings.length === 0 ? null : (
+            <Button
+              size="xs"
+              variant="outline"
+              // The outline variant draws its pressed look (border kept, hover fill) for this attribute.
+              data-pressed={settingsOpen ? "" : undefined}
+              aria-expanded={settingsOpen}
+              onClick={() => setPluginSettingsOpen(settingsKey, !settingsOpen)}
+            >
+              Settings
+            </Button>
+          )}
           {state._tag === "backoff" || state._tag === "quarantined" ? (
             <Button
               size="xs"
@@ -306,6 +338,15 @@ function PluginRow(props: {
             </Button>
           </div>
         </div>
+      ) : null}
+      {settingsOpen && plugin.settings.length > 0 ? (
+        <PluginSettingsForm
+          environmentId={environmentId}
+          plugin={plugin}
+          canManage={canManage}
+          formRef={formRef}
+          onCollapse={() => setPluginSettingsOpen(settingsKey, false)}
+        />
       ) : null}
     </SettingsRow>
   );

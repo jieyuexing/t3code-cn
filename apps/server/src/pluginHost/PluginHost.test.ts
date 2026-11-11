@@ -258,6 +258,27 @@ describe("PluginHost", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.live(
+    "saves a setting of a plugin that was never enabled or is disabled, without starting it",
+    () =>
+      Effect.gen(function* () {
+        const { host, copyExample, spawns } = yield* setup();
+        yield* call(host, { _tag: "add", path: yield* copyExample("echo") });
+        const prefix = (snapshot: PluginHostSnapshot | undefined) =>
+          entryOf(snapshot!)!.settingValues["prefix"];
+
+        yield* call(host, { _tag: "setSetting", pluginId, key: "prefix", value: "Idle" });
+        expect(entryOf((yield* latest(host))!)!.state._tag).toBe("idle");
+        expect(prefix(yield* latest(host))).toBe("Idle");
+
+        yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
+        yield* call(host, { _tag: "disable", pluginId });
+        yield* call(host, { _tag: "setSetting", pluginId, key: "prefix", value: "Off" });
+        expect(prefix(yield* latest(host))).toBe("Off");
+        expect(spawns.count).toBe(0);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.live("reload applies a new title and keeps the consent, back in standby", () =>
     Effect.gen(function* () {
       const { fs, path, host, copyExample, spawns, invoke } = yield* setup();

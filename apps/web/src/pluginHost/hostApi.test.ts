@@ -10,6 +10,7 @@ function setup(capabilities: ReadonlyArray<string> = [CAPABILITY]) {
     preview: vi.fn(),
     fileContents: vi.fn(async () => ({ oldContents: "old", newContents: "new" })),
     openDiff: vi.fn(),
+    openPluginSettings: vi.fn(),
   } satisfies Omit<HostApiDeps, "capabilities">;
   return { deps, call: createHostApi({ capabilities, ...deps }) };
 }
@@ -157,5 +158,26 @@ describe("host api", () => {
       code: "invalid",
     });
     await expect(call("t3.openDiff", { kind: "turn" })).rejects.toMatchObject({ code: "invalid" });
+  });
+
+  it("opens the caller's own plugin settings only for a plugin that declared settings", async () => {
+    const { deps, call } = setup(["views", "settings"]);
+    await expect(call("t3.openPluginSettings", {})).resolves.toBeNull();
+    // The target is whoever calls: input naming another plugin is not read.
+    await expect(call("t3.openPluginSettings", { pluginId: "someone.else" })).resolves.toBeNull();
+    expect(deps.openPluginSettings).toHaveBeenCalledTimes(2);
+    expect(deps.openPluginSettings).toHaveBeenLastCalledWith();
+
+    const withoutSettings = setup(["views", "host.vcs-read"]);
+    await expect(withoutSettings.call("t3.openPluginSettings", {})).rejects.toMatchObject(DENIED);
+    expect(withoutSettings.deps.openPluginSettings).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Git methods behind host.vcs-read when a plugin declares only settings", async () => {
+    const { deps, call } = setup(["settings"]);
+    await expect(call("vcs.status", { cwd: "/repo" })).rejects.toMatchObject(DENIED);
+    await expect(call("t3.openDiff", { kind: "working-tree" })).rejects.toMatchObject(DENIED);
+    expect(deps.status).not.toHaveBeenCalled();
+    expect(deps.openDiff).not.toHaveBeenCalled();
   });
 });
