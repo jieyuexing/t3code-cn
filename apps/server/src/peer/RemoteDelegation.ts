@@ -17,6 +17,7 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -26,8 +27,10 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import type * as Tool from "effect/ai/Tool";
 import { withExecutedModelNote } from "@t3tools/provider-core/server/subagentProjection";
+import { chooseLoadBalancedEnvironment } from "@t3tools/shared/loadBalancing";
 
 import type * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
+import { EnvironmentToolkit } from "../mcp/toolkits/environment/tools.ts";
 import { ProjectToolkit } from "../mcp/toolkits/project/tools.ts";
 import {
   resolveInteractionMode,
@@ -39,6 +42,7 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as HostResources from "../resourceTelemetry/HostResources.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as PeerForwarding from "./PeerForwarding.ts";
 import * as PeerLinks from "./PeerLinks.ts";
@@ -60,7 +64,24 @@ export const FollowRetrySchedule = Context.Reference<Schedule.Schedule<unknown>>
   },
 );
 
+/** Reading a linked machine's load and projects, so a sleeping one cannot hold up a placement. */
+const PLACEMENT_READ_TIMEOUT = Duration.seconds(3);
+
 type ThreadScope = McpInvocationContext.McpThreadInvocationScope;
+
+export interface PlacementRequest {
+  /** The project here whose repository the other machine must have. Default: the calling thread's. */
+  readonly projectId?: ProjectId | undefined;
+  /** The request has a form only this machine runs, such as attachments or a worktree. */
+  readonly hereOnly: boolean;
+}
+
+/** Where an `"auto"` request runs. `environmentId` is undefined for this machine. */
+export interface Placement {
+  readonly environmentId: EnvironmentId | undefined;
+  /** The project there that has this project's repository. */
+  readonly projectId: ProjectId | undefined;
+}
 
 /**
  * `delegate_task` to a linked environment. The task's child is an ordinary
@@ -79,6 +100,16 @@ export class RemoteDelegation extends Context.Service<
         };
       },
     ) => Effect.Effect<{ readonly taskId: NodeId }, OrchestratorMcpFailure>;
+    /**
+     * The least loaded of this machine and the linked ones that answer, have
+     * the project's repository once, and report their load. This machine when
+     * none of them qualifies, including itself, or when the request is
+     * `hereOnly`.
+     */
+    readonly place: (
+      scope: McpInvocationContext.McpInvocationScope,
+      request: PlacementRequest,
+    ) => Effect.Effect<Placement>;
     /**
      * Stops the task's thread there, then completes it here as cancelled. A
      * task that already has its result keeps it; its thread there is still
@@ -123,6 +154,7 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectService.ProjectService;
   const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+  const hostResources = yield* HostResources.HostResources;
   const random = yield* SecureRandom.SecureRandom;
   const hereId = yield* ServerEnvironment.ServerEnvironment.pipe(
     Effect.flatMap((environment) => environment.getEnvironmentId),
@@ -139,30 +171,29 @@ const make = Effect.gen(function* () {
       .getThreadRecords(parentThreadId, ["subagents"], { subagentIds: [taskId] })
       .pipe(Effect.map(({ thread, subagents }) => ({ thread, task: subagents[0] })));
 
-  /** The peer's project with this thread's repository, or the one the caller named. */
-  const resolveRemoteProject = Effect.fn("RemoteDelegation.resolveRemoteProject")(function* (
-    scope: ThreadScope,
-    environmentId: EnvironmentId,
-    parentProjectId: ProjectId,
-    requested: ProjectId | undefined,
-  ) {
-    if (requested !== undefined) return requested;
-    const here = yield* projects.getById(parentProjectId).pipe(
+  /**
+   * The project's repository identity. Its own is a one-minute cache that
+   * reads blank when cold, so resolve it here, as the other side's
+   * t3_project_list does.
+   */
+  const repositoryKeyOf = (projectId: ProjectId) =>
+    projects.getById(projectId).pipe(
       Effect.map(Option.getOrUndefined),
       Effect.orElseSucceed(() => undefined),
+      Effect.flatMap((here) =>
+        here === undefined
+          ? Effect.void
+          : repositoryIdentities
+              .resolve(here.workspaceRoot)
+              .pipe(Effect.map((identity) => identity?.canonicalKey)),
+      ),
     );
-    // The project's own identity is a one-minute cache that reads blank when
-    // cold, so resolve it here, as the other side's t3_project_list does.
-    const key =
-      here === undefined
-        ? undefined
-        : (yield* repositoryIdentities.resolve(here.workspaceRoot))?.canonicalKey;
-    if (key === undefined) {
-      return yield* new OrchestratorMcpFailure({
-        code: "target_required",
-        message: "Pass target.projectId: this thread's project has no repository to match there.",
-      });
-    }
+
+  const projectsWithRepository = Effect.fn("RemoteDelegation.projectsWithRepository")(function* (
+    scope: McpInvocationContext.McpInvocationScope,
+    environmentId: EnvironmentId,
+    key: string,
+  ) {
     const matches: Array<{ readonly id: ProjectId; readonly title: string }> = [];
     let cursor: number | null = 0;
     while (cursor !== null) {
@@ -176,6 +207,25 @@ const make = Effect.gen(function* () {
       );
       cursor = listed.nextCursor;
     }
+    return matches;
+  });
+
+  /** The peer's project with this thread's repository, or the one the caller named. */
+  const resolveRemoteProject = Effect.fn("RemoteDelegation.resolveRemoteProject")(function* (
+    scope: ThreadScope,
+    environmentId: EnvironmentId,
+    parentProjectId: ProjectId,
+    requested: ProjectId | undefined,
+  ) {
+    if (requested !== undefined) return requested;
+    const key = yield* repositoryKeyOf(parentProjectId);
+    if (key === undefined) {
+      return yield* new OrchestratorMcpFailure({
+        code: "target_required",
+        message: "Pass target.projectId: this thread's project has no repository to match there.",
+      });
+    }
+    const matches = yield* projectsWithRepository(scope, environmentId, key);
     if (matches.length === 1) return matches[0]!.id;
     return yield* new OrchestratorMcpFailure({
       code: "invalid_request",
@@ -185,6 +235,76 @@ const make = Effect.gen(function* () {
           : `Several projects there have this repository: ${matches.map((project) => `${project.title} (${project.id})`).join(", ")}. Pass target.projectId.`,
     });
   });
+
+  const place: RemoteDelegation["Service"]["place"] = Effect.fn("RemoteDelegation.place")(
+    function* (scope, request) {
+      const here: Placement = { environmentId: undefined, projectId: undefined };
+      if (request.hereOnly) return here;
+      const projectId =
+        request.projectId ??
+        (scope.thread === undefined
+          ? undefined
+          : (yield* threads
+              .getThreadShell(scope.thread.threadId)
+              .pipe(Effect.orElseSucceed(() => null)))?.projectId);
+      const key = projectId === undefined ? undefined : yield* repositoryKeyOf(projectId);
+      if (key === undefined) return here;
+      // Not `links.list`, which probes every address of every link before it returns.
+      // A link that is expired or does not answer fails its read below instead.
+      const writable = (yield* links.stored.pipe(Effect.orElseSucceed(() => []))).filter(
+        (link) => link.access !== "read-only",
+      );
+      const read = Effect.fn("RemoteDelegation.placementRead")(function* (
+        environmentId: EnvironmentId,
+      ) {
+        const [environment, matches] = yield* Effect.all(
+          [
+            forwarding.call(scope, EnvironmentToolkit.tools.t3_environment_read, environmentId, {
+              environmentId,
+            }),
+            projectsWithRepository(scope, environmentId, key),
+          ],
+          { concurrency: 2 },
+        );
+        return environment.hostResources === undefined || matches.length !== 1
+          ? undefined
+          : { environmentId, projectId: matches[0]!.id, resources: environment.hostResources };
+      });
+      // Anything that keeps a machine from answering in time leaves it out.
+      const there = (yield* Effect.forEach(
+        writable,
+        (link) =>
+          read(link.environmentId).pipe(
+            Effect.timeout(PLACEMENT_READ_TIMEOUT),
+            Effect.orElseSucceed(() => undefined),
+          ),
+        { concurrency: "unbounded" },
+      )).filter((candidate) => candidate !== undefined);
+      const now = DateTime.toEpochMillis(yield* DateTime.now);
+      // This machine comes first, so a tie stays here.
+      const chosen = chooseLoadBalancedEnvironment(
+        [
+          {
+            environmentId: hereId,
+            resources: yield* hostResources.read,
+            receivedAt: now,
+            weight: 1,
+          },
+          ...there.map(({ environmentId, resources }) => ({
+            environmentId,
+            resources,
+            receivedAt: now,
+            weight: 1,
+          })),
+        ],
+        now,
+      );
+      const picked = there.find((candidate) => candidate.environmentId === chosen);
+      return picked === undefined
+        ? here
+        : { environmentId: picked.environmentId, projectId: picked.projectId };
+    },
+  );
 
   const delegate: RemoteDelegation["Service"]["delegate"] = Effect.fn("RemoteDelegation.delegate")(
     function* (scope, input) {
@@ -793,7 +913,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.ignoreCause({ log: true })),
     );
 
-  return RemoteDelegation.of({ delegate, cancel, start });
+  return RemoteDelegation.of({ delegate, place, cancel, start });
 });
 
 const isTerminal = (status: string) =>

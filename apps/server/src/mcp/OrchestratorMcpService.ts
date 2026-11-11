@@ -13,6 +13,7 @@ import {
   type OrchestrationV2ThreadShell,
   type OrchestrationV2ThreadLaunchWorkspaceStrategy,
   type OrchestrationV2TurnItem,
+  OrchestratorMcpAutoEnvironment,
   OrchestratorMcpFailure,
   type OrchestratorMcpCapabilitiesInput,
   type OrchestratorMcpCapabilitiesResult,
@@ -1444,6 +1445,34 @@ const make = Effect.gen(function* () {
   const requestKey = (clientRequestId: string | undefined): Effect.Effect<string> =>
     clientRequestId === undefined ? random.uuidV4() : Effect.succeed(clientRequestId);
 
+  /** A task whose target says "auto" gets the machine and project the placement picked, if not this one. */
+  const placeAutoTarget = Effect.fn("OrchestratorMcpService.placeAutoTarget")(function* (
+    scope: McpInvocationScope,
+    input: OrchestratorMcpDelegateTaskInput,
+  ): Effect.fn.Return<OrchestratorMcpDelegateTaskInput, OrchestratorMcpFailure> {
+    const { target } = input;
+    if (target === undefined || target.environmentId !== OrchestratorMcpAutoEnvironment) {
+      return input;
+    }
+    if (target.projectId !== undefined) {
+      return yield* failure(
+        "invalid_request",
+        'With environmentId "auto", omit target.projectId: the task runs in this thread\'s project.',
+      );
+    }
+    const { environmentId: _auto, ...rest } = target;
+    const placed = yield* remoteDelegation.place(scope, {
+      hereOnly: input.isolation === "worktree",
+    });
+    return {
+      ...input,
+      target:
+        placed.environmentId === undefined
+          ? rest
+          : { ...rest, environmentId: placed.environmentId, projectId: placed.projectId },
+    };
+  });
+
   const readTask = Effect.fn("OrchestratorMcpService.readTask")(function* (
     scope: McpThreadInvocationScope,
     taskId: NodeId,
@@ -2363,7 +2392,8 @@ const make = Effect.gen(function* () {
         },
       };
     }),
-    delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(function* (callerScope, input) {
+    delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(function* (callerScope, asked) {
+      const input = yield* placeAutoTarget(callerScope, asked);
       const environmentId =
         input.target === undefined
           ? undefined

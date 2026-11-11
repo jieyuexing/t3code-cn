@@ -286,6 +286,14 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
       }),
     // The launched thread carries the caller's link, if it has one.
     "stamped",
+    // Attachments are pending uploads here, and only a project's checkout is the same on every machine.
+    (input) => ({
+      projectId: input.projectId,
+      hereOnly:
+        input.scratch === true ||
+        (input.attachments?.length ?? 0) > 0 ||
+        (input.workspaceStrategy !== undefined && input.workspaceStrategy.type !== "root"),
+    }),
   ),
   t3_project_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {

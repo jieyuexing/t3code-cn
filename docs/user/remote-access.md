@@ -362,7 +362,15 @@ If the other machine revokes the link, or the link is removed here, the task
 fails with that reason.
 
 To choose between machines, an agent can read each one's current CPU and memory
-load with `t3_environment_read`.
+load with `t3_environment_read`. Or it can pass `"auto"` as the environment of
+`delegate_task` or `t3_thread_launch`, and this machine picks the least loaded
+one, counting itself and the linked machines that answer, report their load, and
+have exactly one project with the same repository. `"auto"` always means this
+thread's project (or `t3_thread_launch`'s `projectId`, which is then this
+machine's). If no machine qualifies, the work stays here, and so does work only
+this machine can do, such as a worktree or an attachment. `t3_thread_launch`
+returns the `environmentId` that took it; a `delegate_task` that ran elsewhere
+returns that machine's thread as `remoteChild`.
 
 ## Manage or revoke access
 
