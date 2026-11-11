@@ -76,7 +76,8 @@ export type RightPanelSurface =
       detailTab?: PullRequestDetailTab;
     }
   | { id: "pull-requests"; kind: "pull-requests" }
-  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId };
+  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId }
+  | { id: `plugin:${string}`; kind: "plugin"; pluginId: string; viewId: string; title: string };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 const RIGHT_PANEL_STORAGE_VERSION = 14;
@@ -126,6 +127,7 @@ interface RightPanelStoreState {
     kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "side-chat">,
   ) => void;
   openSideChat: (ref: ScopedThreadRef, threadId: ThreadId) => void;
+  openPlugin: (ref: ScopedThreadRef, view: PluginSurface) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
@@ -257,6 +259,7 @@ const terminalSurface = (terminalId: string): RightPanelSurface => ({
 });
 
 export type PullRequestSurface = Extract<RightPanelSurface, { kind: "pull-request" }>;
+export type PluginSurface = Omit<Extract<RightPanelSurface, { kind: "plugin" }>, "id">;
 
 export function pullRequestSurfaceId(target: {
   environmentId?: string;
@@ -724,6 +727,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) =>
             upsertSurface(current, { id: `side-chat:${threadId}`, kind: "side-chat", threadId }),
+          ),
+        ),
+      openPlugin: (ref, view) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) =>
+            upsertSurface(current, { ...view, id: `plugin:${view.pluginId}:${view.viewId}` }),
           ),
         ),
       renameDevice: (ref, surfaceId, title) =>
@@ -1234,7 +1243,7 @@ export function selectThreadPanelOpen(
 export function selectActiveRightPanel(
   byThreadKey: Record<string, ThreadRightPanelState>,
   ref: ScopedThreadRef | null | undefined,
-): RightPanelKind | null {
+): RightPanelSurface["kind"] | null {
   const state = selectThreadRightPanelState(byThreadKey, ref);
   if (!state.isOpen) return null;
   return state.surfaces.find((surface) => surface.id === state.activeSurfaceId)?.kind ?? null;

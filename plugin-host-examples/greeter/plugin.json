@@ -1,0 +1,39 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "example.greeter",
+  "version": "0.1.0",
+  "description": "Greets by name and asks the example.clock service for the time.",
+  "extensions": {
+    "com.jieyuexing.t3code": {
+      "apiVersion": 1,
+      "title": "Greeter",
+      "entry": "./index.mjs",
+      "capabilities": ["views"],
+      "inject": ["example.clock", "log"],
+      "views": [
+        { "id": "greeting", "title": "Greeter", "placement": "side-panel", "html": "./view.html" }
+      ],
+      "provides": [
+        {
+          "name": "example.greeter",
+          "methods": [
+            {
+              "name": "greet",
+              "title": "Greet",
+              "description": "Greets by name and adds the time from example.clock.",
+              "readOnly": true,
+              "ui": true,
+              "input": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "description": "Who to greet." }
+                },
+                "required": ["name"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

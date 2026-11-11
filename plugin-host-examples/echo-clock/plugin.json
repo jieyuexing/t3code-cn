@@ -1,0 +1,60 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "example.echo-clock",
+  "version": "0.1.0",
+  "description": "A clock page, a service and a setting, to exercise the T3 plugin host.",
+  "extensions": {
+    "com.jieyuexing.t3code": {
+      "apiVersion": 1,
+      "title": "Echo Clock",
+      "entry": "./index.mjs",
+      "capabilities": ["settings", "views"],
+      "inject": ["settings", "log", "handle"],
+      "views": [
+        {
+          "id": "clock",
+          "title": "Echo Clock",
+          "placement": "side-panel",
+          "html": "./view.html"
+        }
+      ],
+      "settings": [
+        {
+          "type": "text",
+          "key": "prefix",
+          "label": "Prefix",
+          "default": "Now"
+        }
+      ],
+      "provides": [
+        {
+          "name": "example.clock",
+          "methods": [
+            {
+              "name": "now",
+              "title": "Current time",
+              "description": "The prefixed ISO time.",
+              "readOnly": true,
+              "agent": true,
+              "input": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  }
+                }
+              },
+              "ui": true
+            },
+            {
+              "name": "info",
+              "title": "Plugin info",
+              "readOnly": true,
+              "ui": true
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

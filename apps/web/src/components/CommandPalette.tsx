@@ -165,6 +165,7 @@ import {
   useCommandPaletteStore,
 } from "../commandPaletteStore";
 import { PULL_REQUESTS_PANEL_REF, useRightPanelStore } from "../rightPanelStore";
+import { usePluginPaletteItems } from "../pluginHost/usePluginPalette";
 import { getLatestThreadForProject, sortThreads } from "@t3tools/client-runtime/state/thread-sort";
 import {
   cn,
@@ -473,6 +474,7 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
+  const plugins = usePluginPaletteItems(activeThread, primaryEnvironmentId);
   const projects = useProjects();
   const referenceThreadRef =
     pathname === "/pull-requests"
@@ -1662,6 +1664,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  actionItems.push(plugins.settingsItem);
   actionItems.push({
     kind: "action",
     value: "action:settings",
@@ -1729,7 +1732,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
+  const rootGroups = [...buildRootGroups({ actionItems, recentThreadItems }), ...plugins.groups];
   // Every setting goes to the palette's own matcher, so settings get the same
   // word starts and typo tolerance as threads.
   const settingsSearchItems: CommandPaletteActionItem[] = settingsForThisPlatform(

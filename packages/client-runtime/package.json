@@ -503,6 +503,10 @@
       "types": "./src/state/mcpApps.ts",
       "default": "./src/state/mcpApps.ts"
     },
+    "./state/plugin-host": {
+      "types": "./src/state/pluginHost.ts",
+      "default": "./src/state/pluginHost.ts"
+    },
     "./source-control-clients": {
       "types": "./src/sourceControlClients.ts",
       "default": "./src/sourceControlClients.ts"
