@@ -92,7 +92,14 @@ describe("pendingThreads", () => {
     });
     const done = shell("done", run("2026-11-11T02:00:00.000Z"));
     const fresh = shell("fresh");
-    const [askedRow, doneRow, freshRow] = pending([asked, done, fresh]);
+    // Marked as asking by the shell's own timestamp when no request summary came with it.
+    const stamped = shell("stamped", {
+      hasPendingUserInput: true,
+      pendingUserInputAt: "2026-11-11T05:00:00.000Z",
+      ...run("2026-11-11T04:00:00.000Z"),
+    });
+    const [askedRow, doneRow, freshRow, stampedRow] = pending([asked, done, fresh, stamped]);
+    expect(stampedRow).toMatchObject({ status: "input", waitingSince: "2026-11-11T05:00:00.000Z" });
     expect(askedRow).toMatchObject({
       status: "input",
       project: "Alpha project",
@@ -131,15 +138,17 @@ describe("clipReply", () => {
     expect(clipReply("done")).toEqual({ text: "done", truncated: false });
   });
 
-  it("cuts a long reply at 60000 characters and says so", () => {
-    const clipped = clipReply("字".repeat(60_001));
+  it("keeps the last 60000 characters of a long reply, where it asks, and says so", () => {
+    const clipped = clipReply(`头${"字".repeat(60_000)}尾`);
     expect(clipped.text).toHaveLength(60_000);
+    expect(clipped.text.endsWith("字尾")).toBe(true);
     expect(clipped.truncated).toBe(true);
   });
 
   it("cuts further when escaping would push the message past the bridge limit", () => {
-    const clipped = clipReply("\n".repeat(60_000));
+    const clipped = clipReply(`头${"\n".repeat(60_000)}尾`);
     expect(JSON.stringify(clipped.text).length).toBeLessThanOrEqual(64_000);
+    expect(clipped.text.endsWith("尾")).toBe(true);
     expect(clipped.truncated).toBe(true);
   });
 });

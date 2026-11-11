@@ -44,7 +44,7 @@ export interface PendingThread {
   readonly status: PendingThreadStatus;
   readonly request: { readonly kind: string; readonly createdAt: string } | null;
   readonly lastTurnCompletedAt: string | null;
-  /** When the thread started waiting: its open request, else its last finished turn. */
+  /** When the thread started waiting: its open question or request, else its last finished turn. */
   readonly waitingSince: string | null;
 }
 
@@ -93,7 +93,7 @@ export function pendingThreads(input: {
             ? null
             : { kind: request.kind, createdAt: DateTime.formatIso(request.createdAt) },
         lastTurnCompletedAt,
-        waitingSince: requestAt ?? lastTurnCompletedAt,
+        waitingSince: requestAt ?? thread.pendingUserInputAt ?? lastTurnCompletedAt,
       };
     });
 }
@@ -102,10 +102,10 @@ const REPLY_MAX_CHARS = 60_000;
 // The bridge drops a message over 64K characters once the text is JSON-escaped.
 const REPLY_MAX_ENCODED_CHARS = 64_000;
 
-/** The text of the last assistant message, cut to what one bridge message can carry. */
+/** A reply cut to what one bridge message can carry. The tail stays: what a reply asks of the user comes last. */
 export function clipReply(text: string): { readonly text: string; readonly truncated: boolean } {
-  let clipped = text.slice(0, REPLY_MAX_CHARS);
+  let clipped = text.slice(-REPLY_MAX_CHARS);
   const overflow = JSON.stringify(clipped).length - REPLY_MAX_ENCODED_CHARS;
-  if (overflow > 0) clipped = clipped.slice(0, clipped.length - overflow);
+  if (overflow > 0) clipped = clipped.slice(overflow);
   return { text: clipped, truncated: clipped.length < text.length };
 }

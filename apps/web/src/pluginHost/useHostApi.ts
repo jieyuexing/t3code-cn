@@ -46,6 +46,10 @@ export function useHostApi(options: {
   const fileContents = useAtomCommand(pluginHostEnvironment.diffFileContents, quietly);
   const transcript = useAtomCommand(orchestrationEnvironment.threadTranscript, quietly);
   const snooze = useOrchestrationCommand(threadEnvironment.snooze, quietly);
+  const readItems = async (threadId: string) =>
+    unwrap(
+      await transcript({ environmentId, input: { threadId: ThreadId.make(threadId) } }),
+    ).items.map(({ item }) => item);
   return createHostApi({
     capabilities,
     // `localOnly` keeps this from fetching or reading the remote status.
@@ -66,7 +70,7 @@ export function useHostApi(options: {
     // Read when called, so a view's polling does not re-render the panel on every thread update.
     pendingThreads: () =>
       pendingThreads({
-        shells: appAtomRegistry.get(environmentThreadShells.quietThreadShellsAtom),
+        shells: appAtomRegistry.get(environmentThreadShells.navigationThreadShellsAtom),
         environmentId,
         projectNames: new Map(
           appAtomRegistry
@@ -78,11 +82,14 @@ export function useHostApi(options: {
         now: new Date().toISOString(),
       }),
     lastReply: async (threadId) => {
-      const { items } = unwrap(
-        await transcript({ environmentId, input: { threadId: ThreadId.make(threadId) } }),
-      );
-      for (const { item } of items.toReversed()) {
+      for (const item of (await readItems(threadId)).toReversed()) {
         if (item.type === "assistant_message") return item.text;
+      }
+      return "";
+    },
+    question: async (threadId) => {
+      for (const item of (await readItems(threadId)).toReversed()) {
+        if (item.type === "user_input_request") return item.questions[0]?.question ?? "";
       }
       return "";
     },

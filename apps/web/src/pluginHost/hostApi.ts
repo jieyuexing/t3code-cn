@@ -34,6 +34,8 @@ export interface HostApiDeps {
   readonly pendingThreads: () => ReadonlyArray<PendingThread>;
   /** The text of the thread's last assistant message, in full. */
   readonly lastReply: (threadId: string) => Promise<string>;
+  /** The first question of the thread's latest structured question, or an empty text. */
+  readonly question: (threadId: string) => Promise<string>;
   readonly openThread: (threadId: string) => void;
   readonly snoozeThread: (threadId: string, until: string) => Promise<void>;
 }
@@ -156,6 +158,10 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
     const threadId = readText(input, "threadId");
     return { threadId, ...clipReply(await deps.lastReply(threadId)) };
   },
+  "threads.question": async (deps, input) => {
+    const threadId = readText(input, "threadId");
+    return { threadId, question: (await deps.question(threadId)) || null };
+  },
   "t3.openThread": async (deps, input) => {
     deps.openThread(readText(input, "threadId"));
     return null;
@@ -173,6 +179,7 @@ const CAPABILITY_OF: Readonly<Record<string, string>> = {
   "t3.openPluginSettings": SETTINGS_CAPABILITY,
   "threads.pending": THREADS_READ_CAPABILITY,
   "threads.lastReply": THREADS_READ_CAPABILITY,
+  "threads.question": THREADS_READ_CAPABILITY,
   "t3.openThread": THREADS_READ_CAPABILITY,
   "threads.snooze": THREADS_ORGANIZE_CAPABILITY,
 };

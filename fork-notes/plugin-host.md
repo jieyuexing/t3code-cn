@@ -28,7 +28,7 @@ t3code-zh 自建的通用插件系统，语义参照 Cordis：插件按清单声
   - `kind` 还没读出来时不发猜测：已发过则维持上一个答案，从没发过则视图暂不挂载（`init` 之前等它）。读失败（缺文件、无读权限）按 `file`。
   - 插件视图只在自己的标签可见时挂载，用户到文件标签再回来是新的 `init`；在线收到 `context` 变化的场景主要是被记住的标签在插件可见时被关掉。
 - **主题变量**：`--background` `--foreground` `--muted` `--card` `--popover` `--secondary` `--primary` `--accent` `--destructive` `--success` `--warning` `--info` `--code-background`，其中除 `--foreground` 外各项另有 `-foreground`；另有 `--border` `--input` `--ring` `--warning-surface` `--radius` `--font-sans` `--font-mono`。清单在 `apps/web/src/pluginHost/viewContext.ts`。
-- **`callHost`**：`{_tag:"callHost", id, method, input}`，宿主回 `result` 或 `error`。每个方法要求清单 `capabilities` 含对应能力（随同意摘要，改了要重新同意）：`t3.openPluginSettings` 要 `"settings"`；`threads.pending`、`threads.lastReply`、`t3.openThread` 要 `"host.threads-read"`；`threads.snooze` 要 `"host.threads-organize"`（写，单独声明、单独同意）；其余都要 `"host.vcs-read"`。没声明、或 `method` 不在下表，一律回 `error`，`code` 为 `denied`。Git、差异与线程类调用用当前用户自己的连接代为发出，页面碰不到 T3 的 API（视图 CSP 不变）。结果超过 64K 回 `too-large`。
+- **`callHost`**：`{_tag:"callHost", id, method, input}`，宿主回 `result` 或 `error`。每个方法要求清单 `capabilities` 含对应能力（随同意摘要，改了要重新同意）：`t3.openPluginSettings` 要 `"settings"`；`threads.pending`、`threads.lastReply`、`threads.question`、`t3.openThread` 要 `"host.threads-read"`；`threads.snooze` 要 `"host.threads-organize"`（写，单独声明、单独同意）；其余都要 `"host.vcs-read"`。没声明、或 `method` 不在下表，一律回 `error`，`code` 为 `denied`。Git、差异与线程类调用用当前用户自己的连接代为发出，页面碰不到 T3 的 API（视图 CSP 不变）。结果超过 64K 回 `too-large`。
 
 | `method`                  | `input`                                                          | 结果                                                                                                                                                                   |
 | ------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -38,7 +38,8 @@ t3code-zh 自建的通用插件系统，语义参照 Cordis：插件按清单声
 | `t3.openDiff`             | `{kind: "working-tree"\|"commit", sha?, file?}`                  | 在当前线程打开 T3 的差异面板，选中未提交改动或该提交，并定位到 `file`；返回 `null`                                                                                     |
 | `t3.openPluginSettings`   | `{}`（必须是对象，里面的字段一概不读）                           | 打开设置页「插件」，滚动到调用方自己的插件行并展开它的设置；目标永远是调用方，不能指定别的插件；返回 `null`                                                            |
 | `threads.pending`         | `{}`                                                             | 当前环境里未归档、未 settle、未稍后处理的顶层线程（不含子会话、旁路对话），每条 `{threadId, title, project, status, request, lastTurnCompletedAt, waitingSince}`；见下 |
-| `threads.lastReply`       | `{threadId}`                                                     | `{threadId, text, truncated}`：该线程最后一条 assistant 消息，超过 60000 字符（转义后超过 64000 时再短些）截断并标 `truncated`                                         |
+| `threads.lastReply`       | `{threadId}`                                                     | `{threadId, text, truncated}`：该线程最后一条 assistant 消息；超过 60000 字符（转义后超过 64000 时再短些）保留末尾并标 `truncated`                                     |
+| `threads.question`        | `{threadId}`                                                     | `{threadId, question}`：该线程最近一次结构化提问的第一个问题，没有则 `null`                                                                                            |
 | `t3.openThread`           | `{threadId}`                                                     | 在当前窗口打开该线程；返回 `null`                                                                                                                                      |
 | `threads.snooze`          | `{threadId, until}`                                              | 走 T3 的稍后处理命令与权限，`until` 是带时区的时间，返回 `null`；线程不能稍后处理（有待审批等）时由命令回 `call-failed`                                                |
 
@@ -46,7 +47,7 @@ t3code-zh 自建的通用插件系统，语义参照 Cordis：插件按清单声
 
 `file` 可以是路径字符串，也可以是 `{path, previousPath?}`；重命名的文件要给 `previousPath`。
 
-线程类方法的数据都在网页端取，与侧栏同一份：`threads.pending` 读客户端已有的线程快照，过滤口径同侧栏（`isListedThreadLineage`、`settledOverride`、`effectiveSnoozed`——稍后处理中举手的线程照常列出），`status` 用 `resolveSidebarThreadStatus` 再映射成 `input` `approval` `request` `failed`（含额度上限）`done` `waiting` `working`；`request` 只有种类和创建时间，问题正文不在快照里。`waitingSince` 取待答请求的创建时间，没有则取最近一轮完成时间。`threads.lastReply` 走已有的 `threadTranscript` HTTP 取整份对话再取最后一条 assistant 消息，长线程较重，视图应按需读取，不要轮询。逻辑在 `apps/web/src/pluginHost/pendingThreads.ts`，上游文件 0 行。
+线程类方法的数据都在网页端取，与侧栏同一份：`threads.pending` 读客户端的 `navigationThreadShellsAtom`（侧栏用的归档、子会话、委派任务和隐藏标签过滤都已在里面），再按 `settledOverride`、`effectiveSnoozed` 过滤——稍后处理中举手的线程照常列出；`status` 用 `resolveSidebarThreadStatus` 再映射成 `input` `approval` `request` `failed`（含额度上限）`done` `waiting` `working`；`request` 只有种类和创建时间。`waitingSince` 取待答请求的创建时间，其次是 `pendingUserInputAt`，再其次是最近一轮完成时间；子会话在父线程上的提问没有自己的时间，按完成时间算。`threads.lastReply` 与 `threads.question` 走已有的 `threadTranscript` HTTP 取整份对话（服务端上限 50 MiB，超过时回 `call-failed`），长线程较重，视图应按需读取、缓存，不要轮询。逻辑在 `apps/web/src/pluginHost/pendingThreads.ts`，上游文件 0 行。
 
 ## 自有目录
 
