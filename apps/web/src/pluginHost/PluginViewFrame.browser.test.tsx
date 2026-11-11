@@ -12,6 +12,27 @@ const fixture = vi.hoisted(() => ({
   pageUrl: "",
   calls: [] as unknown[],
   echoes: 0,
+  host: {
+    status: async (input: { cwd: string }) => ({ isRepo: true, cwd: input.cwd }),
+    preview: async () => ({
+      cwd: "/repo",
+      generatedAt: "2026-11-11T00:00:00Z",
+      sources: [
+        {
+          id: "working-tree",
+          kind: "working-tree",
+          title: "Uncommitted",
+          baseRef: "HEAD",
+          headRef: null,
+          diff: "diff --git a/big.txt b/big.txt\n",
+          diffHash: "h",
+          truncated: false,
+        },
+      ],
+    }),
+    fileContents: async () => ({ oldContents: "", newContents: "x".repeat(70_000) }),
+    openDiff: (_target: unknown) => {},
+  } as Record<string, (...args: never[]) => unknown>,
 }));
 
 vi.mock("../state/session", () => ({
@@ -20,6 +41,13 @@ vi.mock("../state/session", () => ({
     value: { httpBaseUrl: "https://environment.example.test" },
   }),
 }));
+vi.mock("./useHostApi", async () => {
+  const { createHostApi } = await import("./hostApi");
+  return {
+    useHostApi: (options: { capabilities: ReadonlyArray<string> }) =>
+      createHostApi({ capabilities: options.capabilities, ...fixture.host } as never),
+  };
+});
 vi.mock("./usePluginHost", () => ({
   pluginHostFailureMessage: () => "failed",
   usePluginHostCall: () => async (input: { _tag: string; handler?: string; input?: unknown }) => {
@@ -86,6 +114,9 @@ const frameProps = {
   viewId: "clock",
   title: "Echo Clock",
   generation: 1,
+  capabilities: [] as ReadonlyArray<string>,
+  cwd: null as string | null,
+  threadRef: null,
   onReload: () => {},
 };
 const frame = <PluginViewFrame {...frameProps} />;
@@ -202,4 +233,72 @@ it("takes the plugin from its own frame, never from the page, and refuses names 
       input: null,
     },
   ]);
+});
+
+// A page that reports the context it was given and what the host answers to each `callHost`.
+const HOST_PAGE = `<!doctype html><title>host</title><script>
+  const report = (what, text) => parent.postMessage({ type: "test-observe", what, text }, "*");
+  window.addEventListener("message", (event) => {
+    if (event.source !== parent || event.data?.type !== "t3-view:connect") return;
+    const port = event.ports[0];
+    const send = (id, method, input) =>
+      port.postMessage(JSON.stringify({ _tag: "callHost", id, method, input }));
+    port.onmessage = (message) => {
+      const body = JSON.parse(message.data);
+      if (body._tag === "ping") port.postMessage(JSON.stringify({ _tag: "pong", n: body.n }));
+      if (body._tag === "init") {
+        report("init", JSON.stringify(body.context));
+        send(1, "vcs.status", { cwd: "/repo" });
+        send(2, "git.runStackedAction", { cwd: "/repo" });
+        send(3, "review.diffFileContents", { cwd: "/repo", sourceKind: "working-tree", file: { path: "big.txt" } });
+      }
+      if (body._tag === "context") report("context", JSON.stringify(body.context));
+      if (body._tag === "result") report("result", body.id + ":" + JSON.stringify(body.value));
+      if (body._tag === "error") report("error", body.id + ":" + body.code);
+    };
+  });
+  parent.postMessage({ type: "t3-view:ready" }, "*");
+</script>`;
+
+it("gives the page the thread's cwd and the theme at init, and again when the cwd changes", async () => {
+  using observed = setup(HOST_PAGE);
+  const withCwd = (cwd: string) => (
+    <PluginViewFrame {...frameProps} cwd={cwd} capabilities={["host.vcs-read"]} />
+  );
+  await using screen = await render(withCwd("/work/a"), { router: false });
+  await vi.waitFor(() =>
+    expect(observed.seen.some((entry) => entry.startsWith("init:"))).toBe(true),
+  );
+  const initial = JSON.parse(observed.seen.find((entry) => entry.startsWith("init:"))!.slice(5));
+  expect(initial.cwd).toBe("/work/a");
+  expect(["light", "dark"]).toContain(initial.theme.scheme);
+  expect(typeof initial.theme.vars).toBe("object");
+
+  await screen.rerender(withCwd("/work/b"));
+  await vi.waitFor(() => {
+    const updates = observed.seen.filter((entry) => entry.startsWith("context:"));
+    expect(updates).toHaveLength(1);
+    expect(JSON.parse(updates[0]!.slice(8)).cwd).toBe("/work/b");
+  });
+});
+
+it("serves a plugin that declared host.vcs-read, denies other methods and refuses results over 64K", async () => {
+  using observed = setup(HOST_PAGE);
+  await using _screen = await render(
+    <PluginViewFrame {...frameProps} cwd="/repo" capabilities={["host.vcs-read"]} />,
+    { router: false },
+  );
+  await vi.waitFor(() => expect(observed.seen).toContain("error:3:too-large"));
+  expect(observed.seen).toContain('result:1:{"isRepo":true,"cwd":"/repo"}');
+  expect(observed.seen).toContain("error:2:denied");
+});
+
+it("denies every callHost to a plugin without the capability", async () => {
+  using observed = setup(HOST_PAGE);
+  await using _screen = await render(<PluginViewFrame {...frameProps} cwd="/repo" />, {
+    router: false,
+  });
+  await vi.waitFor(() => expect(observed.seen).toContain("error:3:denied"));
+  expect(observed.seen).toContain("error:1:denied");
+  expect(observed.seen).toContain("error:2:denied");
 });

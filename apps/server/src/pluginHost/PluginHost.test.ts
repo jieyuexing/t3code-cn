@@ -322,6 +322,15 @@ describe("PluginHost", () => {
         "idle",
       ]);
 
+      const gitRead = yield* reloadWith(
+        editExtension(original, (extension) => {
+          extension.capabilities = [...extension.capabilities, "host.vcs-read"];
+        }),
+      );
+      expect(gitRead.problem).toBeUndefined();
+      expect(gitRead.capabilities).toContain("host.vcs-read");
+      expect([gitRead.consent, gitRead.state._tag]).toEqual(["required", "idle"]);
+
       const restored = yield* reloadWith(original);
       expect([restored.consent, restored.state._tag]).toEqual(["granted", "standby"]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

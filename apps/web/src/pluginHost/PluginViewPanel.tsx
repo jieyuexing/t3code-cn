@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { Button } from "../components/ui/button";
@@ -20,6 +20,9 @@ export function PluginViewPanel(props: {
   readonly environmentId: EnvironmentId;
   readonly visible: boolean;
   readonly onCloseSurface: (surface: RightPanelSurface) => void;
+  readonly threadRef?: ScopedThreadRef;
+  /** The thread's checkout: its worktree, or else the project root. */
+  readonly files?: { readonly workspaceRoot: string | undefined };
 }) {
   const service = serviceOfViewId(props.surface.viewId);
   return service === null ? (
@@ -40,8 +43,11 @@ function PluginViewTab(props: {
   readonly environmentId: EnvironmentId;
   readonly visible: boolean;
   readonly onCloseSurface: (surface: RightPanelSurface) => void;
+  readonly threadRef?: ScopedThreadRef;
+  /** The thread's checkout: its worktree, or else the project root. */
+  readonly files?: { readonly workspaceRoot: string | undefined };
 }) {
-  const { surface, environmentId, visible, onCloseSurface } = props;
+  const { surface, environmentId, visible, onCloseSurface, threadRef, files } = props;
   const navigate = useNavigate();
   const canCall = useCanCallPluginHost(environmentId);
   const { snapshot, failed } = usePluginHostSnapshot(environmentId);
@@ -90,6 +96,11 @@ function PluginViewTab(props: {
       viewId={view.viewId}
       title={view.title}
       generation={view.generation}
+      capabilities={
+        snapshot?.plugins.find((plugin) => plugin.id === view.pluginId)?.capabilities ?? []
+      }
+      cwd={files?.workspaceRoot ?? null}
+      threadRef={threadRef ?? null}
       onReload={() => setReloads((value) => value + 1)}
     />
   );
