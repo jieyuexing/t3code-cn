@@ -94,6 +94,9 @@ export const OrchestratorMcpTargetOptions = Schema.Union([
 ]);
 export type OrchestratorMcpTargetOptions = typeof OrchestratorMcpTargetOptions.Type;
 
+/** `environmentId` that picks the machine itself: the least loaded one that has the project. */
+export const OrchestratorMcpAutoEnvironment = "auto";
+
 export const OrchestratorMcpTarget = Schema.Struct({
   providerInstanceId: Schema.optional(
     ProviderInstanceId.annotate({
@@ -115,7 +118,7 @@ export const OrchestratorMcpTarget = Schema.Struct({
   environmentId: Schema.optional(
     EnvironmentId.annotate({
       description:
-        "Linked environment to run in. Provider and model default to yours; others come from `orchestrator_capabilities` with this `environmentId`.",
+        'Linked environment to run in, or "auto" (`delegate_task` only). Provider and model default to yours; others come from `orchestrator_capabilities` with this `environmentId`.',
     }),
   ),
   projectId: Schema.optional(

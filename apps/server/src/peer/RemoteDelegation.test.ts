@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   EventId,
+  type HostResourcesSnapshot,
   MessageId,
   NodeId,
   type OrchestrationV2Run,
@@ -23,6 +24,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -31,6 +33,7 @@ import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Tracer from "effect/Tracer";
+import * as TestClock from "effect/testing/TestClock";
 import type * as SqlClient from "effect/sql/SqlClient";
 import { McpSchema, McpServer } from "effect/ai";
 
@@ -54,6 +57,7 @@ import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as HostResources from "../resourceTelemetry/HostResources.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -74,6 +78,8 @@ import * as PeerLinkRequests from "./PeerLinkRequests.ts";
 const laptop = descriptorOf("environment-laptop", "Laptop");
 const box = descriptorOf("environment-box", "Box");
 const boxProject = ProjectId.make("project:box");
+/** A project on the laptop whose repository the box does not have. */
+const laptopOtherProject = ProjectId.make("project:laptop-other");
 const instanceId = ProviderInstanceId.make("codex");
 const driver = ProviderDriverKind.make("codex");
 const modelSelection = { instanceId, model: "gpt-5.4" };
@@ -82,6 +88,15 @@ type LaunchedWith = Pick<
   ThreadLaunch.ThreadLaunchInput,
   "modelSelection" | "runtimeMode" | "interactionMode"
 >;
+
+const idle: HostResourcesSnapshot = {
+  sampledAt: 0,
+  cpuUtilization: 0.1,
+  cpuCount: 8,
+  availableMemoryBytes: 12 * 1024 ** 3,
+  totalMemoryBytes: 16 * 1024 ** 3,
+};
+const busy: HostResourcesSnapshot = { ...idle, cpuUtilization: 0.8 };
 
 /** The thread the box launches for the task, which the test finishes. */
 interface BoxThread {
@@ -131,6 +146,8 @@ interface BoxThread {
   readonly sent: Ref.Ref<ReadonlyArray<string>>;
   /** Runs as the launch there is answered, before the laptop hears back. */
   readonly afterLaunch: Ref.Ref<Effect.Effect<void>>;
+  /** What the box reports for its own load; `Effect.never` is a machine that does not answer. */
+  readonly load: Ref.Ref<Effect.Effect<HostResourcesSnapshot>>;
 }
 
 const makeBoxThread = Effect.gen(function* () {
@@ -166,6 +183,7 @@ const makeBoxThread = Effect.gen(function* () {
     releaseStop: yield* Deferred.make<void>(),
     sent: yield* Ref.make<ReadonlyArray<string>>([]),
     afterLaunch: yield* Ref.make<Effect.Effect<void>>(Effect.void),
+    load: yield* Ref.make<Effect.Effect<HostResourcesSnapshot>>(Effect.succeed(idle)),
   } satisfies BoxThread;
 });
 
@@ -472,9 +490,10 @@ const boxToolkitLayer = (thread: BoxThread) => {
         ),
       ),
   });
-  return Layer.merge(
+  return Layer.mergeAll(
     McpHttpServer.layerOrchestratorToolkit,
     McpHttpServer.layerProjectRegistration,
+    McpHttpServer.layerEnvironmentToolkit,
   ).pipe(
     Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
     Layer.provide(NodeCrypto.layer),
@@ -512,7 +531,12 @@ const boxToolkitLayer = (thread: BoxThread) => {
     ),
     Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
     Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
-    Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(
+      Layer.mergeAll(
+        ServerSettings.layerTest(),
+        Layer.mock(HostResources.HostResources)({ read: Effect.flatten(Ref.get(thread.load)) }),
+      ),
+    ),
     Layer.provide(NodeServices.layer),
   );
 };
@@ -551,6 +575,7 @@ const makeLaptop = (
   >,
   /** The laptop's links from before a restart, which keep their sessions there. */
   kept?: Context.Context<Layer.Success<ReturnType<typeof layerLinkingEnvironment>>>,
+  load: HostResourcesSnapshot = idle,
 ) =>
   Effect.gen(function* () {
     const linking = kept ?? (yield* layerLinkingEnvironment(laptop).pipe(Layer.build));
@@ -583,9 +608,9 @@ const makeLaptop = (
           Layer.provide(
             Layer.mock(ProjectService.ProjectService)({
               // A cold enrichment cache: the project itself reports no identity yet.
-              getById: () =>
+              getById: (id) =>
                 Effect.succeedSome({
-                  workspaceRoot: "/home/me/app",
+                  workspaceRoot: id === laptopOtherProject ? "/home/me/other" : "/home/me/app",
                   repositoryIdentity: null,
                 } as never),
             }),
@@ -596,17 +621,22 @@ const makeLaptop = (
                 Effect.succeed(
                   cwd === "/home/me/app"
                     ? ({ canonicalKey: "github.com/acme/app" } as RepositoryIdentity)
-                    : null,
+                    : cwd === "/home/me/other"
+                      ? ({ canonicalKey: "github.com/acme/other" } as RepositoryIdentity)
+                      : null,
                 ),
             }),
           ),
+          Layer.provide(Layer.mock(HostResources.HostResources)({ read: Effect.succeed(load) })),
         ),
       ),
       Layer.provide(Layer.succeedContext(linking)),
       Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
       Layer.provide(NodeCrypto.layer),
       Layer.provideMerge(layerThreads),
-      Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
+      Layer.provide(
+        Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      ),
       Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
@@ -1944,6 +1974,119 @@ it.effect("a local task runs in this thread's project", () =>
       });
       expect(result.isError).toBe(true);
       expect(JSON.stringify(result.content)).toContain("invalid_request");
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+/** The laptop (busy by default) linked to the box, whose load the test sets through `thread.load`. */
+const autoPlacement = (
+  access: Parameters<typeof linkTo>[2] = "full-access",
+  laptopLoad: HostResourcesSnapshot = busy,
+) =>
+  Effect.gen(function* () {
+    const thread = yield* makeBoxThread;
+    const b = yield* serveBox(thread);
+    const offers = yield* SubscriptionRef.make<
+      ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+    >([]);
+    const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+    const a = yield* makeLaptop(database, offers, undefined, laptopLoad);
+    yield* linkTo(a.links, b, access);
+    yield* seedParent(a);
+    return { thread, a };
+  });
+
+const here = { environmentId: undefined, projectId: undefined };
+
+it.effect("auto places a task on the less loaded machine, and ties stay here", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual({
+        environmentId: box.environmentId,
+        projectId: boxProject,
+      });
+
+      yield* Ref.set(thread.load, Effect.succeed(busy));
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+
+      // The task itself goes where the placement said.
+      yield* Ref.set(thread.load, Effect.succeed(idle));
+      const result = yield* a.call("delegate_task", {
+        task: "Run the suite wherever it is quiet.",
+        target: { environmentId: "auto", providerInstanceId: instanceId, model: "gpt-5.4" },
+      });
+      expect(result.isError, JSON.stringify(result.content)).toBe(false);
+      expect(result.structuredContent).toMatchObject({
+        remoteChild: { environmentId: box.environmentId },
+      });
+      expect(yield* Ref.get(thread.launched)).not.toBeNull();
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("auto leaves out a machine that is not a candidate", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const placed = a.remote.place(parentScope, { hereOnly: false });
+
+      // Without this repository there, or when only this machine can run it.
+      expect(
+        yield* a.remote.place(parentScope, { hereOnly: false, projectId: laptopOtherProject }),
+      ).toEqual(here);
+      expect(yield* a.remote.place(parentScope, { hereOnly: true })).toEqual(here);
+
+      // With linked environments off, nothing is asked of the box.
+      yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: false });
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: true });
+
+      // A silent box is given up on, not waited for.
+      const asked = yield* Deferred.make<void>();
+      yield* Ref.set(
+        thread.load,
+        Deferred.succeed(asked, undefined).pipe(Effect.andThen(Effect.never)),
+      );
+      const waiting = yield* Effect.forkChild(placed);
+      yield* Deferred.await(asked);
+      yield* TestClock.adjust("3 seconds");
+      expect(yield* Fiber.join(waiting)).toEqual(here);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("auto keeps a task here when a worktree or a project is asked for", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const target = { environmentId: "auto", providerInstanceId: instanceId, model: "gpt-5.4" };
+
+      const worktree = yield* a.call("delegate_task", {
+        task: "Branch it.",
+        target,
+        isolation: "worktree",
+      });
+      // It stays on the local path, which this fixture has no provider for;
+      // a placement there would have been refused as unsupported.
+      expect(JSON.stringify(worktree.content)).not.toContain("not supported there");
+
+      const named = yield* a.call("delegate_task", {
+        task: "Run it.",
+        target: { ...target, projectId: boxProject },
+      });
+      expect(named.isError).toBe(true);
+      expect(JSON.stringify(named.content)).toContain("omit target.projectId");
+      expect(yield* Ref.get(thread.launched)).toBeNull();
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("auto does not pick a read-only link", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { a } = yield* autoPlacement("read-only");
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
