@@ -88,7 +88,7 @@ CLI 的原上游 `smoke-cli-archive.ts` 保持原合同；发行目标入口额�
 
 ### 套装发布
 
-`release-desktop-zh.mjs` 是唯一 publisher。协调者整合、提交并推送到 `origin/zh-i18n` 后，以同一 clean 源码构建要发布的产物并完成各自目标验证。publisher 只强制套装含 **Windows x64 archive**，DMG arm64、Linux x64 archive 对它可选。2026-10-30 起 Release 只由公开仓库 `jieyuexing/t3code-zh-build` 的 `build.yml` 在 GitHub runner 上发布：每次构建 DMG arm64、Linux x64 与 Windows x64 archive 三件，各自在目标系统验证后调用本 publisher。下游跟随依赖这套三件：141 的 `t3-141-update win --release` 取 Windows x64 包，台式机的 `t3-desktop-update --release` 取 Linux x64 包，两者都先核对 SHA256SUMS 与 PROVENANCE.json。本机不上传 Release，runner 不可用时停下报告，不从本机补发；脚本里本机上传的代码路径（非 Actions 分支）已不再使用，去留由每日同步决定。`suite.json` 留任务目录，三件齐全时结构为（只发 Windows 时 artifacts 只留最后一项）：
+`release-desktop-zh.mjs` 是唯一 publisher。协调者整合、提交并推送到 `origin/zh-main` 后，以同一 clean 源码构建要发布的产物并完成各自目标验证。publisher 只强制套装含 **Windows x64 archive**，DMG arm64、Linux x64 archive 对它可选。2026-10-30 起 Release 只由公开仓库 `jieyuexing/t3code-zh-build` 的 `build.yml` 在 GitHub runner 上发布：每次构建 DMG arm64、Linux x64 与 Windows x64 archive 三件，各自在目标系统验证后调用本 publisher。下游跟随依赖这套三件：141 的 `t3-141-update win --release` 取 Windows x64 包，台式机的 `t3-desktop-update --release` 取 Linux x64 包，两者都先核对 SHA256SUMS 与 PROVENANCE.json。本机不上传 Release，runner 不可用时停下报告，不从本机补发；脚本里本机上传的代码路径（非 Actions 分支）已不再使用，去留由每日同步决定。`suite.json` 留任务目录，三件齐全时结构为（只发 Windows 时 artifacts 只留最后一项）：
 
 ```json
 {
@@ -122,7 +122,7 @@ node scripts/release-desktop-zh.mjs --suite /task/suite.json --dry-run
 node scripts/release-desktop-zh.mjs --suite /task/suite.json --tag zh-vV-r1 --dry-run
 ```
 
-dry-run 无 GitHub 写入。完整本地预检通过后才查远端：HEAD 必须精确等于当前 origin/zh-i18n，tag 必须不存在或精确指向它，不能以任意远端包含 HEAD 代替。默认 tag 是 `zh-vV`，显式修订只接受 `zh-vV-rN`；产品版本和资产名不加 zh/rN。已有已发布 Release 永远不变。
+dry-run 无 GitHub 写入。完整本地预检通过后才查远端：HEAD 必须精确等于当前 origin/zh-main，tag 必须不存在或精确指向它，不能以任意远端包含 HEAD 代替。默认 tag 是 `zh-vV`，显式修订只接受 `zh-vV-rN`；产品版本和资产名不加 zh/rN。已有已发布 Release 永远不变。
 
 获准正式发布时才去掉 `--dry-run`：先建立 draft、上传套装产物和自动生成的 SHA256SUMS/PROVENANCE.json，逐件核对 GitHub 存储 digest/size，完整才 publish。同源码、同套装 draft 可恢复；同名异 hash、额外资产、错误 tag 或另一套源码均拒绝，不删除或覆盖修复。本机路径（已不再使用）经既有 2080 代理，令牌由 `gh auth token` 取出，只经 stdin 配置交给 `/usr/bin/curl` 上传，不进入 argv/env/日志；GitHub Actions 上（`GITHUB_ACTIONS=true`）只接受工作流注入的 `GH_TOKEN`，直连并用 `gh release upload`。公开 provenance 只含必要版本、仓库/commit、源码与产物 hash、目标与检查边界，不上传私有候选清单或回执。
 

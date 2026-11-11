@@ -263,7 +263,7 @@ NodeTest.test("draft state rejects wrong branch/tag/source/assets and published 
     const state = { originHead: source.head, release };
     NodeAssert.throws(
       () => checkRemoteState({ ...state, originHead: "another-remote-contains-head" }, p, tag),
-      /origin\/zh-i18n/,
+      /origin\/zh-main/,
     );
     NodeAssert.throws(
       () => checkRemoteState({ ...state, tagCommit: "0".repeat(40) }, p, tag),
@@ -272,7 +272,7 @@ NodeTest.test("draft state rejects wrong branch/tag/source/assets and published 
     for (const change of [
       { body: "old source" },
       { draft: false },
-      { target_commitish: "zh-i18n" },
+      { target_commitish: "zh-main" },
       { assets: [{ name: "extra", size: 1, digest: "sha256:x" }] },
     ])
       NodeAssert.throws(() =>
