@@ -345,11 +345,18 @@ describe("PluginHost", () => {
 
       const gitRead = yield* reloadWith(
         editExtension(original, (extension) => {
-          extension.capabilities = [...extension.capabilities, "host.vcs-read"];
+          extension.capabilities = [
+            ...extension.capabilities,
+            "host.vcs-read",
+            "host.threads-read",
+            "host.threads-organize",
+          ];
         }),
       );
       expect(gitRead.problem).toBeUndefined();
-      expect(gitRead.capabilities).toContain("host.vcs-read");
+      expect(gitRead.capabilities).toEqual(
+        expect.arrayContaining(["host.vcs-read", "host.threads-read", "host.threads-organize"]),
+      );
       expect([gitRead.consent, gitRead.state._tag]).toEqual(["required", "idle"]);
 
       const restored = yield* reloadWith(original);
