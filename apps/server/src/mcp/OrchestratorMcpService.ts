@@ -2439,13 +2439,14 @@ const make = Effect.gen(function* () {
         yield* requireCapability(callerScope);
         const scope = yield* requireThreadScope(callerScope, "delegate_task");
         // The task's child runs as an ordinary thread there; this thread keeps the task.
-        const { taskId } = yield* remoteDelegation.delegate(scope, {
+        const { taskId, checkout } = yield* remoteDelegation.delegate(scope, {
           ...input,
           target: { ...input.target, environmentId },
         });
-        return yield* input.mode === "wait"
+        const task = yield* input.mode === "wait"
           ? awaitTask(scope, taskId, taskId, input.timeoutMs)
           : readTask(scope, taskId, false, true);
+        return checkout === undefined ? task : { ...task, checkout };
       }
       const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
       if (

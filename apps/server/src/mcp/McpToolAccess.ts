@@ -2,6 +2,7 @@ import {
   type EnvironmentId,
   type OrchestrationV2LinkOrigin,
   OrchestratorMcpAutoEnvironment,
+  type OrchestratorMcpCheckout,
   OrchestratorMcpEnvironmentTarget,
   OrchestratorMcpFailure,
   type ProviderInteractionMode,
@@ -422,23 +423,42 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
               : { environmentId: undefined, projectId: undefined }
             : undefined;
         const chosen = placed === undefined ? environmentId : placed.environmentId;
-        const reported = <A>(result: A) =>
-          placed === undefined
+        const reported = <A>(result: A, checkout?: OrchestratorMcpCheckout) =>
+          placed === undefined && checkout === undefined
             ? result
-            : { ...result, environmentId: chosen ?? scope.environmentId };
+            : {
+                ...result,
+                ...(placed === undefined ? {} : { environmentId: chosen ?? scope.environmentId }),
+                ...(checkout === undefined ? {} : { checkout }),
+              };
         const target = PeerForwarding.remoteTarget(scope, chosen);
         if (target === undefined) return reported(yield* here(params));
         if (scope.linkedEnvironments === false) return yield* PeerForwarding.linkedEnvironmentsOff;
         yield* (remote as RemoteCheck<typeof params>)(params);
         if (Option.isNone(forwarding)) return yield* linksUnavailable;
-        return reported(
-          yield* forwarding.value.call(scope, tool, target, {
-            ...params,
-            // The project there that has the repository, not the id here.
-            ...(placed?.projectId === undefined ? {} : { projectId: placed.projectId }),
-            environmentId: target,
-          }),
+        // A launch in the project's own checkout runs on the code that is there.
+        const request = placement?.(params);
+        const thereProjectId = placed?.projectId ?? request?.projectId;
+        const [result, checkout] = yield* Effect.all(
+          [
+            forwarding.value.call(scope, tool, target, {
+              ...params,
+              // The project there that has the repository, not the id here.
+              ...(placed?.projectId === undefined ? {} : { projectId: placed.projectId }),
+              environmentId: target,
+            }),
+            Option.isSome(delegation) && request?.hereOnly === false && thereProjectId !== undefined
+              ? delegation.value.checkout(scope, {
+                  environmentId: target,
+                  projectId: thereProjectId,
+                  // With "auto" the project here is the one asked for, not the thread's; a named one is the other machine's.
+                  hereProjectId: placed === undefined ? undefined : request.projectId,
+                })
+              : Effect.undefined,
+          ],
+          { concurrency: 2 },
         );
+        return reported(result, checkout);
       });
   }
   return handlers as Toolkit.HandlersFrom<Tools>;

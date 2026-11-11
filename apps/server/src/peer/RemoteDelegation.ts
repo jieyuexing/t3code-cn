@@ -3,6 +3,7 @@ import {
   type EnvironmentId,
   NodeId,
   OrchestratorMcpFailure,
+  type OrchestratorMcpCheckout,
   type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpTaskCancelResult,
   type OrchestratorMcpThreadRun,
@@ -41,6 +42,7 @@ import {
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ProjectCheckout from "../project/ProjectCheckout.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as HostResources from "../resourceTelemetry/HostResources.ts";
@@ -65,10 +67,20 @@ export const FollowRetrySchedule = Context.Reference<Schedule.Schedule<unknown>>
   },
 );
 
-/** Reading a linked machine's load and projects, so a sleeping one cannot hold up a placement. */
+/** Reading a linked machine's load, projects and checkout, so a sleeping one cannot hold up a placement. */
 const PLACEMENT_READ_TIMEOUT = Duration.seconds(3);
 
 type ThreadScope = McpInvocationContext.McpThreadInvocationScope;
+
+const shortCommit = (commit: string | null) => commit?.slice(0, 8) ?? null;
+
+interface HereCheckout {
+  readonly head: string | null;
+  readonly uncommitted: boolean;
+  /** The repository's canonical key, to tell a project there with another repository. */
+  readonly key: string | undefined;
+}
+const unreadableHere: HereCheckout = { head: null, uncommitted: false, key: undefined };
 
 export interface PlacementRequest {
   /** The project here whose repository the other machine must have. Default: the calling thread's. */
@@ -104,10 +116,28 @@ export class RemoteDelegation extends Context.Service<
           readonly environmentId: EnvironmentId;
         };
       },
-    ) => Effect.Effect<{ readonly taskId: NodeId }, OrchestratorMcpFailure>;
+    ) => Effect.Effect<
+      { readonly taskId: NodeId; readonly checkout: OrchestratorMcpCheckout | undefined },
+      OrchestratorMcpFailure
+    >;
+    /**
+     * Where the project's checkout there stands against this machine's, or
+     * undefined when the commits match and nothing is edited here. Unreadable
+     * in time counts as unreadable.
+     */
+    readonly checkout: (
+      scope: McpInvocationContext.McpInvocationScope,
+      request: {
+        /** The project there. */
+        readonly projectId: ProjectId;
+        readonly environmentId: EnvironmentId;
+        /** The project here. Default: the calling thread's. */
+        readonly hereProjectId?: ProjectId | undefined;
+      },
+    ) => Effect.Effect<OrchestratorMcpCheckout | undefined>;
     /**
      * The least loaded of this machine and the linked ones that answer, have
-     * the project's repository once, and report their load. This machine when
+     * the project's repository once at this machine's commit, and report their load. This machine when
      * none of them qualifies, including itself, or when the request is
      * `hereOnly`.
      */
@@ -160,6 +190,7 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const hostResources = yield* HostResources.HostResources;
+  const checkouts = yield* ProjectCheckout.ProjectCheckout;
   const random = yield* SecureRandom.SecureRandom;
   const hereId = yield* ServerEnvironment.ServerEnvironment.pipe(
     Effect.flatMap((environment) => environment.getEnvironmentId),
@@ -187,7 +218,7 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => undefined),
       Effect.flatMap((here) =>
         here === undefined
-          ? Effect.void
+          ? Effect.undefined
           : repositoryIdentities
               .resolve(here.workspaceRoot)
               .pipe(Effect.map((identity) => identity?.canonicalKey)),
@@ -241,6 +272,72 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const workspaceRootOf = (projectId: ProjectId) =>
+    projects.getById(projectId).pipe(
+      Effect.map((project) => Option.getOrUndefined(project)?.workspaceRoot),
+      Effect.orElseSucceed(() => undefined),
+    );
+
+  const checkoutHere = Effect.fn("RemoteDelegation.checkoutHere")(function* (
+    projectId: ProjectId,
+  ): Effect.fn.Return<HereCheckout> {
+    const root = yield* workspaceRootOf(projectId);
+    if (root === undefined) return unreadableHere;
+    const [head, uncommitted, key] = yield* Effect.all(
+      [checkouts.head(root), checkouts.hasTrackedChanges(root), repositoryKeyOf(projectId)],
+      { concurrency: 3 },
+    );
+    return { head, uncommitted, key };
+  });
+
+  /** The peer's project and the commit it is at, which is missing when the peer cannot say. */
+  const projectThere = (
+    scope: McpInvocationContext.McpInvocationScope,
+    environmentId: EnvironmentId,
+    projectId: ProjectId,
+  ) => forwarding.call(scope, ProjectToolkit.tools.t3_project_read, environmentId, { projectId });
+
+  const checkout: RemoteDelegation["Service"]["checkout"] = Effect.fn("RemoteDelegation.checkout")(
+    function* (scope, request) {
+      const hereProjectId =
+        request.hereProjectId ??
+        (scope.thread === undefined
+          ? undefined
+          : (yield* threads
+              .getThreadShell(scope.thread.threadId)
+              .pipe(Effect.orElseSucceed(() => null)))?.projectId);
+      if (hereProjectId === undefined) return undefined;
+      // A failed or late read is an unreadable checkout, never a failed call.
+      const [here, there] = yield* Effect.all(
+        [
+          checkoutHere(hereProjectId).pipe(
+            Effect.timeout(PLACEMENT_READ_TIMEOUT),
+            Effect.orElseSucceed(() => unreadableHere),
+          ),
+          projectThere(scope, request.environmentId, request.projectId).pipe(
+            Effect.timeout(PLACEMENT_READ_TIMEOUT),
+            Effect.orElseSucceed(() => null),
+          ),
+        ],
+        { concurrency: 2 },
+      );
+      // A machine on an older version sends no commit at all, which is not the same as one it cannot read.
+      if (there !== null && there.head === undefined) return undefined;
+      const thereKey = there?.repositoryIdentity?.canonicalKey;
+      // A project there with another repository has no commit to compare.
+      if (here.key !== undefined && thereKey !== undefined && here.key !== thereKey) {
+        return undefined;
+      }
+      const thereHead = there?.head ?? null;
+      if (here.head !== null && here.head === thereHead && !here.uncommitted) return undefined;
+      return {
+        here: shortCommit(here.head),
+        there: shortCommit(thereHead),
+        ...(here.uncommitted ? { uncommittedHere: true as const } : {}),
+      };
+    },
+  );
+
   const place: RemoteDelegation["Service"]["place"] = Effect.fn("RemoteDelegation.place")(
     function* (scope, request) {
       const here: Placement = { environmentId: undefined, projectId: undefined };
@@ -256,8 +353,14 @@ const make = Effect.gen(function* () {
         request.providerInstanceId === "inherit"
           ? shell?.modelSelection.instanceId
           : request.providerInstanceId;
-      const key = projectId === undefined ? undefined : yield* repositoryKeyOf(projectId);
+      if (projectId === undefined) return here;
+      const key = yield* repositoryKeyOf(projectId);
       if (key === undefined) return here;
+      // Only a machine at this commit runs the task on the same code. Without one here, none matches:
+      // a commit there that cannot be read is null too.
+      const root = yield* workspaceRootOf(projectId);
+      const hereHead = root === undefined ? null : yield* checkouts.head(root);
+      if (hereHead === null) return here;
       // Not `links.list`, which probes every address of every link before it returns.
       // A link that is expired or does not answer fails its read below instead.
       const writable = (yield* links.stored.pipe(Effect.orElseSucceed(() => []))).filter(
@@ -266,12 +369,20 @@ const make = Effect.gen(function* () {
       const read = Effect.fn("RemoteDelegation.placementRead")(function* (
         environmentId: EnvironmentId,
       ) {
-        const [environment, matches, capabilities] = yield* Effect.all(
+        const [environment, matched, capabilities] = yield* Effect.all(
           [
             forwarding.call(scope, EnvironmentToolkit.tools.t3_environment_read, environmentId, {
               environmentId,
             }),
-            projectsWithRepository(scope, environmentId, key),
+            projectsWithRepository(scope, environmentId, key).pipe(
+              Effect.flatMap((matches) =>
+                matches.length === 1
+                  ? projectThere(scope, environmentId, matches[0]!.id).pipe(
+                      Effect.map((project) => ({ id: matches[0]!.id, head: project.head })),
+                    )
+                  : Effect.undefined,
+              ),
+            ),
             // The default list is short; a model asked for is looked up by name.
             providerInstanceId === undefined
               ? Effect.void
@@ -296,9 +407,12 @@ const make = Effect.gen(function* () {
               (request.model === undefined ||
                 provider.models.some((model) => model.id === request.model)),
           );
-        return environment.hostResources === undefined || matches.length !== 1 || !providerUsable
+        return environment.hostResources === undefined ||
+          matched === undefined ||
+          matched.head !== hereHead ||
+          !providerUsable
           ? undefined
-          : { environmentId, projectId: matches[0]!.id, resources: environment.hostResources };
+          : { environmentId, projectId: matched.id, resources: environment.hostResources };
       });
       // Anything that keeps a machine from answering in time leaves it out.
       const there = (yield* Effect.forEach(
@@ -411,25 +525,30 @@ const make = Effect.gen(function* () {
       const key = input.clientRequestId ?? (yield* random.uuidV4());
       const task = taskPrompt(input);
       const title = input.title ?? parent.thread.title;
-      const launched = yield* forwarding.call(
-        scope,
-        ProjectToolkit.tools.t3_thread_launch,
-        target.environmentId,
-        {
-          projectId,
-          title,
-          modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
-          ...(runtimeMode === undefined ? {} : { runtimeMode }),
-          ...(interactionMode === undefined ? {} : { interactionMode }),
-          message: task,
-          clientRequestId: `delegate:${scope.thread.threadId}:${key}`,
-          // The thread there shows it is this thread's subagent, with a way back.
-          delegatedFrom: {
-            environmentId: hereId,
-            threadId: parent.thread.id,
-            title: parent.thread.title,
-          },
-        },
+      const [launched, checkoutNote] = yield* Effect.all(
+        [
+          forwarding.call(scope, ProjectToolkit.tools.t3_thread_launch, target.environmentId, {
+            projectId,
+            title,
+            modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
+            ...(runtimeMode === undefined ? {} : { runtimeMode }),
+            ...(interactionMode === undefined ? {} : { interactionMode }),
+            message: task,
+            clientRequestId: `delegate:${scope.thread.threadId}:${key}`,
+            // The thread there shows it is this thread's subagent, with a way back.
+            delegatedFrom: {
+              environmentId: hereId,
+              threadId: parent.thread.id,
+              title: parent.thread.title,
+            },
+          }),
+          checkout(scope, {
+            environmentId: target.environmentId,
+            projectId,
+            hereProjectId: parent.thread.projectId,
+          }),
+        ],
+        { concurrency: 2 },
       );
       const link = yield* links.get(target.environmentId).pipe(
         Effect.map(Option.getOrUndefined),
@@ -505,7 +624,7 @@ const make = Effect.gen(function* () {
         });
       }
       yield* followOne(scope.thread.threadId, taskId).pipe(Effect.forkIn(followers));
-      return { taskId };
+      return { taskId, checkout: checkoutNote };
     },
   );
 
@@ -943,7 +1062,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.ignoreCause({ log: true })),
     );
 
-  return RemoteDelegation.of({ delegate, place, cancel, start });
+  return RemoteDelegation.of({ delegate, checkout, place, cancel, start });
 });
 
 const isTerminal = (status: string) =>

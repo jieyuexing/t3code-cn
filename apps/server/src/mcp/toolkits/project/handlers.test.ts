@@ -885,6 +885,12 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
     const boxProject = ProjectId.make("project:box");
     const asked: Array<RemoteDelegation.PlacementRequest> = [];
     const sent: Array<{ environmentId: EnvironmentId; params: unknown }> = [];
+    const checked: Array<{
+      environmentId: EnvironmentId;
+      projectId: ProjectId;
+      hereProjectId?: ProjectId | undefined;
+    }> = [];
+    const drift = { here: "aaaaaaaa", there: "bbbbbbbb" };
     const launchAuto = Effect.fn("test.launchAuto")(function* (
       placedOn: EnvironmentId | undefined,
       params: object,
@@ -906,6 +912,10 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
           },
         },
         delegation: {
+          checkout: (_scope, request) => {
+            checked.push(request);
+            return Effect.succeed(drift);
+          },
           place: (_scope, request) => {
             asked.push(request);
             return Effect.succeed(
@@ -933,12 +943,17 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
     const there = yield* launchAuto(box, {});
     expect(sent).toMatchObject([{ environmentId: box, params: { projectId: boxProject } }]);
     expect(there.launched).toHaveLength(0);
-    expect(there.result).toMatchObject({ environmentId: box });
+    expect(there.result).toMatchObject({ environmentId: box, checkout: drift });
+    // Compared against the project asked for here, which is not always the thread's.
+    expect(checked).toEqual([
+      { environmentId: box, projectId: boxProject, hereProjectId: there.projectId },
+    ]);
 
     // Here: launched in the project asked for, and the result names this environment.
     const here = yield* launchAuto(undefined, {});
     expect(here.launched).toMatchObject([{ projectId: here.projectId }]);
     expect(here.result).toMatchObject({ environmentId: "environment" });
+    expect(here.result).not.toHaveProperty("checkout");
 
     // The provider and model it names are what the box must be able to run.
     const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" };
@@ -955,6 +970,9 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
       params: { projectId: named.projectId },
     });
     expect(named.result).not.toHaveProperty("environmentId");
+    // The check names the project the caller gave, which is the box's, and rides along.
+    expect(named.result).toMatchObject({ checkout: drift });
+    expect(checked.at(-1)).toEqual({ environmentId: box, projectId: named.projectId });
     const unnamed = yield* launchAuto(box, { environmentId: undefined });
     expect(unnamed.launched).toHaveLength(1);
     expect(unnamed.result).not.toHaveProperty("environmentId");
@@ -983,6 +1001,14 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
       true,
       true,
     ]);
-    expect(sent).toHaveLength(3);
+    // A worktree on a named machine is branched from a ref there, not the project's checkout.
+    const worktree = yield* launchAuto(box, {
+      environmentId: box,
+      workspaceStrategy: { type: "worktree", baseRef: "main" },
+    });
+    expect(worktree.result).not.toHaveProperty("checkout");
+    expect(sent).toHaveLength(4);
+    // Only a launch in the project's own checkout is checked: not the unnamed, scratch, worktree or attachment ones.
+    expect(checked).toHaveLength(3);
   }),
 );
