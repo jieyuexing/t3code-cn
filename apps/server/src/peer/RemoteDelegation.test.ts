@@ -54,6 +54,7 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ProjectCheckout from "../project/ProjectCheckout.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
@@ -79,6 +80,7 @@ import * as PeerLinkRequests from "./PeerLinkRequests.ts";
 const laptop = descriptorOf("environment-laptop", "Laptop");
 const box = descriptorOf("environment-box", "Box");
 const boxProject = ProjectId.make("project:box");
+const boxOtherRepository = ProjectId.make("project:box-elsewhere");
 /** A project on the laptop whose repository the box does not have. */
 const laptopOtherProject = ProjectId.make("project:laptop-other");
 const instanceId = ProviderInstanceId.make("codex");
@@ -98,6 +100,8 @@ const idle: HostResourcesSnapshot = {
   totalMemoryBytes: 16 * 1024 ** 3,
 };
 const busy: HostResourcesSnapshot = { ...idle, cpuUtilization: 0.8 };
+const commit = "0123456789abcdef0123456789abcdef01234567";
+const otherCommit = "fedcba9876543210fedcba9876543210fedcba98";
 
 /** The provider the box lists: ready, signed in, with the model the tasks ask for. */
 const codexReady: ServerProvider = {
@@ -166,6 +170,8 @@ interface BoxThread {
   readonly load: Ref.Ref<Effect.Effect<HostResourcesSnapshot>>;
   /** The providers the box lists. */
   readonly providers: Ref.Ref<ReadonlyArray<ServerProvider>>;
+  /** The commit the box's checkout is at; null when it cannot say. */
+  readonly head: Ref.Ref<string | null>;
 }
 
 const makeBoxThread = Effect.gen(function* () {
@@ -203,6 +209,7 @@ const makeBoxThread = Effect.gen(function* () {
     afterLaunch: yield* Ref.make<Effect.Effect<void>>(Effect.void),
     load: yield* Ref.make<Effect.Effect<HostResourcesSnapshot>>(Effect.succeed(idle)),
     providers: yield* Ref.make<ReadonlyArray<ServerProvider>>([codexReady]),
+    head: yield* Ref.make<string | null>(commit),
   } satisfies BoxThread;
 });
 
@@ -219,6 +226,24 @@ const boxProjects: ReadonlyArray<Project> = [
     updatedAt: "2026-10-01T00:00:00.000Z",
     deletedAt: null,
   })),
+  {
+    id: boxOtherRepository,
+    title: "elsewhere",
+    workspaceRoot: "/srv/elsewhere",
+    repositoryIdentity: {
+      canonicalKey: "github.com/acme/elsewhere",
+      locator: {
+        source: "git-remote",
+        remoteName: "origin",
+        remoteUrl: "git@github.com:acme/elsewhere.git",
+      },
+    },
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+    deletedAt: null,
+  },
   {
     id: boxProject,
     title: "app",
@@ -543,7 +568,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
     Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
-        getById: () => Effect.succeedNone,
+        getById: (id) => Effect.succeed(Option.fromNullishOr(boxProjects.find((p) => p.id === id))),
         // More than a page, so finding the project with this repository pages.
         listPage: ({ cursor, limit }) =>
           Effect.succeed({
@@ -552,7 +577,12 @@ const boxToolkitLayer = (thread: BoxThread) => {
           }),
       }),
     ),
-    Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
+        Layer.mock(ProjectCheckout.ProjectCheckout)({ head: () => Ref.get(thread.head) }),
+      ),
+    ),
     Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
     Layer.provide(
       Layer.mergeAll(
@@ -601,6 +631,30 @@ const makeLaptop = (
   load: HostResourcesSnapshot = idle,
 ) =>
   Effect.gen(function* () {
+    const checkout = yield* Ref.make<{ head: string | null; uncommitted: boolean }>({
+      head: commit,
+      uncommitted: false,
+    });
+    // A box on an older version does not send `head`.
+    const olderBox = yield* Ref.make(false);
+    const layerForwarding = Layer.effect(
+      PeerForwarding.PeerForwarding,
+      Effect.map(PeerForwarding.PeerForwarding, (forwarding) => ({
+        ...forwarding,
+        call: ((scope, tool, environmentId, params) =>
+          forwarding.call(scope, tool, environmentId, params).pipe(
+            Effect.flatMap((result) =>
+              Ref.get(olderBox).pipe(
+                Effect.map((older) => {
+                  if (!older || tool.name !== "t3_project_read") return result;
+                  const { head: _head, ...rest } = result as { head?: unknown };
+                  return rest as typeof result;
+                }),
+              ),
+            ),
+          )) as typeof forwarding.call,
+      })),
+    ).pipe(Layer.provide(PeerForwarding.layer));
     const linking = kept ?? (yield* layerLinkingEnvironment(laptop).pipe(Layer.build));
     const layerDatabase = Layer.succeedContext(database);
     const layerOrchestrator = Layer.mergeAll(
@@ -627,7 +681,7 @@ const makeLaptop = (
       Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
       Layer.provideMerge(
         RemoteDelegation.layer.pipe(
-          Layer.provideMerge(PeerForwarding.layer),
+          Layer.provideMerge(layerForwarding),
           Layer.provide(
             Layer.mock(ProjectService.ProjectService)({
               // A cold enrichment cache: the project itself reports no identity yet.
@@ -651,6 +705,13 @@ const makeLaptop = (
             }),
           ),
           Layer.provide(Layer.mock(HostResources.HostResources)({ read: Effect.succeed(load) })),
+          Layer.provide(
+            Layer.mock(ProjectCheckout.ProjectCheckout)({
+              head: () => Ref.get(checkout).pipe(Effect.map((state) => state.head)),
+              hasTrackedChanges: () =>
+                Ref.get(checkout).pipe(Effect.map((state) => state.uncommitted)),
+            }),
+          ),
         ),
       ),
       Layer.provide(Layer.succeedContext(linking)),
@@ -672,6 +733,9 @@ const makeLaptop = (
     const here = yield* Layer.build(layerHere);
     const server = Context.get(here, McpServer.McpServer);
     return {
+      /** What this machine's checkout of the project is at. */
+      checkout,
+      olderBox,
       links: Context.get(linking, PeerLinks.PeerLinks),
       settings: Context.get(linking, ServerSettings.ServerSettingsService),
       orchestrator: Context.get(here, Orchestrator.OrchestratorV2),
@@ -2060,6 +2124,31 @@ it.effect("auto leaves out a machine that is not a candidate", () =>
       ).toEqual(here);
       expect(yield* a.remote.place(parentScope, { hereOnly: true })).toEqual(here);
 
+      // Another commit there, or one it cannot say, is not the code this machine has.
+      const there = { environmentId: box.environmentId, projectId: boxProject };
+      yield* Ref.set(thread.head, otherCommit);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      yield* Ref.set(thread.head, null);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      // Nor is any machine a match for a checkout here that cannot say.
+      yield* Ref.set(thread.head, commit);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(there);
+      yield* Ref.set(a.checkout, { head: null, uncommitted: false });
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      // Two commits that cannot be read are not the same commit.
+      yield* Ref.set(thread.head, null);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      yield* Ref.set(thread.head, commit);
+      // A box on an older version sends no commit to match.
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
+      yield* Ref.set(a.olderBox, true);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      yield* Ref.set(a.olderBox, false);
+      // Edits here do not rule the other machine out.
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: true });
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(there);
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
+
       // With linked environments off, nothing is asked of the box.
       yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: false });
       expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
@@ -2075,6 +2164,69 @@ it.effect("auto leaves out a machine that is not a candidate", () =>
       yield* Deferred.await(asked);
       yield* TestClock.adjust("3 seconds");
       expect(yield* Fiber.join(waiting)).toEqual(here);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a task says whether the checkout it runs on is at the code here", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const delegate = Effect.fn("test.delegate")(function* (
+        environmentId: string,
+        projectId?: ProjectId,
+      ) {
+        const result = yield* a.call("delegate_task", {
+          task: "Run the suite.",
+          target: {
+            environmentId,
+            ...(projectId === undefined ? {} : { projectId }),
+            providerInstanceId: instanceId,
+            model: "gpt-5.4",
+          },
+          mode: "async",
+        });
+        expect(result.isError, JSON.stringify(result.content)).toBe(false);
+        return result.structuredContent as { checkout?: unknown };
+      });
+      const short = (sha: string) => sha.slice(0, 8);
+
+      // The same commit and nothing edited: nothing to say.
+      expect(yield* delegate(box.environmentId)).not.toHaveProperty("checkout");
+
+      // Another commit there: the task still runs, and both commits are named.
+      yield* Ref.set(thread.head, otherCommit);
+      expect(yield* delegate(box.environmentId)).toMatchObject({
+        checkout: { here: short(commit), there: short(otherCommit) },
+      });
+      expect(yield* Ref.get(thread.launched)).not.toBeNull();
+
+      // A project there with another repository has no commit to compare.
+      expect(yield* delegate(box.environmentId, boxOtherRepository)).not.toHaveProperty("checkout");
+
+      // An older box has nothing to compare: the task runs and the result says nothing.
+      yield* Ref.set(a.olderBox, true);
+      expect(yield* delegate(box.environmentId)).not.toHaveProperty("checkout");
+      yield* Ref.set(a.olderBox, false);
+
+      // A commit it cannot read, on either side, is said so.
+      yield* Ref.set(thread.head, null);
+      expect(yield* delegate(box.environmentId)).toMatchObject({
+        checkout: { here: short(commit), there: null },
+      });
+      yield* Ref.set(thread.head, commit);
+      yield* Ref.set(a.checkout, { head: null, uncommitted: false });
+      expect(yield* delegate(box.environmentId)).toMatchObject({
+        checkout: { here: null, there: short(commit) },
+      });
+
+      // Edits here never reach the box, at the same commit or when auto picks it.
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: true });
+      const edited = { here: short(commit), there: short(commit), uncommittedHere: true };
+      expect(yield* delegate(box.environmentId)).toMatchObject({ checkout: edited });
+      expect(yield* delegate("auto")).toMatchObject({ checkout: edited });
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
+      expect(yield* delegate("auto")).not.toHaveProperty("checkout");
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

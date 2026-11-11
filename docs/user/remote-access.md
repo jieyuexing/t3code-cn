@@ -368,12 +368,20 @@ To choose between machines, an agent can read each one's current CPU and memory
 load with `t3_environment_read`. Or it can pass `"auto"` as the environment of
 `delegate_task` or `t3_thread_launch`, and this machine picks the least loaded
 one, counting itself and the linked machines that answer, report their load, and
-have exactly one project with the same repository and can run the provider (and the model, when one is named) the work uses. `"auto"` always means this
+have exactly one project with the same repository, at the same commit as this machine's checkout, and can run the provider (and the model, when one is named) the work uses. `"auto"` always means this
 thread's project (or `t3_thread_launch`'s `projectId`, which is then this
 machine's). If no machine qualifies, the work stays here, and so does work only
 this machine can do, such as a worktree or an attachment. `t3_thread_launch`
 returns the `environmentId` that took it; a `delegate_task` that ran elsewhere
 returns that machine's thread as `remoteChild`.
+
+T3 does not copy code between machines or update the other checkout: the work
+runs on whatever commit is checked out there, and uncommitted edits here are
+not sent. When a `delegate_task`, or a `t3_thread_launch` in the project's own
+checkout, runs on another machine, its result carries a `checkout` if the two
+are at different commits, one commit cannot be read, or this machine has
+uncommitted edits to tracked files. Commit and push here, and pull there,
+before you rely on the result.
 
 ## Manage or revoke access
 
