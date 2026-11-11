@@ -170,6 +170,8 @@ function SettingField(props: {
             <span className="text-success">Saved</span>
           ) : unsaved ? (
             <span>Unsaved</span>
+          ) : settingIsDefault(field, value) ? (
+            <span>Default</span>
           ) : (
             <span />
           )}

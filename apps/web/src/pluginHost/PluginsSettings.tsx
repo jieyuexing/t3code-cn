@@ -266,7 +266,9 @@ function PluginRow(props: {
           {plugin.settings.length === 0 ? null : (
             <Button
               size="xs"
-              variant={settingsOpen ? "secondary" : "outline"}
+              variant="outline"
+              // The outline variant draws its pressed look (border kept, hover fill) for this attribute.
+              data-pressed={settingsOpen ? "" : undefined}
               aria-expanded={settingsOpen}
               onClick={() => setPluginSettingsOpen(settingsKey, !settingsOpen)}
             >

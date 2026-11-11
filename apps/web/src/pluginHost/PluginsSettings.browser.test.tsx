@@ -343,7 +343,8 @@ it("offers Reset to default only when the value differs, and writes the default 
   });
   await using screen = await render(settings, { router: "/" });
   await screen.getByRole("button", { name: "Settings", exact: true }).click();
-  // Page size and the switch stand on their defaults; only the path differs.
+  // Page size and the switch stand on their defaults and say so; only the path differs.
+  expect(screen.getByText("Default", { exact: true }).elements()).toHaveLength(2);
   expect(screen.getByRole("button", { name: "Reset to default (cvs)" }).elements()).toHaveLength(1);
   expect(screen.getByRole("button", { name: /^Reset to default/ }).elements()).toHaveLength(1);
   await screen.getByRole("button", { name: "Reset to default (cvs)" }).click();

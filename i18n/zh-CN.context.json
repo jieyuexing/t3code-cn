@@ -157,6 +157,10 @@
   "apps/web/src/components/usage/UsagePage.tsx": {
     "Share": "占比"
   },
+  "apps/web/src/pluginHost/PluginSettingsForm.tsx": {
+    "Collapse": "收起",
+    "Default": "默认值"
+  },
   "packages/client-runtime/src/state/threadShell.ts": {
     "approval": "审批",
     "input": "输入",
