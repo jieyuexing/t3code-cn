@@ -19,12 +19,17 @@ const noProxyWithLoopback = () =>
     .filter(Boolean)
     .join(",");
 
-/** Uses EnvHttpProxyAgent when a proxy variable is set or --use-env-proxy / NODE_USE_ENV_PROXY installed one. */
-export function installHttp1FetchDispatcher(): void {
+const proxyEnvironmentKey = () =>
+  JSON.stringify(
+    ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy"].map(
+      (name) => process.env[name],
+    ),
+  );
+let installedProxyEnvironmentKey: string | undefined;
+
+function setHttp1FetchDispatcher(usesEnvProxy: boolean): void {
   const undici = requireUndici("undici") as typeof Undici;
-  // Node's agent comes from its internal undici copy, so `instanceof` against the npm class is false.
-  const usesEnvProxy =
-    hasProxyEnvironment() || undici.getGlobalDispatcher().constructor.name === "EnvHttpProxyAgent";
+  installedProxyEnvironmentKey = proxyEnvironmentKey();
   undici.setGlobalDispatcher(
     usesEnvProxy
       ? new undici.EnvHttpProxyAgent({
@@ -37,6 +42,15 @@ export function installHttp1FetchDispatcher(): void {
   );
 }
 
+/** Uses EnvHttpProxyAgent when a proxy variable is set or --use-env-proxy / NODE_USE_ENV_PROXY installed one. */
+export function installHttp1FetchDispatcher(): void {
+  const undici = requireUndici("undici") as typeof Undici;
+  // Node's agent comes from its internal undici copy, so `instanceof` against the npm class is false.
+  setHttp1FetchDispatcher(
+    hasProxyEnvironment() || undici.getGlobalDispatcher().constructor.name === "EnvHttpProxyAgent",
+  );
+}
+
 /**
  * Avoids uncaught idle-timeout errors on h2 streams (https://github.com/nodejs/undici/issues/5936),
  * and makes built-in fetch honour HTTPS_PROXY and friends without NODE_USE_ENV_PROXY=1.
@@ -44,7 +58,18 @@ export function installHttp1FetchDispatcher(): void {
 export function configureOutboundFetch(): void {
   if (builtinFetchUsesHttp2(process.versions.undici) || hasProxyEnvironment()) {
     installHttp1FetchDispatcher();
+  } else {
+    installedProxyEnvironmentKey = proxyEnvironmentKey();
   }
+}
+
+/**
+ * The desktop shell environment arrives after startup, so proxy variables can appear or vanish then.
+ * Rebuilds the dispatcher from the current environment only when they changed.
+ */
+export function refreshOutboundFetchDispatcher(): void {
+  if (proxyEnvironmentKey() === installedProxyEnvironmentKey) return;
+  setHttp1FetchDispatcher(hasProxyEnvironment());
 }
 
 // @types/node does not declare setTypeOfService yet.

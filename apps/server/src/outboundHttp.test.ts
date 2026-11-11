@@ -18,6 +18,7 @@ import {
   configureOutboundFetch,
   ignoreMacosTypeOfServiceEinval,
   installHttp1FetchDispatcher,
+  refreshOutboundFetchDispatcher,
 } from "./outboundHttp.ts";
 
 // Non-secret, self-signed 127.0.0.1 certificate, valid until 2126; ALPN h2 requires TLS.
@@ -172,6 +173,35 @@ describe("configureOutboundFetch", () => {
       expect(yield* textViaBuiltinFetch(ipv6TargetOrigin)).toBe("direct");
     }),
   );
+});
+
+describe("refreshOutboundFetchDispatcher", () => {
+  it("follows proxy variables that appear or disappear after startup", () => {
+    configureOutboundFetch();
+    vi.stubEnv("HTTPS_PROXY", proxyOrigin);
+    refreshOutboundFetchDispatcher();
+    expect(Undici.getGlobalDispatcher()).toBeInstanceOf(Undici.EnvHttpProxyAgent);
+
+    vi.stubEnv("HTTPS_PROXY", undefined);
+    refreshOutboundFetchDispatcher();
+    expect(Undici.getGlobalDispatcher()).toBeInstanceOf(Undici.Agent);
+    expect(Undici.getGlobalDispatcher()).not.toBeInstanceOf(Undici.EnvHttpProxyAgent);
+  });
+
+  it("leaves the dispatcher alone while the proxy variables are unchanged", () => {
+    configureOutboundFetch();
+    vi.stubEnv("HTTPS_PROXY", proxyOrigin);
+    refreshOutboundFetchDispatcher();
+    const installed = Undici.getGlobalDispatcher();
+
+    vi.stubEnv("PATH", "/unrelated");
+    refreshOutboundFetchDispatcher();
+    expect(Undici.getGlobalDispatcher()).toBe(installed);
+
+    vi.stubEnv("NO_PROXY", "t3-proxy-test.invalid");
+    refreshOutboundFetchDispatcher();
+    expect(Undici.getGlobalDispatcher()).not.toBe(installed);
+  });
 });
 
 const runNode = Effect.fnUntraced(function* (args: Array<string>) {
