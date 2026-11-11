@@ -24,6 +24,10 @@ const PluginHostMessage = Schema.Union([
     capabilities: Schema.Array(Schema.String),
     /** The plugin services this plugin injects, so the child offers `context.services` for exactly those. */
     services: Schema.Array(Schema.String),
+    /** The services this plugin's manifest provides, so it can register them from the manifest alone. */
+    provides: Schema.Array(
+      Schema.Struct({ name: Schema.String, methods: Schema.Array(Schema.String) }),
+    ),
   }),
   Schema.TaggedStruct("Invoke", { requestId: RequestId, handler: HandlerName, input: Schema.Json }),
   Schema.TaggedStruct("Deactivate", {}),

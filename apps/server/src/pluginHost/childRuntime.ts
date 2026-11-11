@@ -6,6 +6,10 @@ import type { Json, PluginChildMessage, PluginHostMessage } from "./PluginIpc.ts
 
 interface PluginContext {
   readonly pluginId: string;
+  readonly provides: ReadonlyArray<{
+    readonly name: string;
+    readonly methods: ReadonlyArray<string>;
+  }>;
   readonly log: Record<"debug" | "info" | "warn" | "error", (...parts: Array<unknown>) => void>;
   readonly handle: (name: string, fn: (input: Json) => unknown) => void;
   readonly services: Readonly<
@@ -68,6 +72,7 @@ export function runPluginChild() {
   const buildContext = (message: Extract<PluginHostMessage, { _tag: "Activate" }>) => {
     const context: PluginContext = {
       pluginId: message.pluginId,
+      provides: message.provides,
       log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") },
       handle: (name, fn) => {
         handlers.set(name, fn);
@@ -86,8 +91,9 @@ export function runPluginChild() {
           new Proxy(
             {},
             {
+              // `then` stays undefined so that awaiting a service is not a call to it.
               get: (_target, method) =>
-                typeof method === "string"
+                typeof method === "string" && method !== "then"
                   ? (input?: Json) =>
                       hostCall("service.call", { service, method, input: input ?? null })
                   : undefined,

@@ -228,6 +228,10 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
     entryPath: registration.entryPath,
     capabilities: registration.manifest.capabilities,
     services: options.injectedServices,
+    provides: registration.manifest.provides.map((service) => ({
+      name: service.name,
+      methods: service.methods.map((method) => method.name),
+    })),
   });
   const readyMessage = yield* Deferred.await(ready).pipe(
     Effect.timeoutOption(activationTimeout),

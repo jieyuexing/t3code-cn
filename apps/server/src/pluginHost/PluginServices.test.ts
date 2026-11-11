@@ -471,6 +471,33 @@ export function activate(context) {
       }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
+
+  it.live(
+    "the child learns the services and methods its manifest provides, and is no thenable",
+    () =>
+      Effect.gen(function* () {
+        const { enable, invoke, addGenerated } = yield* setup();
+        yield* addGenerated("probe.provider", {
+          provides: ["svc.probe"],
+          source: `export function activate(context) {
+          context.provide("svc.probe", { ping: () => 1 });
+          context.handle("provides", () => context.provides);
+        }`,
+        });
+        yield* addGenerated("probe.consumer", {
+          inject: ["svc.probe"],
+          source: `export function activate(context) {
+          context.handle("thenType", () => typeof context.services["svc.probe"].then);
+        }`,
+        });
+        yield* enable("probe.provider");
+        yield* enable("probe.consumer");
+        expect(yield* invoke("probe.provider", "provides")).toEqual({
+          value: [{ name: "svc.probe", methods: ["ping"] }],
+        });
+        expect(yield* invoke("probe.consumer", "thenType")).toEqual({ value: "undefined" });
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });
 
 const UI_SERVICE = "svc.ui";
