@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-import type { PluginViewContext } from "./bridge";
+import type { PluginFocus, PluginViewContext } from "./bridge";
 
 const THEME_VARIABLES = [
   ...[
@@ -49,10 +49,13 @@ const subscribeToTheme = (notify: () => void) => {
 };
 const readEncodedTheme = () => JSON.stringify(readPluginTheme());
 
-/** Where a view is shown: the thread's directory, and the theme, read again whenever the app restyles. */
-export function usePluginViewContext(cwd: string | null): PluginViewContext {
+/** Where a view is shown: the thread's directory and file focus, and the theme, read again whenever the app restyles. */
+export function usePluginViewContext(
+  cwd: string | null,
+  focus: PluginFocus | null,
+): PluginViewContext {
   const theme = JSON.parse(
     useSyncExternalStore(subscribeToTheme, readEncodedTheme),
   ) as PluginViewContext["theme"];
-  return { cwd, theme };
+  return { cwd, focus, theme };
 }

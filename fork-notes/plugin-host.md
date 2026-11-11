@@ -20,7 +20,12 @@ t3code-zh 自建的通用插件系统，语义参照 Cordis：插件按清单声
 | 页面 → 宿主 | `call` `callService` `callHost` `cancel` `pong`      | 带 `id`（`cancel` 指向要取消的 `id`）；单条消息上限 64K 字符，嵌套不超过 32 层 |
 | 宿主 → 页面 | `init` `context` `result` `error` `ping` `violation` | `init` 是 `{pluginId, viewId, title, context}`；`context` 是 `{context}`       |
 
-- **`context`**：`{ cwd, theme: { scheme, vars } }`。`cwd` 是当前线程的工作目录（有 worktree 取 worktree，否则取项目根，来自右面板收到的 `files.workspaceRoot`），没有线程时为 `null`。`scheme` 是 `light` 或 `dark`；`vars` 是 T3 页面根元素上各变量的计算值，缺的不发。`init` 带一份，之后 `cwd` 或主题变了宿主再发一条 `{_tag:"context", context}`（内容没变不发）。主题靠监听根元素的 `class` 和 `style` 变化发现，主题编辑器的实时改色也会带来更新。宿主不用 `ui/notifications/host-context-changed`，那是页面服务路由给 `html_render` 页用的。
+- **`context`**：`{ cwd, focus, theme: { scheme, vars } }`。`cwd` 是当前线程的工作目录（有 worktree 取 worktree，否则取项目根，来自右面板收到的 `files.workspaceRoot`），没有线程时为 `null`。`scheme` 是 `light` 或 `dark`；`vars` 是 T3 页面根元素上各变量的计算值，缺的不发。`init` 带一份，之后 `cwd`、`focus` 或主题变了宿主再发一条 `{_tag:"context", context}`（内容没变不发）。主题靠监听根元素的 `class` 和 `style` 变化发现，主题编辑器的实时改色也会带来更新。宿主不用 `ui/notifications/host-context-changed`，那是页面服务路由给 `html_render` 页用的。
+- **`focus`**：`{ path: "<绝对路径>", kind: "folder" | "file" } | null`，是本线程右侧面板里“最近一次激活的文件或目录标签”所指的位置，供版本控制类插件跟着文件面板走。取值在 `apps/web/src/pluginHost/focusSurface.ts` 与 `usePluginFocus.ts`，不动上游文件：
+  - 只看 `files`（文件浏览器，指工作区根，`kind` 为 `folder`）和 `file` 标签（聊天附件不算）。`file` 标签的 `relativePath` 可以是目录（面板靠读文件失败才知道），所以 `kind` 由宿主用面板同一个读文件查询判定，`path_not_file` 为 `folder`，其余为 `file`；`relativePath` 是 `.` 时视为工作区根。路径与面板一致，用 `resolvePathLinkTarget(relativePath, cwd)`，所以可以是工作区之外的绝对路径。
+  - “最近一次激活”：模块加载时订阅右面板 store，每次状态变化，若当前激活的是上述标签就记下它；激活的是别的标签（含插件自己的标签）时沿用记下的那个；记下的标签被关掉、或页面重载后没有记录时，取仍开着的最后一个上述标签（按标签顺序，近似“最近打开”）；一个都没有则为 `null`。`navigateFolder` 原地换标签时新标签 id 被激活，随之更新。记录在内存里，按线程分开。
+  - `kind` 还没读出来时不发猜测：已发过则维持上一个答案，从没发过则视图暂不挂载（`init` 之前等它）。读失败（缺文件、无读权限）按 `file`。
+  - 插件视图只在自己的标签可见时挂载，用户到文件标签再回来是新的 `init`；在线收到 `context` 变化的场景主要是被记住的标签在插件可见时被关掉。
 - **主题变量**：`--background` `--foreground` `--muted` `--card` `--popover` `--secondary` `--primary` `--accent` `--destructive` `--success` `--warning` `--info` `--code-background`，其中除 `--foreground` 外各项另有 `-foreground`；另有 `--border` `--input` `--ring` `--warning-surface` `--radius` `--font-sans` `--font-mono`。清单在 `apps/web/src/pluginHost/viewContext.ts`。
 - **`callHost`**：`{_tag:"callHost", id, method, input}`，宿主回 `result` 或 `error`。要求清单 `capabilities` 含 `"host.vcs-read"`（随同意摘要，改了要重新同意）；没声明、或 `method` 不在下表，一律回 `error`，`code` 为 `denied`。调用用当前用户自己的连接代为发出，只读，页面碰不到 T3 的 API（视图 CSP 不变）。结果超过 64K 回 `too-large`。
 

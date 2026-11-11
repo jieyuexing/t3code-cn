@@ -116,6 +116,7 @@ const frameProps = {
   generation: 1,
   capabilities: [] as ReadonlyArray<string>,
   cwd: null as string | null,
+  focus: null as { path: string; kind: "folder" | "file" } | null,
   threadRef: null,
   onReload: () => {},
 };
@@ -279,6 +280,32 @@ it("gives the page the thread's cwd and the theme at init, and again when the cw
     const updates = observed.seen.filter((entry) => entry.startsWith("context:"));
     expect(updates).toHaveLength(1);
     expect(JSON.parse(updates[0]!.slice(8)).cwd).toBe("/work/b");
+  });
+});
+
+it("gives the page the file focus at init, and again only when the focus changes", async () => {
+  using observed = setup(HOST_PAGE);
+  const withFocus = (focus: { path: string; kind: "folder" | "file" } | null) => (
+    <PluginViewFrame {...frameProps} cwd="/work" focus={focus} />
+  );
+  await using screen = await render(withFocus({ path: "/work/projects/b", kind: "folder" }), {
+    router: false,
+  });
+  await vi.waitFor(() =>
+    expect(observed.seen.some((entry) => entry.startsWith("init:"))).toBe(true),
+  );
+  const initial = JSON.parse(observed.seen.find((entry) => entry.startsWith("init:"))!.slice(5));
+  expect(initial.focus).toEqual({ path: "/work/projects/b", kind: "folder" });
+
+  await screen.rerender(withFocus({ path: "/work/projects/b", kind: "folder" }));
+  await screen.rerender(withFocus({ path: "/work/projects/a/x.ts", kind: "file" }));
+  await vi.waitFor(() => {
+    const updates = observed.seen.filter((entry) => entry.startsWith("context:"));
+    expect(updates).toHaveLength(1);
+    expect(JSON.parse(updates[0]!.slice(8)).focus).toEqual({
+      path: "/work/projects/a/x.ts",
+      kind: "file",
+    });
   });
 });
 

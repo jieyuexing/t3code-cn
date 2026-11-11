@@ -12,9 +12,16 @@ export type BridgeErrorCode =
   | "too-large"
   | "invalid";
 
-/** What the host tells a page about where it is shown: the thread's directory and T3's theme. */
+/** The file or folder tab the thread's panel last stood on. */
+export interface PluginFocus {
+  readonly path: string;
+  readonly kind: "folder" | "file";
+}
+
+/** What the host tells a page about where it is shown: the thread's directory, its file panel's focus and T3's theme. */
 export interface PluginViewContext {
   readonly cwd: string | null;
+  readonly focus: PluginFocus | null;
   readonly theme: {
     readonly scheme: "light" | "dark";
     readonly vars: Readonly<Record<string, string>>;
