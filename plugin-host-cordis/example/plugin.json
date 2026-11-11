@@ -1,0 +1,40 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "example.counter",
+  "version": "0.1.0",
+  "description": "A counter written as a Cordis plugin; it asks example.clock for the time.",
+  "extensions": {
+    "com.jieyuexing.t3code": {
+      "apiVersion": 1,
+      "title": "Counter",
+      "entry": "./index.mjs",
+      "capabilities": ["settings"],
+      "inject": ["example.clock"],
+      "provides": [
+        {
+          "name": "example.counter",
+          "methods": [
+            {
+              "name": "increment",
+              "title": "Increment",
+              "description": "Adds to the counter and returns the new value with the time from example.clock.",
+              "input": {
+                "type": "object",
+                "properties": {
+                  "by": { "type": "integer", "default": 1, "description": "How much to add." }
+                }
+              },
+              "ui": true
+            },
+            {
+              "name": "get",
+              "title": "Current value",
+              "readOnly": true,
+              "ui": true
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
