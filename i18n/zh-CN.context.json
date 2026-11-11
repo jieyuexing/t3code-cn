@@ -70,6 +70,10 @@
   "apps/web/src/components/files/LargeTextViewer.tsx": {
     "lines": "行"
   },
+  "apps/web/src/components/files/OfficeViewer.tsx": {
+    "column": "列",
+    "row": "行"
+  },
   "apps/web/src/components/mcp/UseInAnotherAppDialog.tsx": {
     "Expires": "剩余",
     "Restart T3 Code on": "请重启以下环境上的 T3 Code：",

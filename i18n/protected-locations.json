@@ -56,7 +56,7 @@
   },
   {
     "file": "apps/web/src/components/settings/ResourceTelemetryDiagnostics.tsx",
-    "line": 792,
+    "line": 796,
     "key": "s",
     "reason": "JSX 英文复数后缀可为空译文；ResourceTelemetryDiagnostics 的 s 是秒单位，按该位置保护避免同 key 混用。"
   },

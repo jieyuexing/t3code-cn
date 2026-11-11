@@ -127,6 +127,10 @@
     "category": "code",
     "reason": "HTML 渲染主题、图片和快捷键消息的注入脚本，包含协议值，保持原文。"
   },
+  "(function(){var s=document.getElementById(\"t3-theme\"),n=0;if(!s)return;var b={0};function a(t){if(!t||typeof t!==\"object\"||!t.variables||typeof t.variables!==\"object\")return;var c=\":root{color-scheme:\"+(t.appearance===\"light\"?\"light\":\"dark\")+\";\";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+\":\"+String(t.variables[k]).replace(/[;{}<>]/g,\"\")+\";\";}s.textContent=c+\"}\"+b;}try{var m=/[#&]{1}=([^&]*)/.exec(location.hash);if(m){a(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,\"\",location.pathname+location.search);}}catch(e){}window.addEventListener(\"message\",function(e){var d=e.data,p=d&&d.params;if(d&&d.jsonrpc===\"2.0\"&&d.method==={2}&&p&&p.styles)a({appearance:p.theme,variables:p.styles.variables});});document.addEventListener(\"click\",function(e){var l=e.isTrusted?e.composedPath().find(function(t){return t&&t.matches&&t.matches(\"a[href]\");}):null,u;if(!l)return;try{u=new URL(l.getAttribute(\"href\"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol)||u.href.split(\"#\")[0]===location.href.split(\"#\")[0])return;if(window.parent!==window){e.preventDefault();window.parent.postMessage({jsonrpc:\"2.0\",id:\"t3-link-\"+(++n),method:{3},params:{url:u.href,metaKey:e.metaKey,ctrlKey:e.ctrlKey}},\"*\");}else{l.setAttribute(\"target\",\"_blank\");l.setAttribute(\"rel\",\"noopener\");}},true);if(window.parent!==window){var h,o,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.parent.postMessage({jsonrpc:\"2.0\",method:{4},params:{height:v}},\"*\");};if(window.ResizeObserver){o=new ResizeObserver(z);o.observe(document.documentElement);}document.addEventListener(\"DOMContentLoaded\",function(){if(o&&document.body)o.observe(document.body);z();});window.addEventListener(\"load\",z);window.addEventListener(\"click\",function(e){var t=e.composedPath()[0],u;if(!e.isTrusted||e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||!t||t.tagName!==\"IMG\"||t.closest(\"a[href],button\"))return;u=t.currentSrc||t.src;if(u)setTimeout(function(){if(!e.defaultPrevented)window.parent.postMessage({jsonrpc:\"2.0\",method:{5},params:{src:u,name:t.alt||t.title||\"\"}},\"*\");});});var K=[],B=[],C={6};window.addEventListener(\"message\",function(e){var d=e.data,p=d&&d.params;if(e.source===window.parent&&d&&d.jsonrpc===\"2.0\"&&d.method==={7}&&p&&Array.isArray(p.shortcuts)&&Array.isArray(p.blocked)){K=p.shortcuts;B=p.blocked;}});window.addEventListener(\"keydown\",function(e){var t=e.composedPath()[0],c=e.code||\"\",l=e.key.toLowerCase(),x=/^[a-z]$/.test(l)?[l]:[l,/^Key[A-Z]$/.test(c)?c.slice(3).toLowerCase():\"\",l===\"+\"&&!e.shiftKey&&!e.altKey&&!/^Digit/.test(c)?\"\":C.hasOwnProperty(c)?C[c]:\"\"],f,m=function(s){return s&&s.metaKey===e.metaKey&&s.ctrlKey===e.ctrlKey&&s.shiftKey===e.shiftKey&&s.altKey===e.altKey&&x.indexOf(s.key)>-1;};if(!e.isTrusted||e.isComposing||e.getModifierState(\"AltGraph\")&&!/^[a-z0-9]$/i.test(e.key)||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName))||!K.some(m)||B.some(m))return;f=function(v){window.removeEventListener(\"keydown\",f);if(v!==e||e.defaultPrevented)return;e.preventDefault();window.parent.postMessage({jsonrpc:\"2.0\",method:{8},params:{key:e.key,code:e.code,metaKey:e.metaKey,ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,repeat:e.repeat}},\"*\");};window.addEventListener(\"keydown\",f);setTimeout(function(){window.removeEventListener(\"keydown\",f);});},true);}})();": {
+    "category": "code",
+    "reason": "inline script injected into rendered HTML"
+  },
   "(function(){var s=document.getElementById(\"t3-theme\"),n=0;if(!s)return;var b={0};function a(t){if(!t||typeof t!==\"object\"||!t.variables||typeof t.variables!==\"object\")return;var c=\":root{color-scheme:\"+(t.appearance===\"light\"?\"light\":\"dark\")+\";\";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+\":\"+String(t.variables[k]).replace(/[;{}<>]/g,\"\")+\";\";}s.textContent=c+\"}\"+b;}try{var m=/[#&]{1}=([^&]*)/.exec(location.hash);if(m){a(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,\"\",location.pathname+location.search);}}catch(e){}window.addEventListener(\"message\",function(e){var d=e.data,p=d&&d.params;if(d&&d.jsonrpc===\"2.0\"&&d.method==={2}&&p&&p.styles)a({appearance:p.theme,variables:p.styles.variables});});document.addEventListener(\"click\",function(e){var l=e.isTrusted?e.composedPath().find(function(t){return t&&t.matches&&t.matches(\"a[href]\");}):null,u;if(!l)return;try{u=new URL(l.getAttribute(\"href\"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol)||u.href.split(\"#\")[0]===location.href.split(\"#\")[0])return;if(window.parent!==window){e.preventDefault();window.parent.postMessage({jsonrpc:\"2.0\",id:\"t3-link-\"+(++n),method:{3},params:{url:u.href,metaKey:e.metaKey,ctrlKey:e.ctrlKey}},\"*\");}else{l.setAttribute(\"target\",\"_blank\");l.setAttribute(\"rel\",\"noopener\");}},true);if(window.parent!==window){var h,o,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.parent.postMessage({jsonrpc:\"2.0\",method:{4},params:{height:v}},\"*\");};if(window.ResizeObserver){o=new ResizeObserver(z);o.observe(document.documentElement);}document.addEventListener(\"DOMContentLoaded\",function(){if(o&&document.body)o.observe(document.body);z();});window.addEventListener(\"load\",z);}})();": {
     "category": "code",
     "reason": "htmlRender 的内联引导脚本，包含主题、链接与尺寸的协议处理；不是 UI 文案，必须保持可执行源码。"
@@ -379,6 +383,10 @@
     "category": "code",
     "reason": "文件预览生成的 HTML/XML 片段，属于渲染源码而非界面文案"
   },
+  "<script>\n(() => {\n  try {\n    const initial = new URLSearchParams(location.search).get({0});\n    if (initial === \"light\" || initial === \"dark\") {\n      // A meta tag, unlike an inline style, survives the app's own <html style> attribute.\n      const meta = document.createElement(\"meta\");\n      meta.name = \"color-scheme\";\n      meta.content = initial;\n      document.head.append(meta);\n    }\n  } catch {}\n  window.addEventListener(\"message\", (event) => {\n    if (event.source !== window.parent) return;\n    const message = event.data;\n    if (!message || message.jsonrpc !== \"2.0\") return;\n    const theme = message.method === \"ui/notifications/host-context-changed\"\n      ? message.params?.theme\n      : message.id !== undefined && message.method === undefined\n        ? message.result?.hostContext?.theme\n        : undefined;\n    if (theme === \"light\" || theme === \"dark\") {\n      document.documentElement.style.colorScheme = theme;\n    }\n  });\n})();\n</script>": {
+    "category": "code",
+    "reason": "inline script injected into rendered HTML"
+  },
   "<script>\n(() => {\n  window.addEventListener(\"message\", (event) => {\n    if (event.source !== window.parent) return;\n    const message = event.data;\n    if (!message || message.jsonrpc !== \"2.0\") return;\n    const theme = message.method === \"ui/notifications/host-context-changed\"\n      ? message.params?.theme\n      : message.id !== undefined && message.method === undefined\n        ? message.result?.hostContext?.theme\n        : undefined;\n    if (theme === \"light\" || theme === \"dark\") {\n      document.documentElement.style.colorScheme = theme;\n    }\n  });\n})();\n</script>": {
     "category": "code",
     "reason": "MCP App 沙箱注入的主题或 cookie 兼容脚本，是可执行代码而非界面文案。"
@@ -434,6 +442,14 @@
   "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"var(--recording-cursor-background,white)\" stroke=\"var(--recording-cursor-primary,#2563eb)\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"transform:translate(-2px,-2px)\"><path d=\"M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z\"/></svg>": {
     "category": "code",
     "reason": "SVG"
+  },
+  "<{0}col min=\"{1}\" max=\"{2}\" width=\"{3}\"/>": {
+    "category": "code",
+    "reason": "Office XML markup"
+  },
+  "<{0}cols xmlns{1}=\"{2}\">{3}</{4}cols>": {
+    "category": "code",
+    "reason": "Office XML markup"
   },
   "@ECHO off": {
     "category": "command",
@@ -642,6 +658,10 @@
   "CSS": {
     "category": "brand",
     "reason": "编程语言、标记语言或框架名称，按术语表保留原名。"
+  },
+  "Calibri Light": {
+    "category": "brand",
+    "reason": "Office default font name"
   },
   "Call id is already in use.": {
     "category": "protocol",
@@ -2283,6 +2303,10 @@
     "category": "code",
     "reason": "URL acronym, kept as-is"
   },
+  "UTC": {
+    "category": "brand",
+    "reason": "time zone abbreviation"
+  },
   "Ubuntu Mono": {
     "category": "code",
     "reason": "font family name"
@@ -2662,6 +2686,10 @@
   "backend ready": {
     "category": "dev-only",
     "reason": "log message"
+  },
+  "backend shutdown exceeded timeout; waiting for exit": {
+    "category": "desktop",
+    "reason": "desktop backend log line"
   },
   "backend.example.com": {
     "category": "code",
@@ -4986,6 +5014,10 @@
   "ms": {
     "category": "semantic-value",
     "reason": "保留协议命令、主机名、文件名、品牌或技术单位；它们在服务器也承担原始值语义。"
+  },
+  "ms-auto shrink-0 ps-4 text-muted-foreground text-xs": {
+    "category": "style",
+    "reason": "Tailwind class list"
   },
   "mt-1 block text-xs text-muted-foreground": {
     "category": "code",
