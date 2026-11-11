@@ -21,8 +21,6 @@ const THEME_VARIABLES = [
   "--border",
   "--input",
   "--ring",
-  "--accent-surface",
-  "--destructive-surface",
   "--warning-surface",
   "--radius",
   "--font-sans",
