@@ -235,7 +235,15 @@ export async function main() {
   if (!process.env.TMPDIR)
     throw new Error("Set task-owned TMPDIR/TMP/TEMP before release preflight");
   const scratch = NodeFS.mkdtempSync(NodePath.join(process.env.TMPDIR, "zh-release-"));
-  const merge = git(root, "log", "-1", "--merges", "--format=%H", "--grep=^merge", "HEAD");
+  const merge = git(
+    root,
+    "log",
+    "-1",
+    "--merges",
+    "--format=%H",
+    "--grep=^merge: 同步上游 nightly",
+    "HEAD",
+  );
   const body = merge ? git(root, "log", "-1", "--format=%B", merge) : "";
   const start = body.search(/^更新说明/m);
   if (start < 0) throw new Error("Latest sync merge lacks release notes");
