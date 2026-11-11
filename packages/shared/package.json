@@ -539,6 +539,10 @@
       "types": "./src/cloneUrl.ts",
       "import": "./src/cloneUrl.ts"
     },
+    "./loadBalancing": {
+      "types": "./src/loadBalancing.ts",
+      "import": "./src/loadBalancing.ts"
+    },
     "./speech": {
       "types": "./src/speech.ts",
       "import": "./src/speech.ts"
