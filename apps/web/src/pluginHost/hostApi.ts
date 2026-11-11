@@ -6,9 +6,12 @@ import type {
 } from "@t3tools/contracts";
 
 import { BridgeCallError } from "./bridge";
+import { clipReply, type PendingThread } from "./pendingThreads";
 
 const VCS_READ_CAPABILITY = "host.vcs-read";
 const SETTINGS_CAPABILITY = "settings";
+const THREADS_READ_CAPABILITY = "host.threads-read";
+const THREADS_ORGANIZE_CAPABILITY = "host.threads-organize";
 
 export interface DiffTarget {
   readonly kind: "working-tree" | "commit";
@@ -27,6 +30,14 @@ export interface HostApiDeps {
   readonly openDiff: (target: DiffTarget) => void;
   /** Opens the plugin settings page on the calling plugin's own entry; nothing names another plugin. */
   readonly openPluginSettings: () => void;
+  /** The environment's top-level threads still in play. */
+  readonly pendingThreads: () => ReadonlyArray<PendingThread>;
+  /** The text of the thread's last assistant message, in full. */
+  readonly lastReply: (threadId: string) => Promise<string>;
+  /** The first question of the thread's latest structured question, or an empty text. */
+  readonly question: (threadId: string) => Promise<string>;
+  readonly openThread: (threadId: string) => void;
+  readonly snoozeThread: (threadId: string, until: string) => Promise<void>;
 }
 
 const denied = (message: string) => new BridgeCallError({ code: "denied", message });
@@ -142,16 +153,40 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
     deps.openPluginSettings();
     return null;
   },
+  "threads.pending": async (deps) => deps.pendingThreads(),
+  "threads.lastReply": async (deps, input) => {
+    const threadId = readText(input, "threadId");
+    return { threadId, ...clipReply(await deps.lastReply(threadId)) };
+  },
+  "threads.question": async (deps, input) => {
+    const threadId = readText(input, "threadId");
+    return { threadId, question: (await deps.question(threadId)) || null };
+  },
+  "t3.openThread": async (deps, input) => {
+    deps.openThread(readText(input, "threadId"));
+    return null;
+  },
+  "threads.snooze": async (deps, input) => {
+    const until = new Date(readText(input, "until"));
+    if (Number.isNaN(until.getTime())) throw invalid('"until" must be a date and time.');
+    await deps.snoozeThread(readText(input, "threadId"), until.toISOString());
+    return null;
+  },
 };
 
 /** The capability a method needs; the Git and diff methods all need `host.vcs-read`. */
 const CAPABILITY_OF: Readonly<Record<string, string>> = {
   "t3.openPluginSettings": SETTINGS_CAPABILITY,
+  "threads.pending": THREADS_READ_CAPABILITY,
+  "threads.lastReply": THREADS_READ_CAPABILITY,
+  "threads.question": THREADS_READ_CAPABILITY,
+  "t3.openThread": THREADS_READ_CAPABILITY,
+  "threads.snooze": THREADS_ORGANIZE_CAPABILITY,
 };
 
 /**
- * What a view's `callHost` reaches: a read-only slice of T3's Git, the diff panel, and the
- * caller's own settings page. A plugin that did not declare the capability a method needs is
+ * What a view's `callHost` reaches: a read-only slice of T3's Git, the diff panel, the thread
+ * list and replies, snoozing, and the caller's own settings page. A plugin that did not declare the capability a method needs is
  * denied it, as is any method not listed here.
  */
 export function createHostApi(deps: HostApiDeps) {

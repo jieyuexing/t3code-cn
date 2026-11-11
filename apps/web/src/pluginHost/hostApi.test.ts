@@ -11,6 +11,11 @@ function setup(capabilities: ReadonlyArray<string> = [CAPABILITY]) {
     fileContents: vi.fn(async () => ({ oldContents: "old", newContents: "new" })),
     openDiff: vi.fn(),
     openPluginSettings: vi.fn(),
+    pendingThreads: vi.fn(() => []),
+    lastReply: vi.fn(async () => "reply"),
+    question: vi.fn(async () => "Which table?"),
+    openThread: vi.fn(),
+    snoozeThread: vi.fn(async () => undefined),
   } satisfies Omit<HostApiDeps, "capabilities">;
   return { deps, call: createHostApi({ capabilities, ...deps }) };
 }
@@ -34,7 +39,66 @@ const previewOf = (kind: "working-tree" | "commit", diff: string) => ({
 
 const DENIED = { code: "denied" };
 
+const THREADS_READ = "host.threads-read";
+const THREADS_ORGANIZE = "host.threads-organize";
+
 describe("host api", () => {
+  it("keeps each thread method behind its own capability", async () => {
+    const calls = [
+      ["threads.pending", {}],
+      ["threads.lastReply", { threadId: "t1" }],
+      ["threads.question", { threadId: "t1" }],
+      ["t3.openThread", { threadId: "t1" }],
+      ["threads.snooze", { threadId: "t1", until: "2099-01-01T00:00:00Z" }],
+    ] as const;
+    for (const capabilities of [["views"], ["host.vcs-read"], ["settings"]]) {
+      const { deps, call } = setup(capabilities);
+      for (const [method, input] of calls) {
+        await expect(call(method, input)).rejects.toMatchObject(DENIED);
+      }
+      expect(deps.lastReply).not.toHaveBeenCalled();
+      expect(deps.question).not.toHaveBeenCalled();
+      expect(deps.openThread).not.toHaveBeenCalled();
+      expect(deps.snoozeThread).not.toHaveBeenCalled();
+    }
+    const reader = setup([THREADS_READ]);
+    await expect(reader.call("threads.snooze", calls[4][1])).rejects.toMatchObject(DENIED);
+    await expect(reader.call("threads.pending", {})).resolves.toEqual([]);
+    await expect(reader.call("t3.openThread", { threadId: "t1" })).resolves.toBeNull();
+    expect(reader.deps.openThread).toHaveBeenCalledWith("t1");
+    const organizer = setup([THREADS_ORGANIZE]);
+    await expect(organizer.call("threads.pending", {})).rejects.toMatchObject(DENIED);
+  });
+
+  it("returns the last reply clipped, and snoozes to a normalized time", async () => {
+    const { deps, call } = setup([THREADS_READ, THREADS_ORGANIZE]);
+    deps.lastReply.mockResolvedValue(`head${"x".repeat(60_000)}tail`);
+    const reply = (await call("threads.lastReply", { threadId: "t1" })) as {
+      text: string;
+      truncated: boolean;
+    };
+    expect(reply.text).toHaveLength(60_000);
+    expect(reply.text.endsWith("xxtail")).toBe(true);
+    expect(reply.truncated).toBe(true);
+    await expect(call("threads.question", { threadId: "t1" })).resolves.toEqual({
+      threadId: "t1",
+      question: "Which table?",
+    });
+    deps.question.mockResolvedValue("");
+    await expect(call("threads.question", { threadId: "t1" })).resolves.toEqual({
+      threadId: "t1",
+      question: null,
+    });
+    await call("threads.snooze", { threadId: "t1", until: "2099-01-01T09:00:00+09:00" });
+    expect(deps.snoozeThread).toHaveBeenCalledWith("t1", "2099-01-01T00:00:00.000Z");
+    await expect(
+      call("threads.snooze", { threadId: "t1", until: "tomorrow" }),
+    ).rejects.toMatchObject({ code: "invalid" });
+    await expect(call("threads.snooze", { until: "2099-01-01T00:00:00Z" })).rejects.toMatchObject({
+      code: "invalid",
+    });
+  });
+
   it("denies every method to a plugin that did not declare host.vcs-read", async () => {
     const { deps, call } = setup(["views"]);
     for (const method of ["vcs.status", "review.diffPreview", "t3.openDiff"]) {
