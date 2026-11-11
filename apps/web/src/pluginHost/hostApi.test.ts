@@ -81,6 +81,17 @@ describe("host api", () => {
       commitSha: "abc1234",
       file: { path: "src/a.ts", previousPath: null, sourceKind: "commit" },
     });
+    // A bare path is a file too, the same as `t3.openDiff` takes it.
+    await call("review.diffPreview", {
+      cwd: "/repo",
+      sourceKind: "working-tree",
+      file: "src/a.ts",
+    });
+    expect(deps.preview).toHaveBeenLastCalledWith({
+      cwd: "/repo",
+      sourceKind: "working-tree",
+      file: { path: "src/a.ts", previousPath: null, sourceKind: "working-tree" },
+    });
     await expect(
       call("review.diffPreview", { cwd: "/repo", sourceKind: "commit" }),
     ).rejects.toMatchObject({ code: "invalid" });

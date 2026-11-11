@@ -56,6 +56,8 @@ function readSource(input: Readonly<Record<string, unknown>>, key: "sourceKind" 
 
 function readFile(value: unknown) {
   if (value === undefined || value === null) return undefined;
+  if (typeof value === "string")
+    return { path: readText({ file: value }, "file"), previousPath: null };
   const file = readObject(value);
   return {
     path: readText(file, "path"),

@@ -33,7 +33,7 @@ export function useHostApi(options: {
   const fileContents = useAtomCommand(pluginHostEnvironment.diffFileContents, quietly);
   return createHostApi({
     capabilities,
-    // `localOnly` is what keeps this from fetching or asking a hosting provider.
+    // `localOnly` keeps this from fetching or reading the remote status.
     status: async ({ cwd }) =>
       unwrap(await status({ environmentId, input: { cwd, localOnly: true } })),
     preview: async (input) => unwrap(await preview({ environmentId, input })),

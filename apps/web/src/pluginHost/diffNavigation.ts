@@ -9,12 +9,34 @@ import type { DiffTarget } from "./hostApi";
 interface FileReveal {
   readonly filePath: string;
   readonly requestId: number;
+  /** The comparison the file was asked for in; the request ends when the panel shows another. */
+  readonly scope: string;
 }
+
+const scopeOf = (selection: { readonly kind: string; readonly sha?: string }) =>
+  selection.kind === "commit" ? `commit:${selection.sha}` : selection.kind;
 
 /** The file a plugin asked the thread's diff panel to bring into view; the panel reads it. */
 export const useDiffRevealStore = create<{ byThreadKey: Record<string, FileReveal> }>()(() => ({
   byThreadKey: {},
 }));
+
+// A request left standing would expand the file again whenever the user came back to that comparison.
+useDiffPanelStore.subscribe((state) => {
+  const { byThreadKey } = useDiffRevealStore.getState();
+  const stale = Object.entries(byThreadKey).filter(
+    ([threadKey, reveal]) =>
+      reveal.scope !== scopeOf(state.byThreadKey[threadKey] ?? { kind: "branch" }),
+  );
+  if (stale.length === 0) return;
+  useDiffRevealStore.setState({
+    byThreadKey: Object.fromEntries(
+      Object.entries(byThreadKey).filter(
+        ([threadKey]) => !stale.some(([key]) => key === threadKey),
+      ),
+    ),
+  });
+});
 
 export function usePluginDiffReveal(ref: ScopedThreadRef | null | undefined): FileReveal | null {
   return useDiffRevealStore((state) =>
@@ -43,7 +65,13 @@ export function openThreadDiff(ref: ScopedThreadRef, target: DiffTarget): void {
           ? rest
           : {
               ...rest,
-              [threadKey]: { filePath: target.file, requestId: (previous?.requestId ?? 0) + 1 },
+              [threadKey]: {
+                filePath: target.file,
+                requestId: (previous?.requestId ?? 0) + 1,
+                scope: scopeOf(
+                  useDiffPanelStore.getState().byThreadKey[threadKey] ?? { kind: "branch" },
+                ),
+              },
             },
     };
   });

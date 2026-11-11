@@ -15,6 +15,9 @@ function Probe() {
       <button type="button" onClick={() => setAppearanceMode("light")}>
         light
       </button>
+      <button type="button" onClick={() => setAppearanceMode("system")}>
+        system
+      </button>
       <output data-testid="context">{JSON.stringify(context)}</output>
     </div>
   );
@@ -27,16 +30,23 @@ const read = (screen: { container: HTMLElement }) =>
   };
 
 it("reads the computed theme variables and follows the app to the other scheme", async () => {
-  document.documentElement.style.setProperty("--background", "rgb(250, 250, 250)");
+  const root = document.documentElement;
+  root.style.setProperty("--background", "rgb(250, 250, 250)");
   await using screen = await render(<Probe />, { router: false });
-  await screen.getByText("light").click();
-  await expect.poll(() => read(screen).theme.scheme).toBe("light");
-  expect(read(screen)).toMatchObject({ cwd: "/work/a" });
-  const light = read(screen).theme.vars["--background"];
-  expect(light).toBeTruthy();
+  try {
+    await screen.getByText("light").click();
+    await expect.poll(() => read(screen).theme.scheme).toBe("light");
+    expect(read(screen)).toMatchObject({ cwd: "/work/a" });
+    const light = read(screen).theme.vars["--background"];
+    expect(light).toBeTruthy();
 
-  document.documentElement.style.setProperty("--background", "rgb(10, 10, 10)");
-  await screen.getByText("dark").click();
-  await expect.poll(() => read(screen).theme.scheme).toBe("dark");
-  await expect.poll(() => read(screen).theme.vars["--background"]).not.toBe(light);
+    root.style.setProperty("--background", "rgb(10, 10, 10)");
+    await screen.getByText("dark").click();
+    await expect.poll(() => read(screen).theme.scheme).toBe("dark");
+    await expect.poll(() => read(screen).theme.vars["--background"]).not.toBe(light);
+  } finally {
+    // The test chose an appearance; put it and the variable back for whatever runs next.
+    await screen.getByText("system").click();
+    root.style.removeProperty("--background");
+  }
 });

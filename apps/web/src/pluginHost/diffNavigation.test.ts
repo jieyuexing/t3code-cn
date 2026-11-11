@@ -46,4 +46,21 @@ describe("openThreadDiff", () => {
     openThreadDiff(ref, { kind: "working-tree" });
     expect(useDiffRevealStore.getState().byThreadKey[scopedThreadKey(ref)]).toBeUndefined();
   });
+
+  it("forgets a requested file once the user moves the panel to another comparison", () => {
+    const key = scopedThreadKey(ref);
+    openThreadDiff(ref, { kind: "commit", sha: "abc1234", file: "src/a.ts" });
+    expect(useDiffRevealStore.getState().byThreadKey[key]).toMatchObject({ filePath: "src/a.ts" });
+    // The same comparison chosen again keeps the request; a different one drops it.
+    useDiffPanelStore.getState().selectCommit(ref, "abc1234");
+    expect(useDiffRevealStore.getState().byThreadKey[key]).toBeDefined();
+    useDiffPanelStore.getState().selectGitScope(ref, "branch");
+    expect(useDiffRevealStore.getState().byThreadKey[key]).toBeUndefined();
+    useDiffPanelStore.getState().selectGitScope(ref, "unstaged");
+    expect(useDiffRevealStore.getState().byThreadKey[key]).toBeUndefined();
+
+    openThreadDiff(ref, { kind: "working-tree", file: "src/b.ts" });
+    useDiffPanelStore.getState().selectCommit(ref, "def5678");
+    expect(useDiffRevealStore.getState().byThreadKey[key]).toBeUndefined();
+  });
 });
