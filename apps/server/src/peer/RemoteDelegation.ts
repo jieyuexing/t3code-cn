@@ -31,6 +31,7 @@ import { chooseLoadBalancedEnvironment } from "@t3tools/shared/loadBalancing";
 
 import type * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import { EnvironmentToolkit } from "../mcp/toolkits/environment/tools.ts";
+import { OrchestratorToolkit } from "../mcp/toolkits/orchestrator/tools.ts";
 import { ProjectToolkit } from "../mcp/toolkits/project/tools.ts";
 import {
   resolveInteractionMode,
@@ -74,6 +75,10 @@ export interface PlacementRequest {
   readonly projectId?: ProjectId | undefined;
   /** The request has a form only this machine runs, such as attachments or a worktree. */
   readonly hereOnly: boolean;
+  /** The provider instance the work runs on; "inherit" is the calling thread's own. */
+  readonly providerInstanceId?: ProviderInstanceId | "inherit" | undefined;
+  /** A model that must be in that provider's catalog there. */
+  readonly model?: string | undefined;
 }
 
 /** Where an `"auto"` request runs. `environmentId` is undefined for this machine. */
@@ -240,13 +245,17 @@ const make = Effect.gen(function* () {
     function* (scope, request) {
       const here: Placement = { environmentId: undefined, projectId: undefined };
       if (request.hereOnly) return here;
-      const projectId =
-        request.projectId ??
-        (scope.thread === undefined
-          ? undefined
-          : (yield* threads
+      const shell =
+        scope.thread === undefined
+          ? null
+          : yield* threads
               .getThreadShell(scope.thread.threadId)
-              .pipe(Effect.orElseSucceed(() => null)))?.projectId);
+              .pipe(Effect.orElseSucceed(() => null));
+      const projectId = request.projectId ?? shell?.projectId;
+      const providerInstanceId =
+        request.providerInstanceId === "inherit"
+          ? shell?.modelSelection.instanceId
+          : request.providerInstanceId;
       const key = projectId === undefined ? undefined : yield* repositoryKeyOf(projectId);
       if (key === undefined) return here;
       // Not `links.list`, which probes every address of every link before it returns.
@@ -257,16 +266,37 @@ const make = Effect.gen(function* () {
       const read = Effect.fn("RemoteDelegation.placementRead")(function* (
         environmentId: EnvironmentId,
       ) {
-        const [environment, matches] = yield* Effect.all(
+        const [environment, matches, capabilities] = yield* Effect.all(
           [
             forwarding.call(scope, EnvironmentToolkit.tools.t3_environment_read, environmentId, {
               environmentId,
             }),
             projectsWithRepository(scope, environmentId, key),
+            // The default list is short; a model asked for is looked up by name.
+            providerInstanceId === undefined
+              ? Effect.void
+              : forwarding.call(
+                  scope,
+                  OrchestratorToolkit.tools.orchestrator_capabilities,
+                  environmentId,
+                  {
+                    environmentId,
+                    ...(request.model === undefined ? {} : { search: request.model }),
+                  },
+                ),
           ],
-          { concurrency: 2 },
+          { concurrency: 3 },
         );
-        return environment.hostResources === undefined || matches.length !== 1
+        const providerUsable =
+          capabilities === undefined ||
+          capabilities.providers.some(
+            (provider) =>
+              provider.providerInstanceId === providerInstanceId &&
+              provider.canRunChildTask &&
+              (request.model === undefined ||
+                provider.models.some((model) => model.id === request.model)),
+          );
+        return environment.hostResources === undefined || matches.length !== 1 || !providerUsable
           ? undefined
           : { environmentId, projectId: matches[0]!.id, resources: environment.hostResources };
       });

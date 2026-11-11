@@ -15,6 +15,7 @@ import {
   ProviderThreadId,
   type Project,
   type RepositoryIdentity,
+  type ServerProvider,
   RunId,
   ThreadId,
   TurnItemId,
@@ -98,6 +99,21 @@ const idle: HostResourcesSnapshot = {
 };
 const busy: HostResourcesSnapshot = { ...idle, cpuUtilization: 0.8 };
 
+/** The provider the box lists: ready, signed in, with the model the tasks ask for. */
+const codexReady: ServerProvider = {
+  instanceId,
+  driver,
+  enabled: true,
+  installed: true,
+  version: "test",
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-09-13T00:00:00.000Z",
+  models: [{ slug: "gpt-5.4", name: "gpt-5.4", isCustom: false, capabilities: null }],
+  slashCommands: [],
+  skills: [],
+};
+
 /** The thread the box launches for the task, which the test finishes. */
 interface BoxThread {
   readonly launched: Ref.Ref<ThreadId | null>;
@@ -148,6 +164,8 @@ interface BoxThread {
   readonly afterLaunch: Ref.Ref<Effect.Effect<void>>;
   /** What the box reports for its own load; `Effect.never` is a machine that does not answer. */
   readonly load: Ref.Ref<Effect.Effect<HostResourcesSnapshot>>;
+  /** The providers the box lists. */
+  readonly providers: Ref.Ref<ReadonlyArray<ServerProvider>>;
 }
 
 const makeBoxThread = Effect.gen(function* () {
@@ -184,6 +202,7 @@ const makeBoxThread = Effect.gen(function* () {
     sent: yield* Ref.make<ReadonlyArray<string>>([]),
     afterLaunch: yield* Ref.make<Effect.Effect<void>>(Effect.void),
     load: yield* Ref.make<Effect.Effect<HostResourcesSnapshot>>(Effect.succeed(idle)),
+    providers: yield* Ref.make<ReadonlyArray<ServerProvider>>([codexReady]),
   } satisfies BoxThread;
 });
 
@@ -514,9 +533,13 @@ const boxToolkitLayer = (thread: BoxThread) => {
       ),
     ),
     Layer.provide(
-      Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Ref.get(thread.providers) }),
     ),
-    Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
+    Layer.provide(
+      Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+        list: () => Effect.succeed([instanceId]),
+      }),
+    ),
     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
     Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
@@ -2052,6 +2075,42 @@ it.effect("auto leaves out a machine that is not a candidate", () =>
       yield* Deferred.await(asked);
       yield* TestClock.adjust("3 seconds");
       expect(yield* Fiber.join(waiting)).toEqual(here);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("auto leaves out a machine whose provider cannot run the task", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const request = { hereOnly: false, providerInstanceId: instanceId, model: "gpt-5.4" };
+      const there = { environmentId: box.environmentId, projectId: boxProject };
+      expect(yield* a.remote.place(parentScope, request)).toEqual(there);
+
+      // The model asked for is not in its catalog.
+      expect(yield* a.remote.place(parentScope, { ...request, model: "gpt-9" })).toEqual(here);
+      yield* a.call("delegate_task", {
+        task: "Run the suite wherever it is quiet.",
+        target: { environmentId: "auto", providerInstanceId: instanceId, model: "gpt-9" },
+      });
+      expect(yield* Ref.get(thread.launched)).toBeNull();
+
+      // The provider is signed out there, whether named or inherited from the thread.
+      yield* Ref.set(thread.providers, [{ ...codexReady, auth: { status: "unauthenticated" } }]);
+      expect(yield* a.remote.place(parentScope, request)).toEqual(here);
+      expect(
+        yield* a.remote.place(parentScope, { hereOnly: false, providerInstanceId: "inherit" }),
+      ).toEqual(here);
+
+      // A task that names only a model uses the thread's provider, which the box cannot run.
+      yield* a.call("delegate_task", {
+        task: "Run the suite wherever it is quiet.",
+        target: { environmentId: "auto", model: "gpt-5.4" },
+      });
+      expect(yield* Ref.get(thread.launched)).toBeNull();
+
+      // No provider named: nothing to check, as for a launch that leaves its model to the box.
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(there);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

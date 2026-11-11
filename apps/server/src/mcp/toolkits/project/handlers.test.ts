@@ -761,6 +761,14 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
     expect(here.launched).toMatchObject([{ projectId: here.projectId }]);
     expect(here.result).toMatchObject({ environmentId: "environment" });
 
+    // The provider and model it names are what the box must be able to run.
+    const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" };
+    yield* launchAuto(box, { modelSelection });
+    expect(asked.at(-1)).toMatchObject({
+      providerInstanceId: modelSelection.instanceId,
+      model: "gpt-5.4",
+    });
+
     // Without "auto", the id is taken as given and the project is not translated.
     const named = yield* launchAuto(box, { environmentId: box });
     expect(sent.at(-1)).toMatchObject({
@@ -788,7 +796,14 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
         },
       ],
     });
-    expect(asked.map((request) => request.hereOnly)).toEqual([false, false, true, true, true]);
-    expect(sent).toHaveLength(2);
+    expect(asked.map((request) => request.hereOnly)).toEqual([
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+    ]);
+    expect(sent).toHaveLength(3);
   }),
 );
