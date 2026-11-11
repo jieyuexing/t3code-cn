@@ -36,10 +36,12 @@
     <p id="status">Loading…</p>
     <ul id="files"></ul>
     <button id="open" type="button" disabled>Open T3 diff</button>
+    <button id="settings" type="button">Open plugin settings</button>
     <script>
       // The host bridge: announce `ready` to the parent, receive one MessagePort, then exchange JSON strings on it.
       // `init` and later `context` messages carry `{ cwd, focus, theme: { scheme, vars } }`; `callHost` reaches the
-      // host's read-only Git calls and the diff panel, and needs the `host.vcs-read` capability.
+      // host's read-only Git calls and the diff panel, and needs the `host.vcs-read` capability. `t3.openPluginSettings`
+      // opens this plugin's own entry on T3's settings page and needs the `settings` capability.
       const parentWindow = window.parent;
       const pending = new Map();
       let port = null;
@@ -93,6 +95,9 @@
           kind: "working-tree",
           ...(firstFile === null ? {} : { file: firstFile }),
         });
+      });
+      document.getElementById("settings").addEventListener("click", () => {
+        callHost("t3.openPluginSettings", {});
       });
       window.addEventListener("message", (event) => {
         const data = event.data;

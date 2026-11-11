@@ -3091,6 +3091,18 @@
     "category": "internal",
     "reason": "原子标签，仅用于调试与观测"
   },
+  "environment-command:plugin-host:diff-file-contents": {
+    "category": "code",
+    "reason": "Atom 操作标识，用于状态/诊断，不是用户界面文案。"
+  },
+  "environment-command:plugin-host:diff-preview": {
+    "category": "code",
+    "reason": "Atom 操作标识，用于状态/诊断，不是用户界面文案。"
+  },
+  "environment-command:plugin-host:vcs-status": {
+    "category": "code",
+    "reason": "Atom 操作标识，用于状态/诊断，不是用户界面文案。"
+  },
   "environment-data:agent-sessions:import": {
     "category": "code",
     "reason": "查询/原子标签标识符"

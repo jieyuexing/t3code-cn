@@ -2,13 +2,22 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "example.git-status",
   "version": "0.1.0",
-  "description": "Shows the thread's directory, T3's theme and the changed files, and opens T3's diff panel.",
+  "description": "Shows the thread's directory, T3's theme and the changed files, and opens T3's diff panel and its own settings.",
   "extensions": {
     "com.jieyuexing.t3code": {
       "apiVersion": 1,
       "title": "Git Status",
       "entry": "./index.mjs",
-      "capabilities": ["views", "host.vcs-read"],
+      "capabilities": ["views", "settings", "host.vcs-read"],
+      "settings": [
+        {
+          "type": "text",
+          "key": "note",
+          "label": "Note",
+          "description": "Stored only to show the settings form; nothing reads it.",
+          "default": ""
+        }
+      ],
       "views": [
         {
           "id": "status",

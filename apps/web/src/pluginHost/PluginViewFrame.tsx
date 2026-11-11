@@ -73,7 +73,9 @@ export function PluginViewFrame(props: {
     onReload,
   } = props;
   const call = useStableCallback(usePluginHostCall(environmentId));
-  const callHost = useStableCallback(useHostApi({ environmentId, capabilities, threadRef }));
+  const callHost = useStableCallback(
+    useHostApi({ environmentId, pluginId, capabilities, threadRef }),
+  );
   const context = usePluginViewContext(cwd, focus);
   const contextRef = useRef(context);
   const bridgeRef = useRef<{ readonly pushContext: () => void } | null>(null);

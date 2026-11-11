@@ -3,12 +3,14 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
+import type { EnvironmentId, PluginId, ScopedThreadRef } from "@t3tools/contracts";
 
 import { useAtomCommand } from "../state/use-atom-command";
 import { BridgeCallError } from "./bridge";
 import { openThreadDiff } from "./diffNavigation";
 import { createHostApi } from "./hostApi";
+import { pluginSettingsKey, requestPluginSettings } from "./pluginSettingsStore";
 import { pluginHostEnvironment } from "./state";
 
 function unwrap<A>(result: AtomCommandResult<A, unknown>): A {
@@ -20,13 +22,16 @@ function unwrap<A>(result: AtomCommandResult<A, unknown>): A {
   });
 }
 
-/** What a view's `callHost` runs: the environment's read-only Git calls, and the thread's diff panel. */
+/** What a view's `callHost` runs: the environment's read-only Git calls, the thread's diff panel, and the caller's own settings page. */
 export function useHostApi(options: {
   readonly environmentId: EnvironmentId;
+  /** The plugin whose view calls; it is the only plugin whose settings the view can open. */
+  readonly pluginId: PluginId;
   readonly capabilities: ReadonlyArray<string>;
   readonly threadRef: ScopedThreadRef | null;
 }) {
-  const { environmentId, capabilities, threadRef } = options;
+  const { environmentId, pluginId, capabilities, threadRef } = options;
+  const navigate = useNavigate();
   const quietly = { reportFailure: false };
   const status = useAtomCommand(pluginHostEnvironment.vcsStatus, quietly);
   const preview = useAtomCommand(pluginHostEnvironment.diffPreview, quietly);
@@ -43,6 +48,10 @@ export function useHostApi(options: {
         throw new BridgeCallError({ code: "call-failed", message: "No thread is open." });
       }
       openThreadDiff(threadRef, target);
+    },
+    openPluginSettings: () => {
+      requestPluginSettings(pluginSettingsKey(environmentId, pluginId));
+      void navigate({ to: "/settings/plugins", search: { machine: environmentId } });
     },
   });
 }
