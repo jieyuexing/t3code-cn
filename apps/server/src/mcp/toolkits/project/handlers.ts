@@ -289,6 +289,8 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
     // Attachments are pending uploads here, and only a project's checkout is the same on every machine.
     (input) => ({
       projectId: input.projectId,
+      providerInstanceId: input.modelSelection?.instanceId,
+      model: input.modelSelection?.model,
       hereOnly:
         input.scratch === true ||
         (input.attachments?.length ?? 0) > 0 ||
