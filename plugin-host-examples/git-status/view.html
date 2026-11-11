@@ -32,12 +32,13 @@
   </head>
   <body>
     <p>Directory: <code id="cwd">…</code></p>
+    <p>File panel: <code id="focus">…</code></p>
     <p id="status">Loading…</p>
     <ul id="files"></ul>
     <button id="open" type="button" disabled>Open T3 diff</button>
     <script>
       // The host bridge: announce `ready` to the parent, receive one MessagePort, then exchange JSON strings on it.
-      // `init` and later `context` messages carry `{ cwd, theme: { scheme, vars } }`; `callHost` reaches the
+      // `init` and later `context` messages carry `{ cwd, focus, theme: { scheme, vars } }`; `callHost` reaches the
       // host's read-only Git calls and the diff panel, and needs the `host.vcs-read` capability.
       const parentWindow = window.parent;
       const pending = new Map();
@@ -56,6 +57,9 @@
           document.documentElement.style.setProperty(name, value);
         }
         document.getElementById("cwd").textContent = context.cwd ?? "(no thread)";
+        document.getElementById("focus").textContent = context.focus
+          ? `${context.focus.kind} ${context.focus.path}`
+          : "(none)";
         return context.cwd;
       };
       const show = async (cwd) => {

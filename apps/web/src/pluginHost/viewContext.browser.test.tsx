@@ -6,7 +6,7 @@ import { usePluginViewContext } from "./viewContext";
 
 function Probe() {
   const { setAppearanceMode } = useTheme();
-  const context = usePluginViewContext("/work/a");
+  const context = usePluginViewContext("/work/a", null);
   return (
     <div>
       <button type="button" onClick={() => setAppearanceMode("dark")}>

@@ -12,7 +12,12 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/ui/button";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { usePreparedConnection } from "../state/session";
-import { attachPluginViewBridge, BridgeCallError, type BridgeErrorCode } from "./bridge";
+import {
+  attachPluginViewBridge,
+  BridgeCallError,
+  type BridgeErrorCode,
+  type PluginFocus,
+} from "./bridge";
 import { useHostApi } from "./useHostApi";
 import { pluginHostFailureMessage, usePluginHostCall } from "./usePluginHost";
 import { usePluginViewContext } from "./viewContext";
@@ -50,6 +55,8 @@ export function PluginViewFrame(props: {
   readonly capabilities: ReadonlyArray<string>;
   /** The thread's working directory, shown to the page as its `context`. */
   readonly cwd: string | null;
+  /** The file or folder the thread's file panel last stood on, shown to the page as its `context`. */
+  readonly focus: PluginFocus | null;
   readonly threadRef: ScopedThreadRef | null;
   readonly onReload: () => void;
 }) {
@@ -61,15 +68,16 @@ export function PluginViewFrame(props: {
     generation,
     capabilities,
     cwd,
+    focus,
     threadRef,
     onReload,
   } = props;
   const call = useStableCallback(usePluginHostCall(environmentId));
   const callHost = useStableCallback(useHostApi({ environmentId, capabilities, threadRef }));
-  const context = usePluginViewContext(cwd);
+  const context = usePluginViewContext(cwd, focus);
   const contextRef = useRef(context);
   const bridgeRef = useRef<{ readonly pushContext: () => void } | null>(null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tells the page's open bridge that the thread's directory or the theme changed
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tells the page's open bridge that the thread's directory, its file focus or the theme changed
   useEffect(() => {
     contextRef.current = context;
     bridgeRef.current?.pushContext();

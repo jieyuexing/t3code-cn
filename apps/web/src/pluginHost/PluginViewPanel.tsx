@@ -7,6 +7,7 @@ import type { PluginSurface, RightPanelSurface } from "../rightPanelStore";
 import { PluginServicePanel } from "./PluginServicePanel";
 import { PluginViewFrame } from "./PluginViewFrame";
 import { serviceOfViewId } from "./serviceMethods";
+import { usePluginFocus } from "./usePluginFocus";
 import { useCanCallPluginHost, usePluginHostSnapshot } from "./usePluginHost";
 
 /**
@@ -52,6 +53,7 @@ function PluginViewTab(props: {
   const canCall = useCanCallPluginHost(environmentId);
   const { snapshot, failed } = usePluginHostSnapshot(environmentId);
   const [reloads, setReloads] = useState(0);
+  const focus = usePluginFocus(environmentId, threadRef ?? null, files?.workspaceRoot ?? null);
   const view =
     snapshot?.views.find(
       (candidate) => candidate.pluginId === surface.pluginId && candidate.viewId === surface.viewId,
@@ -87,7 +89,7 @@ function PluginViewTab(props: {
       </p>
     );
   }
-  if (!visible) return null;
+  if (!visible || focus === undefined) return null;
   return (
     <PluginViewFrame
       key={`${view.generation}:${surface.id}:${reloads}`}
@@ -100,6 +102,7 @@ function PluginViewTab(props: {
         snapshot?.plugins.find((plugin) => plugin.id === view.pluginId)?.capabilities ?? []
       }
       cwd={files?.workspaceRoot ?? null}
+      focus={focus}
       threadRef={threadRef ?? null}
       onReload={() => setReloads((value) => value + 1)}
     />
