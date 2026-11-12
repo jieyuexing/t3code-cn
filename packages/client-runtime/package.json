@@ -23,6 +23,10 @@
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"
     },
+    "./composer-thread-query-zh": {
+      "types": "./src/composerThreadQuery.zh.ts",
+      "default": "./src/composerThreadQuery.zh.ts"
+    },
     "./composer-model-mentions": {
       "types": "./src/composerModelMentions.ts",
       "default": "./src/composerModelMentions.ts"

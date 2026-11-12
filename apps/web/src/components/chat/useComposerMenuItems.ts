@@ -2,6 +2,7 @@ import {
   matchComposerEnvironmentItems,
   matchComposerThreadItems,
 } from "@t3tools/client-runtime/composerThreadItems";
+import { expandComposerThreadQuery } from "@t3tools/client-runtime/composer-thread-query-zh";
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import type {
@@ -106,6 +107,8 @@ export function useComposerMenuItems({
   const [now] = useState(() => Date.now());
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
+  const expandedPathTriggerQuery =
+    composerTrigger?.kind === "path" ? expandComposerThreadQuery(composerTrigger.query) : null;
   const pullRequestTriggerQuery =
     composerTrigger?.kind === "pull-request" ? composerTrigger.query : "";
   const pullRequestTextQuery =
@@ -121,6 +124,13 @@ export function useComposerMenuItems({
   const environmentThreadShells = useVisibleThreadShells(isPathTrigger);
   // Mounts older settled threads matching the mention, which shells may leave out.
   useThreadSearch(isPathTrigger ? [environmentId] : [], pathTriggerQuery, { titlesOnly: true });
+  // Titles that skip a word only match the split query, so older settled ones need their own
+  // search; the client's own fallback then ranks both from the shells they mount.
+  useThreadSearch(
+    isPathTrigger && expandedPathTriggerQuery !== null ? [environmentId] : [],
+    expandedPathTriggerQuery ?? "",
+    { titlesOnly: true },
+  );
   // The user's machines feed `@` machine matches; the catalog summary is cheap and stable.
   const environmentIdentities = useEnvironmentIdentities();
   const environmentMachines = useEnvironmentMachines();

@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@t3tools/shared/paletteSearch";
 
+import { expandComposerThreadQuery } from "./composerThreadQuery.zh.ts";
 import type { EnvironmentThreadShell } from "./state/models.ts";
 import { threadSearchSubject, type ThreadSearchShell } from "./state/threadSearch.ts";
 
@@ -49,12 +50,18 @@ export function matchComposerThreadItems(input: {
       shell.archivedAt === null &&
       isListedThreadLineage(shell.lineage),
   );
-  return rankSearchItems(candidates, (shell, options) =>
-    scoreThreadSearch(query, threadSearchSubject(shell, null), input.now, {
-      ...options,
-      picks: false,
-    }),
-  )
+  const rank = (normalizedQuery: string) =>
+    rankSearchItems(candidates, (shell, options) =>
+      scoreThreadSearch(normalizedQuery, threadSearchSubject(shell, null), input.now, {
+        ...options,
+        picks: false,
+      }),
+    );
+  // Fork fallback: a title that skips a word ("水墨同题 · Grok 4.7" for "水墨grok") only
+  // matches once the query is split, so it runs after the query as typed finds nothing.
+  const ranked = rank(query);
+  const expandedQuery = ranked.length === 0 ? expandComposerThreadQuery(query) : null;
+  return (expandedQuery === null ? ranked : rank(expandedQuery))
     .slice(0, COMPOSER_THREAD_RESULT_LIMIT)
     .map(({ item: shell }) => {
       const machine =
