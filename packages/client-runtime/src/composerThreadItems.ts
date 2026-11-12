@@ -59,24 +59,23 @@ export function matchComposerThreadItems(input: {
     );
   // Fork fallback: a title that skips a word ("水墨同题 · Grok 4.7" for "水墨grok") only
   // matches once the query is split, so it runs after the query as typed finds nothing.
-  let ranked = rank(query);
-  if (ranked.length === 0) {
-    const expandedQuery = expandComposerThreadQuery(query);
-    if (expandedQuery !== null) ranked = rank(expandedQuery);
-  }
-  return ranked.slice(0, COMPOSER_THREAD_RESULT_LIMIT).map(({ item: shell }) => {
-    const machine =
-      shell.environmentId === input.environmentId
-        ? undefined
-        : input.linkedEnvironments.get(shell.environmentId);
-    return {
-      id: `thread:${shell.environmentId}:${shell.id}`,
-      type: "thread",
-      thread: { environmentId: shell.environmentId, threadId: shell.id },
-      label: shell.title,
-      description: machine === undefined ? "Thread" : `Thread on ${machine}`,
-    };
-  });
+  const ranked = rank(query);
+  const expandedQuery = ranked.length === 0 ? expandComposerThreadQuery(query) : null;
+  return (expandedQuery === null ? ranked : rank(expandedQuery))
+    .slice(0, COMPOSER_THREAD_RESULT_LIMIT)
+    .map(({ item: shell }) => {
+      const machine =
+        shell.environmentId === input.environmentId
+          ? undefined
+          : input.linkedEnvironments.get(shell.environmentId);
+      return {
+        id: `thread:${shell.environmentId}:${shell.id}`,
+        type: "thread",
+        thread: { environmentId: shell.environmentId, threadId: shell.id },
+        label: shell.title,
+        description: machine === undefined ? "Thread" : `Thread on ${machine}`,
+      };
+    });
 }
 
 export interface ComposerEnvironmentCandidate {
