@@ -81,7 +81,35 @@ const CHILD_ENV_KEYS = [
   "LANG",
   "LC_ALL",
 ];
+/** A plugin that fetches with the environment's own proxy keeps working; no proxy is invented. */
+const CHILD_PROXY_ENV_KEYS = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "all_proxy",
+];
 const STDERR_TAIL_BYTES = 2048;
+
+/** The child's environment: the fixed keys plus the server's proxies, which Node's fetch then honors. */
+export function childEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: "1" };
+  for (const key of [...CHILD_ENV_KEYS, ...CHILD_PROXY_ENV_KEYS]) {
+    const value = hostEnvironment[key];
+    if (value !== undefined) environment[key] = value;
+  }
+  if (
+    environment.HTTP_PROXY !== undefined ||
+    environment.HTTPS_PROXY !== undefined ||
+    environment.http_proxy !== undefined ||
+    environment.https_proxy !== undefined
+  )
+    environment.NODE_USE_ENV_PROXY = "1";
+  return environment;
+}
 
 interface CallFailure {
   readonly reason: PluginCallError["reason"];
@@ -107,11 +135,7 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
   let stderrTail = "";
 
   const hostEnvironment = yield* HostProcess.Environment;
-  const environment: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: "1" };
-  for (const key of CHILD_ENV_KEYS) {
-    const value = hostEnvironment[key];
-    if (value !== undefined) environment[key] = value;
-  }
+  const environment = childEnvironment(hostEnvironment);
 
   const child = yield* Effect.acquireRelease(
     Effect.try({

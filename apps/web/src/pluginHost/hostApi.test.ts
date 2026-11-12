@@ -16,6 +16,7 @@ function setup(capabilities: ReadonlyArray<string> = [CAPABILITY]) {
     question: vi.fn(async () => "Which table?"),
     openThread: vi.fn(),
     snoozeThread: vi.fn(async () => undefined),
+    openUrl: vi.fn(async () => undefined),
   } satisfies Omit<HostApiDeps, "capabilities">;
   return { deps, call: createHostApi({ capabilities, ...deps }) };
 }
@@ -41,6 +42,7 @@ const DENIED = { code: "denied" };
 
 const THREADS_READ = "host.threads-read";
 const THREADS_ORGANIZE = "host.threads-organize";
+const OPEN_URL = "host.open-url";
 
 describe("host api", () => {
   it("keeps each thread method behind its own capability", async () => {
@@ -97,6 +99,21 @@ describe("host api", () => {
     await expect(call("threads.snooze", { until: "2099-01-01T00:00:00Z" })).rejects.toMatchObject({
       code: "invalid",
     });
+  });
+
+  it("opens only http(s) URLs, and only with host.open-url", async () => {
+    const { deps, call } = setup([OPEN_URL]);
+    await expect(call("t3.openUrl", { url: "https://example.com/a" })).resolves.toBeNull();
+    expect(deps.openUrl).toHaveBeenCalledWith("https://example.com/a");
+    for (const url of ["javascript:alert(1)", "file:///etc/passwd", "data:text/html,hi", "/x"]) {
+      await expect(call("t3.openUrl", { url })).rejects.toMatchObject({ code: "invalid" });
+    }
+    expect(deps.openUrl).toHaveBeenCalledTimes(1);
+    const denied = setup([CAPABILITY]);
+    await expect(denied.call("t3.openUrl", { url: "https://example.com/" })).rejects.toMatchObject(
+      DENIED,
+    );
+    expect(denied.deps.openUrl).not.toHaveBeenCalled();
   });
 
   it("denies every method to a plugin that did not declare host.vcs-read", async () => {

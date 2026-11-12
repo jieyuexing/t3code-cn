@@ -5,7 +5,7 @@ t3code-zh 自建的通用插件系统，语义参照 Cordis：插件按清单声
 ## 现行形态
 
 - **清单**：插件目录根上的 `plugin.json`，按 Agent Plugins 1.0；T3 专有字段放在 `extensions["com.jieyuexing.t3code"]`，包括 `entry`、`capabilities`、`inject`、`provides`、`views`、`title`。格式以 `packages/contracts/src/pluginHost/manifest.ts` 为准，写法看 `plugin-host-examples/` 下的三个示例。
-- **运行**：每个插件跑在一个受监督的子进程里，插件用到才启动。这是受信的本机代码，不是沙箱。子进程入口是 `apps/server/src/pluginHost/childRuntime.ts`。
+- **运行**：每个插件跑在一个受监督的子进程里，插件用到才启动。这是受信的本机代码，不是沙箱。子进程入口是 `apps/server/src/pluginHost/childRuntime.ts`。子进程环境只带 `PATH`、`HOME` 等 10 个键；服务器自己带 `HTTP(S)_PROXY`／`NO_PROXY` 时一并透传并置 `NODE_USE_ENV_PROXY=1`，插件用 `fetch` 抓取即走同一代理，服务器没有代理变量时不新增任何东西。
 - **服务**：服务名全局唯一。提供方停用、隔离或重载时，依赖它的插件进入 `waiting`。方法标 `"agent": true` 的进 Agent 工具 `plugin_services`／`plugin_call`；标 `"ui": true` 的进命令面板和服务面板。
 - **视图**：整页 HTML，放在沙箱 iframe 里；可从命令面板、右侧面板空状态的「打开视图」列表和标签栏 “+” 菜单打开（后两处在内置项之后一行一个，没有快捷键，宿主关闭或没有视图时不出现，逻辑在 `launcherViews.ts`、`PluginLauncher.tsx`，用路由里的当前线程，草稿线程和拉取请求页没有），经 MessagePort 桥调用插件处理器，或调用插件注入的服务。消息见下文「视图桥」。
 - **开关**：设置页「插件」按环境管理，环境级总开关默认关。
@@ -28,7 +28,7 @@ t3code-zh 自建的通用插件系统，语义参照 Cordis：插件按清单声
   - `kind` 还没读出来时不发猜测：已发过则维持上一个答案，从没发过则视图暂不挂载（`init` 之前等它）。读失败（缺文件、无读权限）按 `file`。
   - 插件视图只在自己的标签可见时挂载，用户到文件标签再回来是新的 `init`；在线收到 `context` 变化的场景主要是被记住的标签在插件可见时被关掉。
 - **主题变量**：`--background` `--foreground` `--muted` `--card` `--popover` `--secondary` `--primary` `--accent` `--destructive` `--success` `--warning` `--info` `--code-background`，其中除 `--foreground` 外各项另有 `-foreground`；另有 `--border` `--input` `--ring` `--warning-surface` `--radius` `--font-sans` `--font-mono`。清单在 `apps/web/src/pluginHost/viewContext.ts`。
-- **`callHost`**：`{_tag:"callHost", id, method, input}`，宿主回 `result` 或 `error`。每个方法要求清单 `capabilities` 含对应能力（随同意摘要，改了要重新同意）：`t3.openPluginSettings` 要 `"settings"`；`threads.pending`、`threads.lastReply`、`threads.question`、`t3.openThread` 要 `"host.threads-read"`；`threads.snooze` 要 `"host.threads-organize"`（写，单独声明、单独同意）；其余都要 `"host.vcs-read"`。没声明、或 `method` 不在下表，一律回 `error`，`code` 为 `denied`。Git、差异与线程类调用用当前用户自己的连接代为发出，页面碰不到 T3 的 API（视图 CSP 不变）。结果超过 64K 回 `too-large`。
+- **`callHost`**：`{_tag:"callHost", id, method, input}`，宿主回 `result` 或 `error`。每个方法要求清单 `capabilities` 含对应能力（随同意摘要，改了要重新同意）：`t3.openPluginSettings` 要 `"settings"`；`threads.pending`、`threads.lastReply`、`threads.question`、`t3.openThread` 要 `"host.threads-read"`；`threads.snooze` 要 `"host.threads-organize"`（写，单独声明、单独同意）；`t3.openUrl` 要 `"host.open-url"`（只放行 `http:`／`https:`，走系统浏览器）；其余都要 `"host.vcs-read"`。没声明、或 `method` 不在下表，一律回 `error`，`code` 为 `denied`。Git、差异与线程类调用用当前用户自己的连接代为发出，页面碰不到 T3 的 API（视图 CSP 不变）。结果超过 64K 回 `too-large`。
 
 | `method`                  | `input`                                                          | 结果                                                                                                                                                                   |
 | ------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -42,6 +42,7 @@ t3code-zh 自建的通用插件系统，语义参照 Cordis：插件按清单声
 | `threads.question`        | `{threadId}`                                                     | `{threadId, question}`：该线程最近一次结构化提问的第一个问题，没有则 `null`                                                                                            |
 | `t3.openThread`           | `{threadId}`                                                     | 在当前窗口打开该线程；返回 `null`                                                                                                                                      |
 | `threads.snooze`          | `{threadId, until}`                                              | 走 T3 的稍后处理命令与权限，`until` 是带时区的时间，返回 `null`；线程不能稍后处理（有待审批等）时由命令回 `call-failed`                                                |
+| `t3.openUrl`              | `{url}`                                                          | 在系统浏览器打开一个绝对 `http:`／`https:` 地址，返回 `null`；其他协议、相对路径或解析失败回 `invalid`                                                                 |
 
 只读依据：`vcs.refreshStatus` 的 `localOnly` 走 `VcsStatusBroadcaster.refreshStatus` 的本地分支（`VcsStatusBroadcaster.ts:536-545`），只重算本地状态、用缓存的远端部分，不 fetch、不读远端状态；Git 命令带 `GIT_OPTIONAL_LOCKS=0`（`GitVcsDriverCore.ts:983`）。一个例外：远端地址是 T3 认不出的主机时，读本地状态要识别托管平台，会按 `discovery.ts:378-405` 跑各平台 CLI 的认证探测（结果有缓存），T3 自己的界面读状态走的也是这条。差异预览的未跟踪文件用临时索引（复制真索引到临时文件，在副本里 `add --intent-to-add`，`GitVcsDriverCore.ts:3058-3189`），不写仓库。差异类调用的 `cwd` 由服务端 `assertWorkspaceBoundCwd` 限在已登记的工作区内。第一版不开放任何写接口（`git.runStackedAction`、`vcs.pull`、`switchRef` 等）。
 
