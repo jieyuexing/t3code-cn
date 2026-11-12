@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@t3tools/shared/paletteSearch";
 
+import { expandComposerThreadQuery } from "./composerThreadQuery.zh.ts";
 import type { EnvironmentThreadShell } from "./state/models.ts";
 import { threadSearchSubject, type ThreadSearchShell } from "./state/threadSearch.ts";
 
@@ -49,26 +50,33 @@ export function matchComposerThreadItems(input: {
       shell.archivedAt === null &&
       isListedThreadLineage(shell.lineage),
   );
-  return rankSearchItems(candidates, (shell, options) =>
-    scoreThreadSearch(query, threadSearchSubject(shell, null), input.now, {
-      ...options,
-      picks: false,
-    }),
-  )
-    .slice(0, COMPOSER_THREAD_RESULT_LIMIT)
-    .map(({ item: shell }) => {
-      const machine =
-        shell.environmentId === input.environmentId
-          ? undefined
-          : input.linkedEnvironments.get(shell.environmentId);
-      return {
-        id: `thread:${shell.environmentId}:${shell.id}`,
-        type: "thread",
-        thread: { environmentId: shell.environmentId, threadId: shell.id },
-        label: shell.title,
-        description: machine === undefined ? "Thread" : `Thread on ${machine}`,
-      };
-    });
+  const rank = (normalizedQuery: string) =>
+    rankSearchItems(candidates, (shell, options) =>
+      scoreThreadSearch(normalizedQuery, threadSearchSubject(shell, null), input.now, {
+        ...options,
+        picks: false,
+      }),
+    );
+  // Fork fallback: a title that skips a word ("水墨同题 · Grok 4.7" for "水墨grok") only
+  // matches once the query is split, so it runs after the query as typed finds nothing.
+  let ranked = rank(query);
+  if (ranked.length === 0) {
+    const expandedQuery = expandComposerThreadQuery(query);
+    if (expandedQuery !== null) ranked = rank(expandedQuery);
+  }
+  return ranked.slice(0, COMPOSER_THREAD_RESULT_LIMIT).map(({ item: shell }) => {
+    const machine =
+      shell.environmentId === input.environmentId
+        ? undefined
+        : input.linkedEnvironments.get(shell.environmentId);
+    return {
+      id: `thread:${shell.environmentId}:${shell.id}`,
+      type: "thread",
+      thread: { environmentId: shell.environmentId, threadId: shell.id },
+      label: shell.title,
+      description: machine === undefined ? "Thread" : `Thread on ${machine}`,
+    };
+  });
 }
 
 export interface ComposerEnvironmentCandidate {
