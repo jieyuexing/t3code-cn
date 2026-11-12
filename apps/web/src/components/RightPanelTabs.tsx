@@ -105,6 +105,7 @@ import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
 import { surfaceShortcutKey } from "~/lib/surfaceShortcutKey";
 import { PluginTabIcon } from "~/pluginHost/PluginTabIcon";
+import { PluginLauncherMenuItems, PluginLauncherRows } from "~/pluginHost/PluginLauncher";
 
 export interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -562,6 +563,7 @@ function RightPanelEmptyState(props: {
               />
             ),
           )}
+          <PluginLauncherRows />
         </div>
       </div>
     </div>
@@ -1471,6 +1473,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       </SurfaceMenuItem>
                     );
                   })}
+                  <PluginLauncherMenuItems />
                 </MenuPopup>
               </Menu>
             ) : null}

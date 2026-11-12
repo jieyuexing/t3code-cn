@@ -7,7 +7,7 @@ t3code-zh 自建的通用插件系统，语义参照 Cordis：插件按清单声
 - **清单**：插件目录根上的 `plugin.json`，按 Agent Plugins 1.0；T3 专有字段放在 `extensions["com.jieyuexing.t3code"]`，包括 `entry`、`capabilities`、`inject`、`provides`、`views`、`title`。格式以 `packages/contracts/src/pluginHost/manifest.ts` 为准，写法看 `plugin-host-examples/` 下的三个示例。
 - **运行**：每个插件跑在一个受监督的子进程里，插件用到才启动。这是受信的本机代码，不是沙箱。子进程入口是 `apps/server/src/pluginHost/childRuntime.ts`。
 - **服务**：服务名全局唯一。提供方停用、隔离或重载时，依赖它的插件进入 `waiting`。方法标 `"agent": true` 的进 Agent 工具 `plugin_services`／`plugin_call`；标 `"ui": true` 的进命令面板和服务面板。
-- **视图**：整页 HTML，放在沙箱 iframe 里，经 MessagePort 桥调用插件处理器，或调用插件注入的服务。消息见下文「视图桥」。
+- **视图**：整页 HTML，放在沙箱 iframe 里；可从命令面板、右侧面板空状态的「打开视图」列表和标签栏 “+” 菜单打开（后两处在内置项之后一行一个，没有快捷键，宿主关闭或没有视图时不出现，逻辑在 `launcherViews.ts`、`PluginLauncher.tsx`，用路由里的当前线程，草稿线程和拉取请求页没有），经 MessagePort 桥调用插件处理器，或调用插件注入的服务。消息见下文「视图桥」。
 - **开关**：设置页「插件」按环境管理，环境级总开关默认关。
 - **设置项**：清单 `settings` 声明字段（`text`、`boolean`、`number`，暂无 `select`、`secret`）。设置页插件行声明了设置项就显示「设置」按钮和“N 项设置”，点开在行下方展开表单（`PluginSettingsForm.tsx`），经已有的 `setSetting` 保存：文本、数字回车或离开输入框时保存，开关切换即保存，数字不是有限数字时就地提示、不保存；值不等于默认值时显示“恢复默认（默认值）”，保存成功短暂显示“已保存”，宿主拒绝时错误显示在字段下方、输入保留；没有管理权限时只读；停用、出错或被隔离的插件照样可以改。设置按环境保存，不分项目；写入后插件下一次读取即生效，不用重载。
 - **Cordis 写法**：可选的适配包在 `plugin-host-cordis/`，不进 pnpm workspace，自带 npm 锁文件，`cordis` 版本固定在这里，宿主代码不依赖它。
@@ -51,48 +51,48 @@ t3code-zh 自建的通用插件系统，语义参照 Cordis：插件按清单声
 
 ## 自有目录
 
-| 目录                                               | 内容                                               |
-| -------------------------------------------------- | -------------------------------------------------- |
-| `packages/contracts/src/pluginHost/`               | 清单、RPC 载荷与快照 schema                        |
-| `apps/server/src/pluginHost/`                      | 加载、对账、子进程、服务转发、Agent 工具、视图交付 |
-| `apps/web/src/pluginHost/`                         | 视图框与桥、命令面板项、服务面板、设置页           |
-| `packages/client-runtime/src/state/pluginHost*.ts` | 网页端按环境的快照状态                             |
-| `plugin-host-examples/`                            | 示例 `echo-clock`、`greeter`、`git-status`         |
-| `plugin-host-cordis/`                              | 可选的 Cordis 适配包与示例 `example.counter`       |
+| 目录                                               | 内容                                                                                  |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `packages/contracts/src/pluginHost/`               | 清单、RPC 载荷与快照 schema                                                           |
+| `apps/server/src/pluginHost/`                      | 加载、对账、子进程、服务转发、Agent 工具、视图交付                                    |
+| `apps/web/src/pluginHost/`                         | 视图框与桥、命令面板项、右侧面板「打开视图」与 “+” 菜单里的视图入口、服务面板、设置页 |
+| `packages/client-runtime/src/state/pluginHost*.ts` | 网页端按环境的快照状态                                                                |
+| `plugin-host-examples/`                            | 示例 `echo-clock`、`greeter`、`git-status`                                            |
+| `plugin-host-cordis/`                              | 可选的 Cordis 适配包与示例 `example.counter`                                          |
 
 ## 上游挂载点
 
-规则：上游文件只做插入，合计不超过 80 行。目前用了 72 行插入、3 行改动，另有预算快照的 1 行数字和生成的路由表。
+规则：上游文件只做插入，合计不超过 80 行。目前用了 75 行插入、3 行改动，另有预算快照的 1 行数字和生成的路由表。
 
-| 文件                                                           | 插入              | 挂的是什么                                |
-| -------------------------------------------------------------- | ----------------- | ----------------------------------------- |
-| `packages/contracts/src/rpc.ts`                                | 3                 | `pluginHost` 的 WS 方法、RPC 定义、RPC 组 |
-| `packages/contracts/src/clientRpcPermissions.ts`               | 1                 | 受保护方法登记                            |
-| `packages/contracts/src/index.ts`                              | 1                 | 导出 `pluginHost`                         |
-| `packages/client-runtime/package.json`                         | 4                 | `pluginHost` 状态的导出                   |
-| `packages/client-runtime/src/rpc/client.ts`                    | 1                 | 客户端 RPC 方法                           |
-| `packages/client-runtime/src/state/commandPermissions.test.ts` | 1                 | 权限表测试                                |
-| `apps/server/src/ws.ts`                                        | 4                 | RPC 处理器                                |
-| `apps/server/src/ws.test.ts`                                   | 2                 | 测试替身                                  |
-| `apps/server/src/server.ts`                                    | 2                 | 运行时层组装                              |
-| `apps/server/src/binMain.ts`                                   | 3                 | 隐藏命令 `__plugin-host`（子进程入口）    |
-| `apps/server/src/auth/RpcAuthorization.ts`                     | 3                 | 方法鉴权                                  |
-| `apps/server/src/observability/RpcInstrumentation.ts`          | 2                 | 观测表                                    |
-| `apps/server/src/mcp/McpHttpServer.ts`                         | 2                 | Agent 工具集                              |
-| `apps/server/src/provider/AgentContextBudget.test.ts`          | 2                 | 预算测试                                  |
-| `apps/server/src/provider/agentContextBudget.json`             | 改 1              | 工具描述字节数，按实测写                  |
-| `apps/web/src/rightPanelStore.ts`                              | 11（含 2 处改行） | 面板种类 `plugin` 与打开动作              |
-| `apps/web/src/components/chat/RightPanelSurfaceContent.tsx`    | 3                 | 面板内容分支                              |
-| `apps/web/src/components/RightPanelTabs.tsx`                   | 5                 | 标签标题与图标                            |
-| `apps/web/src/closedViewStore.ts`                              | 2                 | 关闭后可重开                              |
-| `apps/web/src/reopenClosedView.ts`                             | 3                 | 关闭后可重开                              |
-| `apps/web/src/components/CommandPalette.tsx`                   | 4（含 1 处改行）  | 命令面板「插件」组                        |
-| `apps/web/src/components/DiffPanel.tsx`                        | 5（含 2 处改行）  | 差异面板读插件要求定位的文件              |
-| `apps/web/src/appInit.tsx`                                     | 2                 | 启动时订阅快照                            |
-| `apps/web/src/components/settings/SettingsSidebarNav.tsx`      | 2                 | 设置页导航项                              |
-| `apps/web/src/components/settings/settingsSearch.ts`           | 4                 | 设置搜索                                  |
-| `apps/web/src/routes/_chat.settings.plugins.tsx`               | 新文件 5          | 设置页路由                                |
-| `apps/web/src/routeTree.gen.ts`                                | 生成              | 路由表                                    |
+| 文件                                                           | 插入              | 挂的是什么                                    |
+| -------------------------------------------------------------- | ----------------- | --------------------------------------------- |
+| `packages/contracts/src/rpc.ts`                                | 3                 | `pluginHost` 的 WS 方法、RPC 定义、RPC 组     |
+| `packages/contracts/src/clientRpcPermissions.ts`               | 1                 | 受保护方法登记                                |
+| `packages/contracts/src/index.ts`                              | 1                 | 导出 `pluginHost`                             |
+| `packages/client-runtime/package.json`                         | 4                 | `pluginHost` 状态的导出                       |
+| `packages/client-runtime/src/rpc/client.ts`                    | 1                 | 客户端 RPC 方法                               |
+| `packages/client-runtime/src/state/commandPermissions.test.ts` | 1                 | 权限表测试                                    |
+| `apps/server/src/ws.ts`                                        | 4                 | RPC 处理器                                    |
+| `apps/server/src/ws.test.ts`                                   | 2                 | 测试替身                                      |
+| `apps/server/src/server.ts`                                    | 2                 | 运行时层组装                                  |
+| `apps/server/src/binMain.ts`                                   | 3                 | 隐藏命令 `__plugin-host`（子进程入口）        |
+| `apps/server/src/auth/RpcAuthorization.ts`                     | 3                 | 方法鉴权                                      |
+| `apps/server/src/observability/RpcInstrumentation.ts`          | 2                 | 观测表                                        |
+| `apps/server/src/mcp/McpHttpServer.ts`                         | 2                 | Agent 工具集                                  |
+| `apps/server/src/provider/AgentContextBudget.test.ts`          | 2                 | 预算测试                                      |
+| `apps/server/src/provider/agentContextBudget.json`             | 改 1              | 工具描述字节数，按实测写                      |
+| `apps/web/src/rightPanelStore.ts`                              | 11（含 2 处改行） | 面板种类 `plugin` 与打开动作                  |
+| `apps/web/src/components/chat/RightPanelSurfaceContent.tsx`    | 3                 | 面板内容分支                                  |
+| `apps/web/src/components/RightPanelTabs.tsx`                   | 8                 | 标签标题与图标；空状态与 “+” 菜单里的插件视图 |
+| `apps/web/src/closedViewStore.ts`                              | 2                 | 关闭后可重开                                  |
+| `apps/web/src/reopenClosedView.ts`                             | 3                 | 关闭后可重开                                  |
+| `apps/web/src/components/CommandPalette.tsx`                   | 4（含 1 处改行）  | 命令面板「插件」组                            |
+| `apps/web/src/components/DiffPanel.tsx`                        | 5（含 2 处改行）  | 差异面板读插件要求定位的文件                  |
+| `apps/web/src/appInit.tsx`                                     | 2                 | 启动时订阅快照                                |
+| `apps/web/src/components/settings/SettingsSidebarNav.tsx`      | 2                 | 设置页导航项                                  |
+| `apps/web/src/components/settings/settingsSearch.ts`           | 4                 | 设置搜索                                      |
+| `apps/web/src/routes/_chat.settings.plugins.tsx`               | 新文件 5          | 设置页路由                                    |
+| `apps/web/src/routeTree.gen.ts`                                | 生成              | 路由表                                        |
 
 ## 同步上游时
 

@@ -13,6 +13,7 @@ import { toastManager } from "../components/ui/toast";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useAtomCommand } from "../state/use-atom-command";
 import { Badge } from "../components/ui/badge";
+import { launcherViews, openPluginView } from "./launcherViews";
 import { methodKey, useServicePanelStore } from "./servicePanelStore";
 import { availableUiMethods, emptyInput, methodNeedsInput, serviceViewId } from "./serviceMethods";
 import { pluginHostEnvironment } from "./state";
@@ -148,7 +149,7 @@ export function usePluginPaletteItems(
           run: async () => openServicePanel(thread, provider.id, service),
         });
       }
-      for (const view of snapshot.views) {
+      for (const view of launcherViews(snapshot, canCall)) {
         items.push({
           kind: "action",
           value: `plugin-view:${view.pluginId}:${view.viewId}`,
@@ -156,16 +157,7 @@ export function usePluginPaletteItems(
           title: `Open ${view.title}`,
           timestamp: view.pluginName,
           icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
-          run: async () => {
-            useRightPanelStore
-              .getState()
-              .openPlugin(scopeThreadRef(thread.environmentId, thread.id), {
-                kind: "plugin",
-                pluginId: view.pluginId,
-                viewId: view.viewId,
-                title: view.title,
-              });
-          },
+          run: async () => openPluginView(scopeThreadRef(thread.environmentId, thread.id), view),
         });
       }
     }
