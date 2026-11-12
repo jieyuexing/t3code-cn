@@ -128,11 +128,18 @@ export const layer = Layer.effectDiscard(
       },
     );
 
+    const dropRequest = (request: ProviderContinuationRequests.ProviderContinuationRequest) =>
+      request.clearIfCurrent !== undefined
+        ? request.clearIfCurrent()
+        : request.dispatchIfCurrent !== undefined
+          ? request.dispatchIfCurrent(Effect.void)
+          : Effect.void;
+
     const dispatchContinuation = Effect.fn("ProviderContinuationService.dispatchContinuation")(
       function* (request: ProviderContinuationRequests.ProviderContinuationRequest) {
         const projection = yield* threads.getThreadRecords(
           request.threadId,
-          ["messages", "runs", "providerTurns"],
+          ["messages", "runs", "providerTurns", "providerThreads"],
           {
             messageIds:
               request.delegatedCompletion === undefined
@@ -150,11 +157,7 @@ export const layer = Layer.effectDiscard(
               delegatedCompletionRetryKey(request, request.delegatedCompletion),
             );
           }
-          if (request.clearIfCurrent !== undefined) {
-            yield* request.clearIfCurrent();
-          } else if (request.dispatchIfCurrent !== undefined) {
-            yield* request.dispatchIfCurrent(Effect.void);
-          }
+          yield* dropRequest(request);
           return;
         }
         if (request.delegatedCompletion !== undefined) {
@@ -232,6 +235,20 @@ export const layer = Layer.effectDiscard(
               }),
             );
           yield* clearRetryAttempt(retryKey);
+          return;
+        }
+        // A buffered wake only replays on the provider that buffered it.
+        const owner = projection.providerThreads.find(({ id }) => id === request.providerThreadId);
+        if (
+          request.delivery !== "message_text" &&
+          owner !== undefined &&
+          owner.providerInstanceId !== projection.thread.modelSelection.instanceId
+        ) {
+          yield* Effect.logInfo("orchestration-v2.provider-continuation.provider-switched", {
+            threadId: request.threadId,
+            providerThreadId: request.providerThreadId,
+          });
+          yield* dropRequest(request);
           return;
         }
         const messageId =

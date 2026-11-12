@@ -35,7 +35,15 @@ const delegatedMessageId = MessageId.make("message-provider-continuation-delegat
 const projection = {
   thread: { archivedAt: null, deletedAt: null },
   messages: [],
+  providerThreads: [],
 } as unknown as OrchestrationV2ThreadProjection;
+
+const projectionOnInstance = (ownerInstanceId: string, selectedInstanceId: string) =>
+  ({
+    ...projection,
+    thread: { ...projection.thread, modelSelection: { instanceId: selectedInstanceId } },
+    providerThreads: [{ id: providerThreadId, providerInstanceId: ownerInstanceId }],
+  }) as unknown as OrchestrationV2ThreadProjection;
 
 const request = (
   dispatchIfCurrent?: ProviderContinuationRequests.ProviderContinuationRequest["dispatchIfCurrent"],
@@ -542,6 +550,43 @@ describe("ProviderContinuationService", () => {
       }).pipe(
         Effect.provide(
           layerTest({ dispatched, getThreadRecords: () => Effect.succeed(projection) }),
+        ),
+        Effect.scoped,
+      );
+    });
+  });
+
+  it.effect("drops a buffered wake once the thread runs on another provider instance", () => {
+    return Effect.gen(function* () {
+      const dispatched = yield* Queue.unbounded<unknown>();
+      let cleared = 0;
+      let projectionCalls = 0;
+      yield* Effect.gen(function* () {
+        const requests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
+        yield* requests.offer({
+          ...request(undefined, "stale"),
+          clearIfCurrent: () =>
+            Effect.sync(() => {
+              cleared += 1;
+            }),
+        });
+        yield* requests.offer(request(undefined, "current"));
+        const command = yield* Queue.take(dispatched);
+        assert.equal((command as { readonly text?: unknown }).text, "current");
+        assert.equal(cleared, 1);
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            dispatched,
+            getThreadRecords: () => {
+              projectionCalls += 1;
+              return Effect.succeed(
+                projectionCalls === 1
+                  ? projectionOnInstance("claude", "codex")
+                  : projectionOnInstance("claude", "claude"),
+              );
+            },
+          }),
         ),
         Effect.scoped,
       );
