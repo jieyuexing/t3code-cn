@@ -3,7 +3,8 @@ import * as Schema from "effect/Schema";
 
 import { compareSemverVersions } from "./semver.ts";
 
-const CLI_RELEASE_REPOSITORY = "pingdotgg/t3code";
+// This fork publishes its own builds, tagged `zh-v<version>`, under upstream's version numbers.
+const CLI_RELEASE_REPOSITORY = "jieyuexing/t3code-zh";
 export const CLI_RELEASES_PAGE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases`;
 export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 export const CLI_RELEASE_BASE_URL_ENV = "T3CODE_RELEASE_BASE_URL";
@@ -44,11 +45,17 @@ export function cliArchiveFileName(version: string, platformKey: CliArchivePlatf
 
 const CLI_RELEASE_DEFAULT_BASE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download`;
 
+/** The fork's tags on its own releases; a mirror or `T3CODE_RELEASE_BASE_URL` keeps `v<version>`. */
+function releaseTag(version: string, baseUrl: string): string {
+  return `${baseUrl === CLI_RELEASE_DEFAULT_BASE_URL ? "zh-v" : "v"}${version}`;
+}
+
 export function cliReleaseDownloadBaseUrl(
   version: string,
   baseUrl: string | undefined = CLI_RELEASE_DEFAULT_BASE_URL,
 ): string {
-  return `${(baseUrl?.trim() || CLI_RELEASE_DEFAULT_BASE_URL).replace(/\/+$/, "")}/v${version}`;
+  const base = baseUrl?.trim() || CLI_RELEASE_DEFAULT_BASE_URL;
+  return `${base.replace(/\/+$/, "")}/${releaseTag(version, base)}`;
 }
 
 /** `segments` added to `baseUrl`'s path, keeping its query, such as a signed mirror URL's token. */
@@ -64,7 +71,8 @@ export function cliReleaseAssetUrl(
   fileName: string,
   baseUrl: string | undefined = CLI_RELEASE_DEFAULT_BASE_URL,
 ): string {
-  return releaseAssetUrl(baseUrl?.trim() || CLI_RELEASE_DEFAULT_BASE_URL, `v${version}`, fileName);
+  const base = baseUrl?.trim() || CLI_RELEASE_DEFAULT_BASE_URL;
+  return releaseAssetUrl(base, releaseTag(version, base), fileName);
 }
 
 export function parseChecksums(text: string): ReadonlyMap<string, string> {
@@ -146,8 +154,9 @@ export function newestCliReleaseVersion(
 ): string | undefined {
   for (const release of releases) {
     if (release.draft) continue;
-    const version = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(release.tag_name)?.[1];
-    if (version === undefined) continue;
+    const version = /^(?:zh-)?v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(release.tag_name)?.[1];
+    // A fork revision, `zh-v<version>-rN`, republishes its version's files and is not a version.
+    if (version === undefined || /-r\d+$/.test(version)) continue;
     if (cliReleaseChannelOf(version) === channel) return version;
   }
   return undefined;
