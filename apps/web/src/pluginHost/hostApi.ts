@@ -6,12 +6,14 @@ import type {
 } from "@t3tools/contracts";
 
 import { BridgeCallError } from "./bridge";
+import { openableUrl } from "./openUrl";
 import { clipReply, type PendingThread } from "./pendingThreads";
 
 const VCS_READ_CAPABILITY = "host.vcs-read";
 const SETTINGS_CAPABILITY = "settings";
 const THREADS_READ_CAPABILITY = "host.threads-read";
 const THREADS_ORGANIZE_CAPABILITY = "host.threads-organize";
+const OPEN_URL_CAPABILITY = "host.open-url";
 
 export interface DiffTarget {
   readonly kind: "working-tree" | "commit";
@@ -38,6 +40,8 @@ export interface HostApiDeps {
   readonly question: (threadId: string) => Promise<string>;
   readonly openThread: (threadId: string) => void;
   readonly snoozeThread: (threadId: string, until: string) => Promise<void>;
+  /** Opens an absolute http(s) URL in the system browser. */
+  readonly openUrl: (url: string) => Promise<void>;
 }
 
 const denied = (message: string) => new BridgeCallError({ code: "denied", message });
@@ -172,6 +176,17 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
     await deps.snoozeThread(readText(input, "threadId"), until.toISOString());
     return null;
   },
+  // Only http(s); the system browser is the only thing this reaches.
+  "t3.openUrl": async (deps, input) => {
+    let url: string;
+    try {
+      url = openableUrl(readText(input, "url"));
+    } catch (error) {
+      throw invalid(error instanceof Error ? error.message : "The URL is not valid.");
+    }
+    await deps.openUrl(url);
+    return null;
+  },
 };
 
 /** The capability a method needs; the Git and diff methods all need `host.vcs-read`. */
@@ -182,12 +197,14 @@ const CAPABILITY_OF: Readonly<Record<string, string>> = {
   "threads.question": THREADS_READ_CAPABILITY,
   "t3.openThread": THREADS_READ_CAPABILITY,
   "threads.snooze": THREADS_ORGANIZE_CAPABILITY,
+  "t3.openUrl": OPEN_URL_CAPABILITY,
 };
 
 /**
  * What a view's `callHost` reaches: a read-only slice of T3's Git, the diff panel, the thread
- * list and replies, snoozing, and the caller's own settings page. A plugin that did not declare the capability a method needs is
- * denied it, as is any method not listed here.
+ * list and replies, snoozing, opening a web page in the browser, and the caller's own settings
+ * page. A plugin that did not declare the capability a method needs is denied it, as is any
+ * method not listed here.
  */
 export function createHostApi(deps: HostApiDeps) {
   return async (method: string, input: unknown): Promise<unknown> => {

@@ -7,6 +7,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ThreadId } from "@t3tools/contracts";
 import type { EnvironmentId, PluginId, ScopedThreadRef } from "@t3tools/contracts";
 
+import { readLocalApi } from "../localApi";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { orchestrationEnvironment } from "../state/orchestration";
 import { environmentProjects } from "../state/projects";
@@ -30,7 +31,7 @@ function unwrap<A>(result: AtomCommandResult<A, unknown>): A {
   });
 }
 
-/** What a view's `callHost` runs: the environment's read-only Git calls, the thread's diff panel, the thread list, replies and snoozing, and the caller's own settings page. */
+/** What a view's `callHost` runs: the environment's read-only Git calls, the thread's diff panel, the thread list, replies and snoozing, opening a web page, and the caller's own settings page. */
 export function useHostApi(options: {
   readonly environmentId: EnvironmentId;
   /** The plugin whose view calls; it is the only plugin whose settings the view can open. */
@@ -106,6 +107,16 @@ export function useHostApi(options: {
           input: { threadId: ThreadId.make(threadId), snoozedUntil: until },
         }),
       );
+    },
+    openUrl: async (url) => {
+      const api = readLocalApi();
+      if (api === undefined) {
+        throw new BridgeCallError({
+          code: "call-failed",
+          message: "Opening links is unavailable.",
+        });
+      }
+      await api.shell.openExternal(url);
     },
   });
 }
