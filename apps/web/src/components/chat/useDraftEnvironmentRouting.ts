@@ -20,7 +20,7 @@ import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { type EnvironmentPresentation, useEnvironmentProviders } from "../../state/environments";
 import { useProjects } from "../../state/entities";
 import type { DraftSessionState } from "../../composerDraftStore";
-import { autoSelectionBlocker, environmentLoadWeight } from "./useDraftEnvironmentRouting.logic";
+import { environmentLoadWeight } from "./useDraftEnvironmentRouting.logic";
 
 interface DraftEnvironmentRoutingInput {
   readonly draftId: DraftId | null;
@@ -75,47 +75,42 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
   const allProjects = useProjects();
   const { openScratchProject } = useScratchProject();
   const needsLoadBalancing = automaticEnvironment && !draftThread?.loadBalancedEnvironmentId;
-  const blockerByEnvironment = new Map(
-    automaticEnvironment
-      ? logicalProjectEnvironments.map((candidate) => {
-          const environment = environmentById.get(candidate.environmentId);
-          return [
-            candidate.environmentId,
-            autoSelectionBlocker({
-              connected: environment?.connection.phase === "connected",
-              weight: environmentLoadWeight(
-                environment,
-                loadBalancingSettings.loadBalancingWeights[candidate.environmentId],
-              ),
-              holdsReferencedThreadContexts: referencedThreadContexts.every(
-                (record) => record.environmentId === candidate.environmentId,
-              ),
-              providers: providersByEnvironment.get(candidate.environmentId)?.map((provider) => ({
-                ...provider,
-                enabled: environment?.serverConfig?.settings
-                  ? resolveProjectProviderInstanceEnabled(
-                      environment.serverConfig.settings,
-                      candidate.projectId,
-                      provider.instanceId,
-                    )
-                  : provider.enabled,
-              })),
-              activeProviderInstanceId,
-              selectedProvider,
-            }),
-          ] as const;
-        })
-      : [],
-  );
   const loadBalancingCandidates = needsLoadBalancing
     ? logicalProjectEnvironments
-        .filter((candidate) => blockerByEnvironment.get(candidate.environmentId) === null)
+        .filter((candidate) => {
+          const environment = environmentById.get(candidate.environmentId);
+          return (
+            environment?.connection.phase === "connected" &&
+            environmentLoadWeight(
+              environment,
+              loadBalancingSettings.loadBalancingWeights[candidate.environmentId],
+            ) > 0 &&
+            referencedThreadContexts.every(
+              (record) => record.environmentId === candidate.environmentId,
+            ) &&
+            providersByEnvironment
+              .get(candidate.environmentId)
+              ?.some(
+                (provider) =>
+                  (activeProviderInstanceId === null ||
+                    provider.instanceId === activeProviderInstanceId) &&
+                  provider.driver === selectedProvider &&
+                  (environment.serverConfig?.settings
+                    ? resolveProjectProviderInstanceEnabled(
+                        environment.serverConfig.settings,
+                        candidate.projectId,
+                        provider.instanceId,
+                      )
+                    : provider.enabled) &&
+                  provider.installed &&
+                  provider.status !== "error" &&
+                  provider.auth.status !== "unauthenticated" &&
+                  provider.availability !== "unavailable",
+              )
+          );
+        })
         .map((candidate) => candidate.environmentId)
     : [];
-  const environmentOptions = logicalProjectEnvironments.map((environment) => {
-    const unavailableReason = blockerByEnvironment.get(environment.environmentId);
-    return unavailableReason ? { ...environment, unavailableReason } : environment;
-  });
   const loadBalancing = useLoadBalancedEnvironment(
     loadBalancingCandidates.map((environmentId) => ({
       environmentId,
@@ -278,7 +273,6 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
     loadBalancing,
     onAutoEnvironmentStable,
     autoEnvironmentLabel,
-    environmentOptions,
     isEnvironmentChanging,
     readPendingEnvironmentChange,
     onEnvironmentChangeStable,

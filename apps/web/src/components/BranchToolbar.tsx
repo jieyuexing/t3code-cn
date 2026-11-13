@@ -357,16 +357,9 @@ const RunContextSelector = memo(function RunContextSelector({
                     value={env.environmentId}
                     closeOnClick
                   >
-                    <span className="flex min-w-0 flex-col">
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <EnvironmentMachineIcon kind={env.machine} className="size-3" />
-                        <span className="min-w-0 truncate">{env.label}</span>
-                      </span>
-                      {env.unavailableReason === undefined ? null : (
-                        <span className="max-w-72 whitespace-normal text-muted-foreground text-xs">
-                          {env.unavailableReason}
-                        </span>
-                      )}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <EnvironmentMachineIcon kind={env.machine} className="size-3" />
+                      <span className="min-w-0 truncate">{env.label}</span>
                     </span>
                   </MenuRadioItem>
                 ))}
