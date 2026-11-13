@@ -2339,6 +2339,8 @@ describe("OrchestratorMcpService provider resolution", () => {
                   const parent = yield* orchestrator.getThreadProjection(parentThreadId);
                   return { taskId: parent.subagents[0]!.id, checkout: undefined };
                 }).pipe(Effect.orDie),
+              hasPendingQuestion: () => Effect.succeed(false),
+              finishedCheckout: () => Effect.undefined,
             });
           }),
         ).pipe(Layer.provide(layerWatchedThreads));

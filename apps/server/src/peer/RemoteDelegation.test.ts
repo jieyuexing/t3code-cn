@@ -52,6 +52,7 @@ import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterReg
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as ThreadSearch from "../orchestration-v2/ThreadSearch.ts";
 import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
@@ -175,6 +176,8 @@ interface BoxThread {
   readonly providers: Ref.Ref<ReadonlyArray<ServerProvider>>;
   /** The commit the box's checkout is at; null when it cannot say. */
   readonly head: Ref.Ref<string | null>;
+  /** The ids of the questions its thread waits on; `Effect.never` is a thread that does not answer. */
+  readonly questions: Ref.Ref<Effect.Effect<ReadonlyArray<string>>>;
 }
 
 const makeBoxThread = Effect.gen(function* () {
@@ -213,6 +216,7 @@ const makeBoxThread = Effect.gen(function* () {
     load: yield* Ref.make<Effect.Effect<HostResourcesSnapshot>>(Effect.succeed(idle)),
     providers: yield* Ref.make<ReadonlyArray<ServerProvider>>([codexReady]),
     head: yield* Ref.make<string | null>(commit),
+    questions: yield* Ref.make<Effect.Effect<ReadonlyArray<string>>>(Effect.succeed([])),
   } satisfies BoxThread;
 });
 
@@ -305,11 +309,17 @@ const boxToolkitLayer = (thread: BoxThread) => {
       const status = yield* Ref.get(thread.status);
       const runless = yield* Ref.get(thread.runless);
       const model = yield* Ref.get(thread.executedModel);
+      const questions = yield* Effect.flatten(Ref.get(thread.questions));
       return shell === null
         ? (null as never)
         : {
             ...idleThreadProjection(shell),
             runs: runless ? [] : [runOf(status)],
+            runtimeRequests: questions.map((id) => ({
+              id,
+              kind: "user_input",
+              status: "pending",
+            })) as never,
             providerTurns: (model === null
               ? []
               : [{ runAttemptId: "attempt:box", ordinal: 1, model }]) as never,
@@ -541,6 +551,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
     McpHttpServer.layerOrchestratorToolkit,
     McpHttpServer.layerProjectRegistration,
     McpHttpServer.layerEnvironmentToolkit,
+    McpHttpServer.layerThreadToolkit,
   ).pipe(
     Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
     Layer.provide(NodeCrypto.layer),
@@ -568,7 +579,12 @@ const boxToolkitLayer = (thread: BoxThread) => {
         list: () => Effect.succeed([instanceId]),
       }),
     ),
-    Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        Layer.mock(ThreadSearch.ThreadSearch)({}),
+      ),
+    ),
     Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
         getById: (id) => Effect.succeed(Option.fromNullishOr(boxProjects.find((p) => p.id === id))),
@@ -2447,6 +2463,68 @@ it.effect("an ended task is not blamed for a difference that was gone by then", 
       const ended = yield* Fiber.join(waiting);
       expect(ended.structuredContent).toMatchObject({ status: "completed" });
       expect(ended.structuredContent).not.toHaveProperty("checkout");
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a task whose thread there waits on a question says so, as a local one does", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const delegated = yield* delegateToBox(a);
+      const status = Effect.map(
+        a.call("task_status", { taskId: delegated.taskId }),
+        (result) => result.structuredContent as Record<string, unknown>,
+      );
+
+      // Nothing is asked: the task is working.
+      expect(yield* status).toMatchObject({
+        status: "running",
+        hasPendingQuestion: false,
+        pendingApproval: null,
+      });
+
+      // A question is open there: the task is blocked.
+      yield* Ref.set(thread.questions, Effect.succeed(["request:ask-1"]));
+      expect(yield* status).toMatchObject({ status: "running", hasPendingQuestion: true });
+
+      // A thread that does not answer in time reads as no question.
+      yield* Ref.set(thread.questions, Effect.never);
+      const silent = yield* Effect.forkChild(status);
+      yield* TestClock.adjust("3 seconds");
+      expect(yield* Fiber.join(silent)).toMatchObject({ hasPendingQuestion: false });
+
+      // Once it ended, whatever is still open there is no longer a question about this task.
+      yield* Ref.set(thread.questions, Effect.succeed(["request:ask-1"]));
+      yield* Ref.set(thread.reply, "Done there.");
+      yield* Ref.set(thread.status, "completed");
+      yield* Deferred.succeed(thread.finished, undefined);
+      yield* taskResult(a, delegated.taskId);
+      expect(yield* status).toMatchObject({ status: "completed", hasPendingQuestion: false });
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a wait on a task whose thread there already waits on a question ends at once", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      yield* Ref.set(thread.questions, Effect.succeed(["request:ask-1"]));
+      const result = yield* a.call("delegate_task", {
+        task: "Ask me something.",
+        target: {
+          environmentId: box.environmentId,
+          providerInstanceId: instanceId,
+          model: "gpt-5.4",
+        },
+        mode: "wait",
+      });
+      expect(result.isError, JSON.stringify(result.content)).toBe(false);
+      expect(result.structuredContent).toMatchObject({
+        status: "running",
+        hasPendingQuestion: true,
+        waitTimedOut: false,
+      });
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

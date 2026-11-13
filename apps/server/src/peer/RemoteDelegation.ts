@@ -41,6 +41,7 @@ import type * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import { EnvironmentToolkit } from "../mcp/toolkits/environment/tools.ts";
 import { OrchestratorToolkit } from "../mcp/toolkits/orchestrator/tools.ts";
 import { ProjectToolkit } from "../mcp/toolkits/project/tools.ts";
+import { ThreadToolkit } from "../mcp/toolkits/thread/tools.ts";
 import {
   resolveInteractionMode,
   resolveRuntimeMode,
@@ -75,7 +76,7 @@ export const FollowRetrySchedule = Context.Reference<Schedule.Schedule<unknown>>
   },
 );
 
-/** Reading a linked machine's load, projects and checkout, so a sleeping one cannot hold up a placement. */
+/** Reading a linked machine's load, projects, checkout and open questions, so a sleeping one cannot hold up a placement. */
 const PLACEMENT_READ_TIMEOUT = Duration.seconds(3);
 
 type ThreadScope = McpInvocationContext.McpThreadInvocationScope;
@@ -153,6 +154,14 @@ export class RemoteDelegation extends Context.Service<
       scope: ThreadScope,
       task: OrchestrationV2Subagent,
     ) => Effect.Effect<OrchestratorMcpCheckout | undefined>;
+    /**
+     * Whether the task's thread there waits on a question nobody answered. Unreadable in time,
+     * or a peer that cannot say, counts as no question.
+     */
+    readonly hasPendingQuestion: (
+      scope: ThreadScope,
+      task: OrchestrationV2Subagent,
+    ) => Effect.Effect<boolean>;
     /**
      * The least loaded of this machine and the linked ones that answer, have
      * the project's repository once at this machine's commit, and report their load. This machine when
@@ -793,6 +802,25 @@ const make = Effect.gen(function* () {
     return yield* checkout(via, { environmentId: remote.environmentId, projectId, hereProjectId });
   });
 
+  const hasPendingQuestion: RemoteDelegation["Service"]["hasPendingQuestion"] = Effect.fn(
+    "RemoteDelegation.hasPendingQuestion",
+  )(function* (scope, task) {
+    const remote = task.remoteChild;
+    if (remote === undefined) return false;
+    return yield* forwarding
+      .call(
+        followScope(scope.thread, remote),
+        ThreadToolkit.tools.t3_pending_request,
+        remote.environmentId,
+        { action: "list", environmentId: remote.environmentId, threadId: remote.threadId },
+      )
+      .pipe(
+        Effect.map((listed) => "requestIds" in listed && listed.requestIds.length > 0),
+        Effect.timeout(PLACEMENT_READ_TIMEOUT),
+        Effect.orElseSucceed(() => false),
+      );
+  });
+
   /**
    * Stops the task's own thread there as its Stop button does: its running turn, queued
    * messages, pull request watches and delegated tasks. `key` names the stop (the follower
@@ -1171,7 +1199,15 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.ignoreCause({ log: true })),
     );
 
-  return RemoteDelegation.of({ delegate, checkout, finishedCheckout, place, cancel, start });
+  return RemoteDelegation.of({
+    delegate,
+    checkout,
+    finishedCheckout,
+    hasPendingQuestion,
+    place,
+    cancel,
+    start,
+  });
 });
 
 const isTerminal = (status: string) =>

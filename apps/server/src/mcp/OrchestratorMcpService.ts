@@ -1793,6 +1793,12 @@ const make = Effect.gen(function* () {
     const terminal = isTerminalTaskStatus(status);
     // Compared again now that it ended: the commit there may have moved while it ran.
     const checkout = terminal ? yield* remoteDelegation.finishedCheckout(scope, task) : undefined;
+    // As for a local task, a question blocks it until answered. Only the question is mirrored:
+    // approvals are not listed over a link, and a wait does not end on it, as no event reports it here.
+    const hasPendingQuestion =
+      !terminal &&
+      task.completionDelivery?.state !== "disposed" &&
+      (yield* remoteDelegation.hasPendingQuestion(scope, task));
     if (
       acknowledgeTerminal &&
       terminal &&
@@ -1852,8 +1858,8 @@ const make = Effect.gen(function* () {
         : null,
       latestTerminalSummary: terminal ? task.result : null,
       latestTerminalResultContextTransferId: null,
-      // Its questions and approvals are answered in the environment it runs in.
-      hasPendingQuestion: false,
+      hasPendingQuestion,
+      // Not listed by the thread there; see above.
       pendingApproval: null,
       waitTimedOut,
     } satisfies OrchestratorMcpDelegateTaskResult;
