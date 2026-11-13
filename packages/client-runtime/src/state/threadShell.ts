@@ -158,13 +158,11 @@ export function childThreadInputsTitle(
   const approvals = children.filter((child) => child.hasPendingApprovals).length;
   const need = approvals === 0 ? "input" : approvals === children.length ? "approval" : "you";
   const sideChats = children.filter((child) => child.lineage.sideChat === true).length;
-  const allSideChats = sideChats === children.length;
-  if (children.length === 1) return `${allSideChats ? "Side chat" : "Subagent"} needs ${need}`;
-  // 名词写进整句：插值的名词加复数后缀无法翻译。
-  if (allSideChats) return `${children.length} side chats need ${need}`;
-  return sideChats === 0
-    ? `${children.length} subagents need ${need}`
-    : `${children.length} threads need ${need}`;
+  const noun =
+    sideChats === children.length ? "side chat" : sideChats === 0 ? "subagent" : "thread";
+  return children.length === 1
+    ? `${noun === "side chat" ? "Side chat" : "Subagent"} needs ${need}`
+    : `${children.length} ${noun}s need ${need}`;
 }
 
 const sameWireThreadShell = Schema.toEquivalence(OrchestrationV2ThreadShell);
