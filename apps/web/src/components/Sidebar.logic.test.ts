@@ -44,6 +44,7 @@ import {
 import { resolveProjectExpanded } from "../uiStateStore";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import { threadKey } from "@t3tools/client-runtime/state/entities";
 
 import {
   DEFAULT_INTERACTION_MODE,
@@ -88,6 +89,23 @@ describe("sidebar environment filtering", () => {
         new Set([remoteEnvironmentId]),
       ),
     ).toEqual([]);
+  });
+
+  it("lists a delegated task on its own once its parent's environment is filtered out", () => {
+    const delegated = {
+      ...remote,
+      id: ThreadId.make("delegated"),
+      delegatedFrom: { environmentId: localEnvironmentId, threadId: local.id, title: "parent" },
+    };
+    const underParent = new Set([
+      threadKey({ environmentId: remoteEnvironmentId, threadId: delegated.id }),
+    ]);
+    const visible = (excluded: ReadonlySet<string>) =>
+      filterSidebarV2VisibleThreads([local, delegated], null, underParent, excluded);
+    // Parent listed: the task stays under it, whether or not its own environment is shown.
+    expect(visible(new Set())).toEqual([local]);
+    expect(visible(new Set([remoteEnvironmentId]))).toEqual([local]);
+    expect(visible(new Set([localEnvironmentId]))).toEqual([delegated]);
   });
 
   it("keeps newly connected environments visible and clears back to all environments", () => {

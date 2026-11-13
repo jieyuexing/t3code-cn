@@ -597,12 +597,16 @@ export function resolveSidebarRowThreadId(
   return thread?.id ?? threadId;
 }
 
+const NO_DELEGATED_PARENTS: ReadonlySet<string> = new Set();
 /**
  * `delegatedUnderParent` holds the tasks linked environments run for a thread
  * the sidebar lists, by thread key; they show under that thread, as subagents do.
  */
 export function filterSidebarV2VisibleThreads<
-  T extends Pick<SidebarThreadSummary, "archivedAt" | "environmentId" | "id" | "lineage"> & {
+  T extends Pick<
+    SidebarThreadSummary,
+    "archivedAt" | "delegatedFrom" | "environmentId" | "id" | "lineage"
+  > & {
     projectId: string;
   },
 >(
@@ -611,18 +615,23 @@ export function filterSidebarV2VisibleThreads<
   delegatedUnderParent: ReadonlySet<string>,
   excludedEnvironmentIds?: ReadonlySet<string>,
 ): T[] {
-  return threads.filter(
-    (thread) =>
+  return threads.filter((thread) => {
+    const parentEnvironmentId = thread.delegatedFrom?.environmentId;
+    // A task whose parent's environment is filtered out has no row to show under.
+    const parentFilteredOut =
+      parentEnvironmentId !== undefined && excludedEnvironmentIds?.has(parentEnvironmentId);
+    return (
       thread.archivedAt === null &&
       !isShownUnderParent(
         { environmentId: thread.environmentId, threadId: thread.id },
         thread.lineage,
-        delegatedUnderParent,
+        parentFilteredOut ? NO_DELEGATED_PARENTS : delegatedUnderParent,
       ) &&
       !excludedEnvironmentIds?.has(thread.environmentId) &&
       (scopedProjectKeys === null ||
-        scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
-  );
+        scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`))
+    );
+  });
 }
 
 export function buildBulkTitleRegenerationContextMenuItem(input: {
@@ -1405,7 +1414,7 @@ export function sortLogicalProjectsForSidebar<
 export function sortSidebarV2ProjectGroups<
   TProject extends LogicalSidebarProject,
   TThread extends ScopedSidebarThread &
-    Pick<SidebarThreadSummary, "environmentId" | "id" | "lineage">,
+    Pick<SidebarThreadSummary, "delegatedFrom" | "environmentId" | "id" | "lineage">,
 >(
   projects: readonly TProject[],
   threads: readonly TThread[],
