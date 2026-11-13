@@ -66,3 +66,29 @@ function providerBlocker(provider: ProviderState): string | null {
   if (provider.availability === "unavailable") return "Provider is unavailable";
   return null;
 }
+
+/**
+ * What the tooltip says about an automatic pick: where it runs, then each machine with a higher
+ * weight that was left out and why, heaviest first. A heavier machine that was merely busier is not listed.
+ */
+export function autoSelectionNotes(
+  selectedEnvironmentId: string,
+  environments: ReadonlyArray<{
+    readonly environmentId: string;
+    readonly label: string;
+    readonly weight: number;
+    readonly blocker: string | null;
+  }>,
+): string[] {
+  const selected = environments.find(
+    (environment) => environment.environmentId === selectedEnvironmentId,
+  );
+  if (selected === undefined) return [];
+  return [
+    `Running on ${selected.label}`,
+    ...environments
+      .filter((environment) => environment.blocker !== null && environment.weight > selected.weight)
+      .toSorted((left, right) => right.weight - left.weight)
+      .map((environment) => `${environment.label} skipped: ${environment.blocker}`),
+  ];
+}

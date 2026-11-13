@@ -128,6 +128,13 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         <TooltipPopup>
           {autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
           {shortcutLabel ? ` · ${shortcutLabel}` : null}
+          {autoEnvironmentLabel
+            ? activeEnvironment?.autoSelectionNotes?.map((note) => (
+                <span key={note} className="block">
+                  {note}
+                </span>
+              ))
+            : null}
         </TooltipPopup>
       </Tooltip>
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>

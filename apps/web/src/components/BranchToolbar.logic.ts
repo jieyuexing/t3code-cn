@@ -21,6 +21,8 @@ export interface EnvironmentOption {
   machine: EnvironmentMachineKind;
   /** Why automatic selection skips this machine; it can still be picked by hand. */
   unavailableReason?: string;
+  /** On the machine automatic selection chose: where the draft runs, and which heavier machines were skipped. */
+  autoSelectionNotes?: readonly string[];
 }
 
 /** "Add to another machine" stays muted until hovered: easy to find, quieter than the machines. */

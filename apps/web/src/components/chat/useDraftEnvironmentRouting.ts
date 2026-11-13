@@ -20,7 +20,11 @@ import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { type EnvironmentPresentation, useEnvironmentProviders } from "../../state/environments";
 import { useProjects } from "../../state/entities";
 import type { DraftSessionState } from "../../composerDraftStore";
-import { autoSelectionBlocker, environmentLoadWeight } from "./useDraftEnvironmentRouting.logic";
+import {
+  autoSelectionBlocker,
+  autoSelectionNotes,
+  environmentLoadWeight,
+} from "./useDraftEnvironmentRouting.logic";
 
 interface DraftEnvironmentRoutingInput {
   readonly draftId: DraftId | null;
@@ -75,6 +79,11 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
   const allProjects = useProjects();
   const { openScratchProject } = useScratchProject();
   const needsLoadBalancing = automaticEnvironment && !draftThread?.loadBalancedEnvironmentId;
+  const weightOf = (environmentId: EnvironmentId) =>
+    environmentLoadWeight(
+      environmentById.get(environmentId),
+      loadBalancingSettings.loadBalancingWeights[environmentId],
+    );
   const blockerByEnvironment = new Map(
     automaticEnvironment
       ? logicalProjectEnvironments.map((candidate) => {
@@ -83,10 +92,7 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
             candidate.environmentId,
             autoSelectionBlocker({
               connected: environment?.connection.phase === "connected",
-              weight: environmentLoadWeight(
-                environment,
-                loadBalancingSettings.loadBalancingWeights[candidate.environmentId],
-              ),
+              weight: weightOf(candidate.environmentId),
               holdsReferencedThreadContexts: referencedThreadContexts.every(
                 (record) => record.environmentId === candidate.environmentId,
               ),
@@ -112,17 +118,32 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
         .filter((candidate) => blockerByEnvironment.get(candidate.environmentId) === null)
         .map((candidate) => candidate.environmentId)
     : [];
+  const autoSelectionSummary = draftThread?.loadBalancedEnvironmentId
+    ? autoSelectionNotes(
+        draftThread.loadBalancedEnvironmentId,
+        logicalProjectEnvironments.map((environment) => ({
+          environmentId: environment.environmentId,
+          label: environment.label,
+          weight: weightOf(environment.environmentId),
+          blocker: blockerByEnvironment.get(environment.environmentId) ?? null,
+        })),
+      )
+    : [];
   const environmentOptions = logicalProjectEnvironments.map((environment) => {
     const unavailableReason = blockerByEnvironment.get(environment.environmentId);
-    return unavailableReason ? { ...environment, unavailableReason } : environment;
+    return {
+      ...environment,
+      ...(unavailableReason ? { unavailableReason } : {}),
+      ...(automaticEnvironment &&
+      environment.environmentId === draftThread?.loadBalancedEnvironmentId
+        ? { autoSelectionNotes: autoSelectionSummary }
+        : {}),
+    };
   });
   const loadBalancing = useLoadBalancedEnvironment(
     loadBalancingCandidates.map((environmentId) => ({
       environmentId,
-      weight: environmentLoadWeight(
-        environmentById.get(environmentId),
-        loadBalancingSettings.loadBalancingWeights[environmentId],
-      ),
+      weight: weightOf(environmentId),
     })),
   );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- writes the resolved load-balanced environment into the draft store once the async pick settles

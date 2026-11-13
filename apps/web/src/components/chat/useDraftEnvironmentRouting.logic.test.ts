@@ -2,7 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 
-import { autoSelectionBlocker, environmentLoadWeight } from "./useDraftEnvironmentRouting.logic";
+import {
+  autoSelectionBlocker,
+  autoSelectionNotes,
+  environmentLoadWeight,
+} from "./useDraftEnvironmentRouting.logic";
 
 const environmentOf = (
   machine: "laptop" | "server",
@@ -159,5 +163,67 @@ describe("autoSelectionBlocker", () => {
         ],
       }),
     ).toBeNull();
+  });
+});
+
+describe("autoSelectionNotes", () => {
+  const environment = (
+    environmentId: string,
+    label: string,
+    weight: number,
+    blocker: string | null = null,
+  ) => ({ environmentId, label, weight, blocker });
+  const box = environment("environment-box", "Box", 50);
+
+  it("only says where it runs when no machine has a higher weight", () => {
+    expect(
+      autoSelectionNotes("environment-box", [
+        box,
+        environment("environment-lap", "Lap", 50, "Not connected"),
+      ]),
+    ).toEqual(["Running on Box"]);
+    expect(autoSelectionNotes("environment-box", [box])).toEqual(["Running on Box"]);
+  });
+
+  it("names a heavier machine that was left out, with its reason", () => {
+    expect(
+      autoSelectionNotes("environment-box", [
+        box,
+        environment("environment-lap", "Lap", 100, "Provider isn't signed in"),
+      ]),
+    ).toEqual(["Running on Box", "Lap skipped: Provider isn't signed in"]);
+  });
+
+  it("lists several skipped machines heaviest first", () => {
+    expect(
+      autoSelectionNotes("environment-box", [
+        box,
+        environment("environment-lap", "Lap", 60, "Not connected"),
+        environment("environment-den", "Den", 100, "Provider is unavailable"),
+      ]),
+    ).toEqual([
+      "Running on Box",
+      "Den skipped: Provider is unavailable",
+      "Lap skipped: Not connected",
+    ]);
+  });
+
+  it("leaves out a heavier machine that was merely busier, and any lighter skipped one", () => {
+    expect(
+      autoSelectionNotes("environment-box", [
+        box,
+        environment("environment-lap", "Lap", 100),
+        environment("environment-den", "Den", 25, "Not connected"),
+      ]),
+    ).toEqual(["Running on Box"]);
+  });
+
+  it("never lists the chosen machine itself", () => {
+    expect(
+      autoSelectionNotes("environment-box", [
+        environment("environment-box", "Box", 50, "Not connected"),
+      ]),
+    ).toEqual(["Running on Box"]);
+    expect(autoSelectionNotes("environment-gone", [box])).toEqual([]);
   });
 });
