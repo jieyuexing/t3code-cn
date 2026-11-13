@@ -968,7 +968,15 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
         ),
       );
       const result = yield* toolkit
-        .handle("t3_thread_launch", { title: "Fix", environmentId: "auto", projectId, ...params })
+        // An agent omits a key rather than sending undefined, which the tool's input schema now rejects.
+        .handle(
+          "t3_thread_launch",
+          Object.fromEntries(
+            Object.entries({ title: "Fix", environmentId: "auto", projectId, ...params }).filter(
+              ([, value]) => value !== undefined,
+            ),
+          ) as never,
+        )
         .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
       return { result: result.at(-1)?.result, launched, projectId };
     });

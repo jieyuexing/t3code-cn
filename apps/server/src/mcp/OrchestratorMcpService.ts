@@ -1526,6 +1526,7 @@ const make = Effect.gen(function* () {
     const placed = yield* remoteDelegation.place(scope, {
       hereOnly: input.isolation === "worktree",
       providerInstanceId: target.providerInstanceId ?? "inherit",
+      driverKind: target.driverKind,
       model: target.model,
     });
     return {

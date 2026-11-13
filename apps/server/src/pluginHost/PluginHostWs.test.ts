@@ -18,6 +18,7 @@ import * as AcpRegistryRuntimeCoordinator from "@t3tools/provider-acp-registry/s
 import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
 import * as AgentSessionImporter from "../project/AgentSessionImporter.ts";
 import * as AcpRegistrySessions from "../provider/AcpRegistrySessions.ts";
+import * as SecretCheck from "../secrets/SecretCheck.ts";
 import * as AgentSessionScanner from "../project/AgentSessionScanner.ts";
 import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
 import * as AntigravityInstallation from "../provider/AntigravityInstallation.ts";
@@ -122,6 +123,7 @@ const layerRpcServices = Layer.mergeAll(
   Layer.mock(AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator)({}),
   Layer.mock(AcpRegistrySupport.AcpRegistryCatalog)({}),
   Layer.mock(AcpRegistrySessions.AcpRegistrySessions)({}),
+  Layer.mock(SecretCheck.SecretCheck)({}),
   Layer.mock(AgentSessionImporter.AgentSessionImporter)({}),
   Layer.mock(AgentSessionScanner.AgentSessionScanner)({}),
   Layer.mock(AnalyticsService.AnalyticsService)({}),
