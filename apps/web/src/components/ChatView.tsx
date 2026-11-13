@@ -1776,6 +1776,7 @@ export default function ChatView(props: ChatViewProps) {
     loadBalancing,
     onAutoEnvironmentStable,
     autoEnvironmentLabel,
+    environmentOptions,
     isEnvironmentChanging,
     readPendingEnvironmentChange,
     onEnvironmentChangeStable,
@@ -3770,7 +3771,7 @@ export default function ChatView(props: ChatViewProps) {
                                       ? onAutoEnvironmentStable
                                       : undefined
                                   }
-                                  availableEnvironments={logicalProjectEnvironments}
+                                  availableEnvironments={environmentOptions}
                                   {...(isServerThread
                                     ? {}
                                     : {
@@ -3858,7 +3859,7 @@ export default function ChatView(props: ChatViewProps) {
                   workspaceMutationId={workspaceMutationId}
                   isGitRepo={isGitRepo}
                   envLocked={envLocked}
-                  availableEnvironments={logicalProjectEnvironments}
+                  availableEnvironments={environmentOptions}
                   autoEnvironmentLabel={autoEnvironmentLabel}
                   onAutoEnvironment={
                     draftId &&

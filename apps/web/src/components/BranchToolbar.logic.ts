@@ -19,6 +19,8 @@ export interface EnvironmentOption {
   label: string;
   isPrimary: boolean;
   machine: EnvironmentMachineKind;
+  /** Why automatic selection skips this machine; it can still be picked by hand. */
+  unavailableReason?: string;
 }
 
 /** "Add to another machine" stays muted until hovered: easy to find, quieter than the machines. */

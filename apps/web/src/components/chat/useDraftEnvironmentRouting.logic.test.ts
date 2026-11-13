@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { environmentLoadWeight } from "./useDraftEnvironmentRouting.logic";
+import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
+
+import { autoSelectionBlocker, environmentLoadWeight } from "./useDraftEnvironmentRouting.logic";
 
 const environmentOf = (
   machine: "laptop" | "server",
@@ -38,5 +40,124 @@ describe("environmentLoadWeight", () => {
     expect(environmentLoadWeight(environmentOf("laptop", undefined, 0), undefined)).toBe(0);
     expect(environmentLoadWeight(environmentOf("server", undefined, 0), 30)).toBe(30);
     expect(environmentLoadWeight(environmentOf("server", undefined, 80), 0)).toBe(0);
+  });
+});
+
+describe("autoSelectionBlocker", () => {
+  const codex = ProviderDriverKind.make("codex");
+  const claude = ProviderDriverKind.make("claudeAgent");
+  const instance = ProviderInstanceId.make("codex");
+  const ready = {
+    instanceId: instance,
+    driver: codex,
+    enabled: true,
+    installed: true,
+    status: "ready" as const,
+    auth: { status: "authenticated" as const },
+  };
+  const candidate = {
+    connected: true,
+    weight: 50,
+    holdsReferencedThreadContexts: true,
+    providers: [ready],
+    activeProviderInstanceId: null,
+    selectedProvider: codex,
+  };
+
+  it("lets a connected, weighted machine with a usable provider be chosen", () => {
+    expect(autoSelectionBlocker(candidate)).toBeNull();
+    expect(autoSelectionBlocker({ ...candidate, activeProviderInstanceId: instance })).toBeNull();
+  });
+
+  it.each([
+    ["is not connected", { connected: false }, "Not connected"],
+    ["has weight zero", { weight: 0 }, "Manual only (weight 0)"],
+    [
+      "is not where the referenced thread contexts are",
+      { holdsReferencedThreadContexts: false },
+      "Thread context is on another machine",
+    ],
+    ["lists no providers", { providers: undefined }, "Provider isn't installed here"],
+    [
+      "lists only another provider",
+      { providers: [{ ...ready, driver: claude }] },
+      "Provider isn't installed here",
+    ],
+    [
+      "lists only another instance when one is asked for",
+      {
+        providers: [{ ...ready, instanceId: ProviderInstanceId.make("codex_personal") }],
+        activeProviderInstanceId: instance,
+      },
+      "Provider isn't installed here",
+    ],
+    [
+      "has the provider not installed",
+      { providers: [{ ...ready, installed: false }] },
+      "Provider isn't installed here",
+    ],
+    [
+      "has the provider disabled for the project",
+      { providers: [{ ...ready, enabled: false }] },
+      "Provider is disabled for this project",
+    ],
+    [
+      "has the provider in error",
+      { providers: [{ ...ready, status: "error" as const }] },
+      "Provider reports an error",
+    ],
+    [
+      "has the provider signed out",
+      { providers: [{ ...ready, auth: { status: "unauthenticated" as const } }] },
+      "Provider isn't signed in",
+    ],
+    [
+      "has the provider unavailable",
+      { providers: [{ ...ready, availability: "unavailable" as const }] },
+      "Provider is unavailable",
+    ],
+  ])("says why a machine that %s is left out", (_name, change, reason) => {
+    expect(autoSelectionBlocker({ ...candidate, ...change })).toBe(reason);
+  });
+
+  it("names the first unmet condition", () => {
+    expect(
+      autoSelectionBlocker({
+        ...candidate,
+        connected: false,
+        weight: 0,
+        holdsReferencedThreadContexts: false,
+        providers: undefined,
+      }),
+    ).toBe("Not connected");
+    expect(
+      autoSelectionBlocker({
+        ...candidate,
+        weight: 0,
+        holdsReferencedThreadContexts: false,
+        providers: undefined,
+      }),
+    ).toBe("Manual only (weight 0)");
+    expect(
+      autoSelectionBlocker({ ...candidate, holdsReferencedThreadContexts: false, providers: [] }),
+    ).toBe("Thread context is on another machine");
+    expect(
+      autoSelectionBlocker({
+        ...candidate,
+        providers: [{ ...ready, installed: false, enabled: false, status: "error" as const }],
+      }),
+    ).toBe("Provider isn't installed here");
+  });
+
+  it("keeps a machine whose other instance of the provider is usable", () => {
+    expect(
+      autoSelectionBlocker({
+        ...candidate,
+        providers: [
+          { ...ready, enabled: false },
+          { ...ready, instanceId: ProviderInstanceId.make("codex_personal") },
+        ],
+      }),
+    ).toBeNull();
   });
 });
