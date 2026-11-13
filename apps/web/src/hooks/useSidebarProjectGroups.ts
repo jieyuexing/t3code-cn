@@ -9,7 +9,7 @@ import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../s
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 
-export function useSidebarProjectGroups(excludedEnvironmentIds?: ReadonlySet<string>) {
+export function useSidebarProjectGroups() {
   const projects = useProjects();
   // Activity order lags a running thread's streaming ticks until its next
   // real change; reading every tick re-rendered the whole sidebar with it.
@@ -39,11 +39,5 @@ export function useSidebarProjectGroups(excludedEnvironmentIds?: ReadonlySet<str
     primaryEnvironmentId,
     resolveEnvironmentLabel: (environmentId) => labels.get(environmentId) ?? null,
   });
-  return sortSidebarV2ProjectGroups(
-    unsortedGroups,
-    threads,
-    sortOrder,
-    delegatedUnderParent,
-    excludedEnvironmentIds,
-  );
+  return sortSidebarV2ProjectGroups(unsortedGroups, threads, sortOrder, delegatedUnderParent);
 }
