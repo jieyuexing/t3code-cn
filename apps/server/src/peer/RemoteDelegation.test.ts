@@ -2079,6 +2079,7 @@ const autoPlacement = (
   machines: {
     readonly laptop?: EnvironmentMachineKind;
     readonly box?: EnvironmentMachineKind;
+    readonly boxWeight?: number;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -2096,6 +2097,9 @@ const autoPlacement = (
       withMachine(laptop, machines.laptop),
     );
     yield* linkTo(a.links, b, access);
+    if (machines.boxWeight !== undefined) {
+      yield* b.settings.updateSettings({ loadBalancingWeight: machines.boxWeight });
+    }
     yield* seedParent(a);
     return { thread, a };
   });
@@ -2129,24 +2133,78 @@ it.effect("auto places a task on the less loaded machine, and ties stay here", (
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
-// Both machines are equally quiet, so only their kinds decide.
+// The laptop here starts busy and the box quiet, unless a row says otherwise.
 it.effect.each([
-  { name: "ties stay here without kinds", machines: {}, placed: here },
+  { name: "a quiet box that declares nothing, like an older version, wins", placed: "box" },
   {
-    name: "an always-on box outweighs a laptop here",
-    machines: { laptop: "laptop", box: "server" },
-    placed: { environmentId: box.environmentId, projectId: boxProject },
+    name: "an always-on box outweighs a laptop here when both are quiet",
+    kinds: { laptop: "laptop", box: "server" },
+    laptopLoad: idle,
+    placed: "box",
   },
   {
     name: "a laptop box does not outweigh an always-on machine here",
-    machines: { laptop: "server", box: "laptop" },
-    placed: here,
+    kinds: { laptop: "server", box: "laptop" },
+    laptopLoad: idle,
+    placed: "here",
   },
-] as const)("auto weighs machines by kind: $name", ({ machines, placed }) =>
+  {
+    name: "a weight the box declares outweighs the same quiet machine without one",
+    kinds: {},
+    laptopLoad: idle,
+    boxWeight: 100,
+    placed: "box",
+  },
+  {
+    name: "a weight the box declares beats its kind",
+    kinds: { box: "server" },
+    laptopLoad: idle,
+    boxWeight: 10,
+    placed: "here",
+  },
+  {
+    name: "a box that declares zero is never chosen",
+    kinds: { box: "server" },
+    boxWeight: 0,
+    placed: "here",
+  },
+  {
+    name: "a weight declared here can outweigh a quieter box",
+    kinds: {},
+    boxWeight: 20,
+    localWeight: 100,
+    placed: "here",
+  },
+  {
+    name: "this machine declaring zero leaves it out",
+    kinds: {},
+    laptopLoad: idle,
+    boxLoad: busy,
+    localWeight: 0,
+    placed: "box",
+  },
+] as const satisfies ReadonlyArray<{
+  readonly name: string;
+  readonly kinds?: { laptop?: EnvironmentMachineKind; box?: EnvironmentMachineKind };
+  readonly laptopLoad?: HostResourcesSnapshot;
+  readonly boxLoad?: HostResourcesSnapshot;
+  readonly boxWeight?: number;
+  readonly localWeight?: number;
+  readonly placed: "box" | "here";
+}>)("auto weighs machines: $name", (row) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const { a } = yield* autoPlacement("full-access", idle, machines);
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(placed);
+      const { thread, a } = yield* autoPlacement("full-access", row.laptopLoad ?? busy, {
+        ...row.kinds,
+        ...("boxWeight" in row ? { boxWeight: row.boxWeight } : {}),
+      });
+      if ("boxLoad" in row) yield* Ref.set(thread.load, Effect.succeed(row.boxLoad));
+      if ("localWeight" in row) {
+        yield* a.settings.updateSettings({ loadBalancingWeight: row.localWeight });
+      }
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(
+        row.placed === "box" ? { environmentId: box.environmentId, projectId: boxProject } : here,
+      );
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

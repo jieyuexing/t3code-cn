@@ -254,6 +254,29 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("keeps a declared load balancing weight, including zero, until it is cleared", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      assert.isNull((yield* service.getSettings).loadBalancingWeight);
+
+      const declared = yield* service.updateSettings({ loadBalancingWeight: 0 });
+      assert.equal(declared.loadBalancingWeight, 0);
+      assert.equal(
+        JSON.parse(yield* fs.readFileString(config.settingsPath)).loadBalancingWeight,
+        0,
+      );
+
+      const cleared = yield* service.updateSettings({ loadBalancingWeight: null });
+      assert.isNull(cleared.loadBalancingWeight);
+      assert.notProperty(
+        JSON.parse(yield* fs.readFileString(config.settingsPath)),
+        "loadBalancingWeight",
+      );
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("keeps an override key a newer server saved when a project setting is edited", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;

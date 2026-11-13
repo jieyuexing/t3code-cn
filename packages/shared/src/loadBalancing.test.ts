@@ -88,6 +88,15 @@ describe("resolving a machine's load balancing weight", () => {
     expect(resolveLoadBalancingWeight({ explicit: 25, machine: "server" })).toBe(25);
   });
 
+  it("takes what the machine declares unless the client picked, and zero excludes it", () => {
+    expect(resolveLoadBalancingWeight({ declared: 80, machine: "laptop" })).toBe(80);
+    expect(resolveLoadBalancingWeight({ explicit: 25, declared: 80, machine: "laptop" })).toBe(25);
+    expect(resolveLoadBalancingWeight({ explicit: 0, declared: 80 })).toBe(0);
+    expect(resolveLoadBalancingWeight({ declared: 0, machine: "server" })).toBe(0);
+    expect(resolveLoadBalancingWeight({ explicit: 40, declared: 0, machine: "server" })).toBe(40);
+    expect(resolveLoadBalancingWeight({ machine: "server" })).toBe(100);
+  });
+
   it("keeps a client's explicit zero, which leaves the machine out", () => {
     const resources = {
       sampledAt: 100_000,

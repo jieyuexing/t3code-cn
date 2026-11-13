@@ -329,10 +329,9 @@ export const BrowserCustomSearchUrl = Schema.String.check(
   Schema.isMaxLength(BROWSER_CUSTOM_SEARCH_URL_MAX_LENGTH),
 );
 
-export const LoadBalancingWeights = Schema.Record(
-  TrimmedNonEmptyString,
-  Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
-);
+export const LoadBalancingWeight = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 }));
+
+export const LoadBalancingWeights = Schema.Record(TrimmedNonEmptyString, LoadBalancingWeight);
 
 export const DiffColorScheme = Schema.Literals(["red-green", "blue-orange"]);
 
@@ -1479,6 +1478,8 @@ export const ServerSettings = Schema.Struct({
   environmentIcon: ForwardCompatibleNullable(EnvironmentMachineKind).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /** Null means the machine declares no weight, so clients use its kind's default. Omitted on the wire when null. */
+  loadBalancingWeight: OmittedWhenNull(LoadBalancingWeight),
   /** Null inherits t3.json, then local; omit it on the wire for older clients requiring a literal. */
   defaultThreadEnvMode: OmittedWhenNull(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
@@ -1882,6 +1883,7 @@ export const ServerSettingsPatch = Schema.Struct({
   providerHealthRefreshInterval: Schema.optionalKey(Schema.DurationFromMillis),
   backgroundActivityProfile: Schema.optionalKey(BackgroundActivityProfile),
   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
+  loadBalancingWeight: Schema.optionalKey(Schema.NullOr(LoadBalancingWeight)),
   defaultThreadEnvMode: Schema.optionalKey(Schema.NullOr(ThreadEnvMode)),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: Schema.optionalKey(Schema.NullOr(WorktreeSubmodules)),

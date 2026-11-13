@@ -49,6 +49,7 @@ import * as ProjectCheckout from "../project/ProjectCheckout.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as HostResources from "../resourceTelemetry/HostResources.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as PeerForwarding from "./PeerForwarding.ts";
 import * as PeerLinks from "./PeerLinks.ts";
@@ -195,6 +196,7 @@ const make = Effect.gen(function* () {
   const hostResources = yield* HostResources.HostResources;
   const checkouts = yield* ProjectCheckout.ProjectCheckout;
   const random = yield* SecureRandom.SecureRandom;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const hereEnvironment = yield* ServerEnvironment.ServerEnvironment;
   const hereId = yield* hereEnvironment.getEnvironmentId;
   // Followers live as long as this service, so shutting down stops them.
@@ -419,6 +421,7 @@ const make = Effect.gen(function* () {
               projectId: matched.id,
               resources: environment.hostResources,
               machine: environment.platform.machine,
+              declared: environment.preferences.loadBalancingWeight,
             };
       });
       // Anything that keeps a machine from answering in time leaves it out.
@@ -440,14 +443,18 @@ const make = Effect.gen(function* () {
             resources: yield* hostResources.read,
             receivedAt: now,
             weight: resolveLoadBalancingWeight({
+              declared: yield* settings.getSettings.pipe(
+                Effect.map((current) => current.loadBalancingWeight ?? undefined),
+                Effect.orElseSucceed(() => undefined),
+              ),
               machine: (yield* hereEnvironment.getDescriptor).platform.machine,
             }),
           },
-          ...there.map(({ environmentId, resources, machine }) => ({
+          ...there.map(({ environmentId, resources, machine, declared }) => ({
             environmentId,
             resources,
             receivedAt: now,
-            weight: resolveLoadBalancingWeight({ machine }),
+            weight: resolveLoadBalancingWeight({ declared, machine }),
           })),
         ],
         now,
