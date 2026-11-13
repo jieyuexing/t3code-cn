@@ -50,6 +50,7 @@ let declare: <P, A, E, R>(
   handle: (params: P) => Effect.Effect<A, E, R>,
   remote: RemoteCheck<P> | undefined,
   placement?: (params: P) => RemoteDelegation.PlacementRequest,
+  forwarded?: Forwarded<P, A, E, R>,
 ) => Declaration<(params: P) => Effect.Effect<A, E, R>>;
 
 /**
@@ -64,6 +65,16 @@ let remoteCheckOf: <Handler>(declaration: Declaration<Handler>) => RemoteCheck<n
 let placementOf: <Handler>(
   declaration: Declaration<Handler>,
 ) => ((params: never) => RemoteDelegation.PlacementRequest) | undefined;
+
+/** What a call answered in a linked environment does here before it returns. */
+type Forwarded<P, A, E, R> = (
+  params: P,
+  environmentId: EnvironmentId,
+  result: A,
+) => Effect.Effect<A, E, R>;
+let forwardedOf: <Handler>(
+  declaration: Declaration<Handler>,
+) => Forwarded<never, unknown, unknown, unknown> | undefined;
 
 type CheckedHandlerOf<D> = D extends Declaration<infer Handler> ? Handler : never;
 
@@ -82,22 +93,33 @@ export class Declaration<out Handler> {
   readonly #handle: Handler;
   readonly #remote: RemoteCheck<never> | undefined;
   readonly #placement: ((params: never) => RemoteDelegation.PlacementRequest) | undefined;
+  readonly #forwarded: Forwarded<never, unknown, unknown, unknown> | undefined;
   private constructor(
     token: typeof builtHere,
     handle: Handler,
     remote: RemoteCheck<never> | undefined,
     placement: ((params: never) => RemoteDelegation.PlacementRequest) | undefined,
+    forwarded: Forwarded<never, unknown, unknown, unknown> | undefined,
   ) {
     refuseOutsideConstruction(token);
     this.#handle = handle;
     this.#remote = remote;
     this.#placement = placement;
+    this.#forwarded = forwarded;
   }
   static {
-    declare = (handle, remote, placement) => new Declaration(builtHere, handle, remote, placement);
+    declare = (handle, remote, placement, forwarded) =>
+      new Declaration(
+        builtHere,
+        handle,
+        remote,
+        placement,
+        forwarded as Forwarded<never, unknown, unknown, unknown> | undefined,
+      );
     checkedHandler = Struct.lambda<CheckedHandler>((declaration) => declaration.#handle);
     remoteCheckOf = (declaration) => declaration.#remote;
     placementOf = (declaration) => declaration.#placement;
+    forwardedOf = (declaration) => declaration.#forwarded;
   }
 }
 
@@ -295,6 +317,21 @@ export const either = <P, A, E, R, A2, E2, R2>(
   );
 };
 
+/**
+ * `declaration`, whose result from a linked environment then goes through
+ * `forwarded` here, for what this environment records about the call.
+ */
+export const afterForwarding = <P, A, E, R, E2, R2>(
+  declaration: Declaration<(params: P) => Effect.Effect<A, E, R>>,
+  forwarded: Forwarded<P, A, E2, R2>,
+) =>
+  declare(
+    checkedHandler(declaration) as (params: P) => Effect.Effect<A, E | E2, R | R2>,
+    remoteCheckOf(declaration) as RemoteCheck<P> | undefined,
+    placementOf(declaration) as ((params: P) => RemoteDelegation.PlacementRequest) | undefined,
+    forwarded,
+  );
+
 const fullAccessRequired =
   "Changing projects or environment settings needs a live full-access/default calling thread or a full-access client.";
 
@@ -402,6 +439,9 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
     const tool = toolkit.tools[name];
     if (tool === undefined || !takesLinkedEnvironment(tool)) continue;
     const remote = remoteCheckOf(declaration);
+    const forwarded = forwardedOf(declaration) as
+      | Forwarded<object, unknown, Tool.Failure<Tools[keyof Tools]>, never>
+      | undefined;
     if (remote === undefined)
       return yield* Effect.die(
         `${name} takes a linked environment, but it acts as its calling thread, which is here.`,
@@ -439,14 +479,17 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
         // A launch in the project's own checkout runs on the code that is there.
         const request = placement?.(params);
         const thereProjectId = placed?.projectId ?? request?.projectId;
+        const forwardedCall = forwarding.value.call(scope, tool, target, {
+          ...params,
+          // The project there that has the repository, not the id here.
+          ...(placed?.projectId === undefined ? {} : { projectId: placed.projectId }),
+          environmentId: target,
+        });
         const [result, checkout] = yield* Effect.all(
           [
-            forwarding.value.call(scope, tool, target, {
-              ...params,
-              // The project there that has the repository, not the id here.
-              ...(placed?.projectId === undefined ? {} : { projectId: placed.projectId }),
-              environmentId: target,
-            }),
+            forwarded === undefined
+              ? forwardedCall
+              : forwardedCall.pipe(Effect.flatMap((result) => forwarded(params, target, result))),
             Option.isSome(delegation) && request?.hereOnly === false && thereProjectId !== undefined
               ? delegation.value.checkout(scope, {
                   environmentId: target,

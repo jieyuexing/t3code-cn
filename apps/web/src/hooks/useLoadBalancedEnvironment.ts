@@ -1,5 +1,6 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { chooseLoadBalancedEnvironment } from "@t3tools/shared/loadBalancing";
+import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { useContext } from "react";
@@ -41,7 +42,8 @@ const hostResourcesAtom = Atom.family((environmentIdsKey: string) =>
 
 /** Only mounted for unresolved automatic drafts, so idle clients do not poll hosts. */
 export function useLoadBalancedEnvironment(
-  candidates: ReadonlyArray<{ readonly environmentId: EnvironmentId; readonly weight: number }>,
+  environmentIds: readonly EnvironmentId[],
+  weights: Readonly<Record<string, number>>,
 ) {
   const registry = useContext(RegistryContext);
   const refresh = (ids: readonly EnvironmentId[]) => {
@@ -49,22 +51,36 @@ export function useLoadBalancedEnvironment(
       registry.refresh(serverEnvironment.hostResources({ environmentId, input: {} }));
     }
   };
-  const { evaluatedAt, resources } = useAtomValue(
-    hostResourcesAtom(candidates.map((candidate) => candidate.environmentId).join("\n")),
-  );
-  const weightById = new Map(
-    candidates.map((candidate) => [candidate.environmentId, candidate.weight]),
-  );
+  const refreshSelection = async (ids: readonly EnvironmentId[]) => {
+    const candidates = await Promise.all(
+      ids.map(async (environmentId) => {
+        const result = await executeAtomQuery(
+          registry,
+          serverEnvironment.hostResources({ environmentId, input: {} }),
+          { refresh: true, reportFailure: false, signal: AbortSignal.timeout(5_000) },
+        );
+        return {
+          environmentId,
+          resources: result._tag === "Success" ? result.value : null,
+          receivedAt: Date.now(),
+          weight: weights[environmentId] ?? 50,
+        };
+      }),
+    );
+    return chooseLoadBalancedEnvironment(candidates, Date.now()) as EnvironmentId | null;
+  };
+  const { evaluatedAt, resources } = useAtomValue(hostResourcesAtom(environmentIds.join("\n")));
   const pending = resources.some((resource) => resource.pending);
   const environmentId = chooseLoadBalancedEnvironment(
     resources.map((resource) => ({
       ...resource,
-      weight: weightById.get(resource.environmentId) ?? 0,
+      weight: weights[resource.environmentId] ?? 50,
     })),
     evaluatedAt,
   ) as EnvironmentId | null;
   return {
     refresh,
+    refreshSelection,
     pending,
     environmentId,
     failed: !pending && environmentId === null && resources.some((resource) => resource.failed),
