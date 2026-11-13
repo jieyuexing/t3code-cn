@@ -16,6 +16,7 @@ import {
   ProjectId,
   OrchestratorMcpClientRequestId,
   OrchestratorMcpCheckout,
+  OrchestratorMcpPlacement,
   OrchestratorMcpEnvironmentTarget,
   EnvironmentId,
   OrchestratorMcpFailure,
@@ -169,6 +170,8 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     environmentId: Schema.optional(EnvironmentId),
     /** Set for a launch in a linked environment's project checkout; see `OrchestratorMcpCheckout`. */
     checkout: Schema.optional(OrchestratorMcpCheckout),
+    /** Set when `environmentId` was "auto": the choice and each machine passed over. */
+    placement: Schema.optional(OrchestratorMcpPlacement),
     link: Schema.optional(Schema.String),
     projectId: ProjectId,
     modelSelection: ModelSelection,

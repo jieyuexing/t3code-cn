@@ -84,6 +84,8 @@ const boxProject = ProjectId.make("project:box");
 const boxOtherRepository = ProjectId.make("project:box-elsewhere");
 /** A project on the laptop whose repository the box does not have. */
 const laptopOtherProject = ProjectId.make("project:laptop-other");
+/** A project on the laptop that is not in any repository. */
+const laptopLooseProject = ProjectId.make("project:laptop-loose");
 const instanceId = ProviderInstanceId.make("codex");
 const driver = ProviderDriverKind.make("codex");
 const modelSelection = { instanceId, model: "gpt-5.4" };
@@ -639,6 +641,8 @@ const makeLaptop = (
     });
     // A box on an older version does not send `head`.
     const olderBox = yield* Ref.make(false);
+    // A box on an older version does not report its load.
+    const withoutLoad = yield* Ref.make(false);
     const layerForwarding = Layer.effect(
       PeerForwarding.PeerForwarding,
       Effect.map(PeerForwarding.PeerForwarding, (forwarding) => ({
@@ -647,11 +651,21 @@ const makeLaptop = (
           forwarding.call(scope, tool, environmentId, params).pipe(
             Effect.flatMap((result) =>
               Ref.get(olderBox).pipe(
-                Effect.map((older) => {
-                  if (!older || tool.name !== "t3_project_read") return result;
-                  const { head: _head, ...rest } = result as { head?: unknown };
-                  return rest as typeof result;
-                }),
+                Effect.flatMap((older) =>
+                  Ref.get(withoutLoad).pipe(
+                    Effect.map((unloaded) => {
+                      if (unloaded && tool.name === "t3_environment_read") {
+                        const { hostResources: _load, ...rest } = result as {
+                          hostResources?: unknown;
+                        };
+                        return rest as typeof result;
+                      }
+                      if (!older || tool.name !== "t3_project_read") return result;
+                      const { head: _head, ...rest } = result as { head?: unknown };
+                      return rest as typeof result;
+                    }),
+                  ),
+                ),
               ),
             ),
           )) as typeof forwarding.call,
@@ -689,7 +703,12 @@ const makeLaptop = (
               // A cold enrichment cache: the project itself reports no identity yet.
               getById: (id) =>
                 Effect.succeedSome({
-                  workspaceRoot: id === laptopOtherProject ? "/home/me/other" : "/home/me/app",
+                  workspaceRoot:
+                    id === laptopOtherProject
+                      ? "/home/me/other"
+                      : id === laptopLooseProject
+                        ? "/home/me/loose"
+                        : "/home/me/app",
                   repositoryIdentity: null,
                 } as never),
             }),
@@ -738,10 +757,16 @@ const makeLaptop = (
       /** What this machine's checkout of the project is at. */
       checkout,
       olderBox,
+      withoutLoad,
       links: Context.get(linking, PeerLinks.PeerLinks),
       settings: Context.get(linking, ServerSettings.ServerSettingsService),
       orchestrator: Context.get(here, Orchestrator.OrchestratorV2),
       remote: Context.get(here, RemoteDelegation.RemoteDelegation),
+      /** Where `place` puts the work, without the account of the machines it passed over. */
+      placed: (...args: Parameters<RemoteDelegation.RemoteDelegation["Service"]["place"]>) =>
+        Context.get(here, RemoteDelegation.RemoteDelegation)
+          .place(...args)
+          .pipe(Effect.map(({ skipped: _skipped, ...placement }) => placement)),
       threads: Context.get(here, ThreadManagement.ThreadManagementService),
       projections: Context.get(here, ProjectionStore.ProjectionStoreV2),
       sink: Context.get(here, EventSink.EventSinkV2),
@@ -2073,6 +2098,8 @@ const withMachine = (descriptor: typeof box, machine: EnvironmentMachineKind | u
     ? descriptor
     : { ...descriptor, platform: { ...descriptor.platform, machine } };
 
+type AutoPlacement = Effect.Success<ReturnType<typeof autoPlacement>>;
+
 /** The laptop (busy by default) linked to the box, whose load the test sets through `thread.load`. */
 const autoPlacement = (
   access: Parameters<typeof linkTo>[2] = "full-access",
@@ -2111,13 +2138,13 @@ it.effect("auto places a task on the less loaded machine, and ties stay here", (
   Effect.scoped(
     Effect.gen(function* () {
       const { thread, a } = yield* autoPlacement();
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual({
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual({
         environmentId: box.environmentId,
         projectId: boxProject,
       });
 
       yield* Ref.set(thread.load, Effect.succeed(busy));
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(here);
 
       // The task itself goes where the placement said.
       yield* Ref.set(thread.load, Effect.succeed(idle));
@@ -2203,7 +2230,7 @@ it.effect.each([
       if ("localWeight" in row) {
         yield* a.settings.updateSettings({ loadBalancingWeight: row.localWeight });
       }
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(
         row.placed === "box" ? { environmentId: box.environmentId, projectId: boxProject } : here,
       );
     }),
@@ -2214,42 +2241,42 @@ it.effect("auto leaves out a machine that is not a candidate", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const { thread, a } = yield* autoPlacement();
-      const placed = a.remote.place(parentScope, { hereOnly: false });
+      const placed = a.placed(parentScope, { hereOnly: false });
 
       // Without this repository there, or when only this machine can run it.
       expect(
-        yield* a.remote.place(parentScope, { hereOnly: false, projectId: laptopOtherProject }),
+        yield* a.placed(parentScope, { hereOnly: false, projectId: laptopOtherProject }),
       ).toEqual(here);
-      expect(yield* a.remote.place(parentScope, { hereOnly: true })).toEqual(here);
+      expect(yield* a.placed(parentScope, { hereOnly: true })).toEqual(here);
 
       // Another commit there, or one it cannot say, is not the code this machine has.
       const there = { environmentId: box.environmentId, projectId: boxProject };
       yield* Ref.set(thread.head, otherCommit);
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(here);
       yield* Ref.set(thread.head, null);
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(here);
       // Nor is any machine a match for a checkout here that cannot say.
       yield* Ref.set(thread.head, commit);
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(there);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(there);
       yield* Ref.set(a.checkout, { head: null, uncommitted: false });
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(here);
       // Two commits that cannot be read are not the same commit.
       yield* Ref.set(thread.head, null);
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(here);
       yield* Ref.set(thread.head, commit);
       // A box on an older version sends no commit to match.
       yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
       yield* Ref.set(a.olderBox, true);
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(here);
       yield* Ref.set(a.olderBox, false);
       // Edits here do not rule the other machine out.
       yield* Ref.set(a.checkout, { head: commit, uncommitted: true });
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(there);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(there);
       yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
 
       // With linked environments off, nothing is asked of the box.
       yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: false });
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(here);
       yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: true });
 
       // A silent box is given up on, not waited for.
@@ -2430,10 +2457,10 @@ it.effect("auto leaves out a machine whose provider cannot run the task", () =>
       const { thread, a } = yield* autoPlacement();
       const request = { hereOnly: false, providerInstanceId: instanceId, model: "gpt-5.4" };
       const there = { environmentId: box.environmentId, projectId: boxProject };
-      expect(yield* a.remote.place(parentScope, request)).toEqual(there);
+      expect(yield* a.placed(parentScope, request)).toEqual(there);
 
       // The model asked for is not in its catalog.
-      expect(yield* a.remote.place(parentScope, { ...request, model: "gpt-9" })).toEqual(here);
+      expect(yield* a.placed(parentScope, { ...request, model: "gpt-9" })).toEqual(here);
       yield* a.call("delegate_task", {
         task: "Run the suite wherever it is quiet.",
         target: { environmentId: "auto", providerInstanceId: instanceId, model: "gpt-9" },
@@ -2442,9 +2469,9 @@ it.effect("auto leaves out a machine whose provider cannot run the task", () =>
 
       // The provider is signed out there, whether named or inherited from the thread.
       yield* Ref.set(thread.providers, [{ ...codexReady, auth: { status: "unauthenticated" } }]);
-      expect(yield* a.remote.place(parentScope, request)).toEqual(here);
+      expect(yield* a.placed(parentScope, request)).toEqual(here);
       expect(
-        yield* a.remote.place(parentScope, { hereOnly: false, providerInstanceId: "inherit" }),
+        yield* a.placed(parentScope, { hereOnly: false, providerInstanceId: "inherit" }),
       ).toEqual(here);
 
       // A task that names only a model uses the thread's provider, which the box cannot run.
@@ -2455,7 +2482,7 @@ it.effect("auto leaves out a machine whose provider cannot run the task", () =>
       expect(yield* Ref.get(thread.launched)).toBeNull();
 
       // No provider named: nothing to check, as for a launch that leaves its model to the box.
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(there);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(there);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
@@ -2486,11 +2513,220 @@ it.effect("auto keeps a task here when a worktree or a project is asked for", ()
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+const bySkipped = (
+  skipped: ReadonlyArray<{ readonly environmentId: string }>,
+): ReadonlyArray<{ readonly environmentId: string }> =>
+  skipped.toSorted((left, right) => left.environmentId.localeCompare(right.environmentId));
+const passedOverBox = (reason: string, extra: object = {}) => ({
+  environmentId: box.environmentId,
+  reason,
+  ...extra,
+});
+const passedOverLaptop = (reason: string) => ({ environmentId: laptop.environmentId, reason });
+const asksFor = { hereOnly: false, providerInstanceId: instanceId, model: "gpt-5.4" } as const;
+
+// Each row has the box (and this machine) pass over for exactly one reason.
+it.effect.each([
+  {
+    name: "a link that is read-only",
+    access: "read-only",
+    placed: "here",
+    skipped: [passedOverBox("link_read_only")],
+  },
+  {
+    name: "a request only this machine runs",
+    request: { hereOnly: true },
+    placed: "here",
+    skipped: [passedOverBox("here_only")],
+  },
+  {
+    name: "linked environments switched off",
+    setup: ({ a }) => a.settings.updateSettings({ linkedEnvironmentsEnabled: false }),
+    placed: "here",
+    skipped: [passedOverBox("linked_environments_off")],
+  },
+  {
+    name: "a project here without a repository",
+    request: { hereOnly: false, projectId: laptopLooseProject },
+    placed: "here",
+    skipped: [passedOverBox("no_repository_here")],
+  },
+  {
+    name: "a commit here that cannot be read",
+    setup: ({ a }) => Ref.set(a.checkout, { head: null, uncommitted: false }),
+    placed: "here",
+    skipped: [passedOverBox("checkout_unreadable_here")],
+  },
+  {
+    name: "a box on an older version that reports no load",
+    setup: ({ a }) => Ref.set(a.withoutLoad, true),
+    placed: "here",
+    skipped: [passedOverBox("no_load_reading")],
+  },
+  {
+    name: "a box without a project with this repository",
+    request: { hereOnly: false, projectId: laptopOtherProject },
+    placed: "here",
+    skipped: [passedOverBox("no_single_project")],
+  },
+  {
+    name: "a box at another commit",
+    setup: ({ thread }) => Ref.set(thread.head, otherCommit),
+    placed: "here",
+    skipped: [
+      passedOverBox("checkout_differs", {
+        checkout: { here: commit.slice(0, 8), there: otherCommit.slice(0, 8) },
+      }),
+    ],
+  },
+  {
+    name: "a box that cannot say its commit",
+    setup: ({ thread }) => Ref.set(thread.head, null),
+    placed: "here",
+    skipped: [
+      passedOverBox("checkout_differs", { checkout: { here: commit.slice(0, 8), there: null } }),
+    ],
+  },
+  {
+    name: "a provider that cannot run tasks on the box",
+    request: asksFor,
+    setup: ({ thread }) =>
+      Ref.set(thread.providers, [{ ...codexReady, auth: { status: "unauthenticated" } }]),
+    placed: "here",
+    skipped: [passedOverBox("provider_cannot_run")],
+  },
+  {
+    name: "a model the box does not have",
+    request: { ...asksFor, model: "gpt-9" },
+    placed: "here",
+    skipped: [passedOverBox("model_missing")],
+  },
+  {
+    name: "a box set to manual only",
+    machines: { boxWeight: 0 },
+    placed: "here",
+    skipped: [passedOverBox("weight_zero")],
+  },
+  {
+    name: "this machine set to manual only",
+    setup: ({ a }) => a.settings.updateSettings({ loadBalancingWeight: 0 }),
+    placed: "box",
+    skipped: [passedOverLaptop("weight_zero")],
+  },
+  {
+    name: "a box too busy",
+    setup: ({ thread }) => Ref.set(thread.load, Effect.succeed({ ...idle, cpuUtilization: 0.99 })),
+    placed: "here",
+    skipped: [passedOverBox("overloaded")],
+  },
+  {
+    name: "a box short of memory",
+    setup: ({ thread }) =>
+      Ref.set(thread.load, Effect.succeed({ ...idle, availableMemoryBytes: 1024 })),
+    placed: "here",
+    skipped: [passedOverBox("overloaded")],
+  },
+  {
+    name: "this machine busier than the box",
+    placed: "box",
+    skipped: [passedOverLaptop("not_best")],
+  },
+  {
+    name: "the box busier than this machine",
+    laptopLoad: idle,
+    setup: ({ thread }) => Ref.set(thread.load, Effect.succeed(busy)),
+    placed: "here",
+    skipped: [passedOverBox("not_best")],
+  },
+  {
+    name: "every machine too busy, which keeps the work here and says why for each",
+    laptopLoad: { ...idle, cpuUtilization: 0.99 },
+    setup: ({ thread }) => Ref.set(thread.load, Effect.succeed({ ...idle, cpuUtilization: 0.99 })),
+    placed: "here",
+    skipped: [passedOverBox("overloaded"), passedOverLaptop("overloaded")],
+  },
+] as const satisfies ReadonlyArray<{
+  readonly name: string;
+  readonly access?: "read-only";
+  readonly laptopLoad?: HostResourcesSnapshot;
+  readonly machines?: { readonly boxWeight?: number };
+  readonly request?: object;
+  readonly setup?: (ctx: AutoPlacement) => Effect.Effect<unknown, unknown>;
+  readonly placed: "box" | "here";
+  readonly skipped: ReadonlyArray<object>;
+}>)("auto says why a machine was passed over: $name", (row) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const ctx = yield* autoPlacement(
+        "access" in row ? row.access : "full-access",
+        "laptopLoad" in row ? row.laptopLoad : busy,
+        "machines" in row ? row.machines : {},
+      );
+      if ("setup" in row) yield* row.setup(ctx);
+      const placement = yield* ctx.a.remote.place(
+        parentScope,
+        "request" in row ? row.request : { hereOnly: false },
+      );
+      expect({
+        environmentId: placement.environmentId,
+        skipped: bySkipped(placement.skipped),
+      }).toEqual({
+        environmentId: row.placed === "box" ? box.environmentId : undefined,
+        skipped: bySkipped(row.skipped),
+      });
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("auto gives up on a box that stays silent and says so", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const asked = yield* Deferred.make<void>();
+      yield* Ref.set(
+        thread.load,
+        Deferred.succeed(asked, undefined).pipe(Effect.andThen(Effect.never)),
+      );
+      const waiting = yield* Effect.forkChild(a.remote.place(parentScope, { hereOnly: false }));
+      yield* Deferred.await(asked);
+      yield* TestClock.adjust("3 seconds");
+      expect((yield* Fiber.join(waiting)).skipped).toEqual([passedOverBox("unreachable")]);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a delegation to auto reports where it went and who was passed over", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      // This machine is the busier one, so the task goes to the box.
+      const { a } = yield* autoPlacement();
+      const delegate = (target: object) =>
+        a.call("delegate_task", { task: "Run the suite.", target, mode: "async" });
+      const named = { providerInstanceId: instanceId, model: "gpt-5.4" };
+
+      const auto = yield* delegate({ ...named, environmentId: "auto" });
+      expect(auto.isError, JSON.stringify(auto.content)).toBe(false);
+      expect(auto.structuredContent).toMatchObject({
+        remoteChild: { environmentId: box.environmentId },
+        placement: {
+          environmentId: box.environmentId,
+          skipped: [passedOverLaptop("not_best")],
+        },
+      });
+
+      // A machine named answers as before.
+      const explicit = yield* delegate({ ...named, environmentId: box.environmentId });
+      expect(explicit.isError, JSON.stringify(explicit.content)).toBe(false);
+      expect(explicit.structuredContent).not.toHaveProperty("placement");
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
 it.effect("auto does not pick a read-only link", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const { a } = yield* autoPlacement("read-only");
-      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      expect(yield* a.placed(parentScope, { hereOnly: false })).toEqual(here);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

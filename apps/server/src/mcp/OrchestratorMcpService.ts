@@ -23,6 +23,7 @@ import {
   type OrchestratorMcpCreatedThread,
   type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpDelegateTaskResult,
+  type OrchestratorMcpPlacement,
   type OrchestratorMcpDeleteScheduledTaskInput,
   type OrchestratorMcpRequestSecretInput,
   type OrchestratorMcpRequestSecretResult,
@@ -1454,10 +1455,17 @@ const make = Effect.gen(function* () {
   const placeAutoTarget = Effect.fn("OrchestratorMcpService.placeAutoTarget")(function* (
     scope: McpInvocationScope,
     input: OrchestratorMcpDelegateTaskInput,
-  ): Effect.fn.Return<OrchestratorMcpDelegateTaskInput, OrchestratorMcpFailure> {
+  ): Effect.fn.Return<
+    {
+      readonly input: OrchestratorMcpDelegateTaskInput;
+      /** Set when the caller asked for "auto". */
+      readonly placement: OrchestratorMcpPlacement | undefined;
+    },
+    OrchestratorMcpFailure
+  > {
     const { target } = input;
     if (target === undefined || target.environmentId !== OrchestratorMcpAutoEnvironment) {
-      return input;
+      return { input, placement: undefined };
     }
     if (target.projectId !== undefined) {
       return yield* failure(
@@ -1472,11 +1480,17 @@ const make = Effect.gen(function* () {
       model: target.model,
     });
     return {
-      ...input,
-      target:
-        placed.environmentId === undefined
-          ? rest
-          : { ...rest, environmentId: placed.environmentId, projectId: placed.projectId },
+      input: {
+        ...input,
+        target:
+          placed.environmentId === undefined
+            ? rest
+            : { ...rest, environmentId: placed.environmentId, projectId: placed.projectId },
+      },
+      placement: {
+        environmentId: placed.environmentId ?? scope.environmentId,
+        skipped: placed.skipped,
+      },
     };
   });
 
@@ -2433,7 +2447,9 @@ const make = Effect.gen(function* () {
       };
     }),
     delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(function* (callerScope, asked) {
-      const input = yield* placeAutoTarget(callerScope, asked);
+      const { input, placement } = yield* placeAutoTarget(callerScope, asked);
+      const withPlacement = <A extends object>(result: A) =>
+        placement === undefined ? result : { ...result, placement };
       const environmentId =
         input.target === undefined
           ? undefined
@@ -2450,9 +2466,11 @@ const make = Effect.gen(function* () {
           ? awaitTask(scope, taskId, taskId, input.timeoutMs)
           : readTask(scope, taskId, false, true);
         // An ended task carries the comparison made when it ended, not the one from the launch.
-        return checkout === undefined || isTerminalTaskStatus(task.status)
-          ? task
-          : { ...task, checkout };
+        return withPlacement(
+          checkout === undefined || isTerminalTaskStatus(task.status)
+            ? task
+            : { ...task, checkout },
+        );
       }
       const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
       if (
@@ -2590,9 +2608,11 @@ const make = Effect.gen(function* () {
         });
       }
 
-      return yield* input.mode === "wait"
-        ? awaitTask(scope, taskId, key, input.timeoutMs)
-        : readTask(scope, taskId, false, true);
+      return withPlacement(
+        yield* input.mode === "wait"
+          ? awaitTask(scope, taskId, key, input.timeoutMs)
+          : readTask(scope, taskId, false, true),
+      );
     }),
     taskStatus: Effect.fn("OrchestratorMcpService.taskStatus")(function* (callerScope, taskId) {
       const scope = yield* requireThreadScope(callerScope, "task_status");

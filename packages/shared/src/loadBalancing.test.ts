@@ -2,7 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ENVIRONMENT_MACHINE_KINDS, type EnvironmentMachineKind } from "@t3tools/contracts";
 
-import { chooseLoadBalancedEnvironment, resolveLoadBalancingWeight } from "./loadBalancing.ts";
+import {
+  chooseLoadBalancedEnvironment,
+  loadBalancingExclusion,
+  resolveLoadBalancingWeight,
+} from "./loadBalancing.ts";
 
 describe("load balancing shared project machines", () => {
   const now = 100_000;
@@ -110,5 +114,40 @@ describe("resolving a machine's load balancing weight", () => {
     expect(
       chooseLoadBalancedEnvironment([{ environmentId: "manual-only", resources, weight }], 100_000),
     ).toBeNull();
+  });
+});
+
+describe("why a machine cannot be chosen", () => {
+  const now = 100_000;
+  const resources = {
+    sampledAt: now,
+    cpuUtilization: 0.2,
+    cpuCount: 8,
+    availableMemoryBytes: 8_000,
+    totalMemoryBytes: 16_000,
+  };
+  const exclusion = (candidate: Partial<Parameters<typeof loadBalancingExclusion>[0]>) =>
+    loadBalancingExclusion(
+      { environmentId: "environment-box", resources, weight: 50, ...candidate },
+      now,
+    );
+
+  it("accepts a quiet machine and names the first rule a machine breaks", () => {
+    expect(exclusion({})).toBeNull();
+    expect(exclusion({ weight: 0 })).toBe("weight_zero");
+    expect(exclusion({ weight: Number.NaN })).toBe("weight_zero");
+    // Weight is the user's word and comes first, whatever the load.
+    expect(exclusion({ weight: 0, resources: null })).toBe("weight_zero");
+  });
+
+  it.each([
+    ["no reading", { resources: null }],
+    ["a stale reading", { resources: { ...resources, sampledAt: now - 15_001 } }],
+    ["a reading from the future", { resources: { ...resources, sampledAt: now + 5_001 } }],
+    ["no cpu sample", { resources: { ...resources, cpuUtilization: null } }],
+    ["a saturated cpu", { resources: { ...resources, cpuUtilization: 0.95 } }],
+    ["almost no memory", { resources: { ...resources, availableMemoryBytes: 800 } }],
+  ])("calls %s overloaded", (_name, candidate) => {
+    expect(exclusion(candidate)).toBe("overloaded");
   });
 });

@@ -1,9 +1,12 @@
 import {
   CommandId,
   type EnvironmentId,
+  type EnvironmentMachineKind,
+  type HostResourcesSnapshot,
   NodeId,
   OrchestratorMcpFailure,
   type OrchestratorMcpCheckout,
+  type OrchestratorMcpPlacementSkip,
   type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpTaskCancelResult,
   type OrchestratorMcpThreadRun,
@@ -30,6 +33,7 @@ import type * as Tool from "effect/ai/Tool";
 import { withExecutedModelNote } from "@t3tools/provider-core/server/subagentProjection";
 import {
   chooseLoadBalancedEnvironment,
+  loadBalancingExclusion,
   resolveLoadBalancingWeight,
 } from "@t3tools/shared/loadBalancing";
 
@@ -93,7 +97,7 @@ export interface PlacementRequest {
   readonly hereOnly: boolean;
   /** The provider instance the work runs on; "inherit" is the calling thread's own. */
   readonly providerInstanceId?: ProviderInstanceId | "inherit" | undefined;
-  /** A model that must be in that provider's catalog there. */
+  /** A model that must be in that provider's catalog there; "inherit" is the calling thread's own. */
   readonly model?: string | undefined;
 }
 
@@ -102,6 +106,8 @@ export interface Placement {
   readonly environmentId: EnvironmentId | undefined;
   /** The project there that has this project's repository. */
   readonly projectId: ProjectId | undefined;
+  /** Every other machine, linked or this one, and why it was not picked. */
+  readonly skipped: ReadonlyArray<OrchestratorMcpPlacementSkip>;
 }
 
 /**
@@ -360,8 +366,22 @@ const make = Effect.gen(function* () {
 
   const place: RemoteDelegation["Service"]["place"] = Effect.fn("RemoteDelegation.place")(
     function* (scope, request) {
-      const here: Placement = { environmentId: undefined, projectId: undefined };
-      if (request.hereOnly) return here;
+      // Not `links.list`, which probes every address of every link before it returns.
+      // A link that is expired or does not answer fails its read below instead.
+      const stored = yield* links.stored.pipe(Effect.orElseSucceed(() => []));
+      const writable = stored.filter((link) => link.access !== "read-only");
+      const stayHere = (
+        reason: Exclude<OrchestratorMcpPlacementSkip["reason"], "link_read_only">,
+      ): Placement => ({
+        environmentId: undefined,
+        projectId: undefined,
+        skipped: stored.map((link) => ({
+          environmentId: link.environmentId,
+          reason: link.access === "read-only" ? "link_read_only" : reason,
+        })),
+      });
+      if (request.hereOnly) return stayHere("here_only");
+      if (!(yield* links.enabled)) return stayHere("linked_environments_off");
       const shell =
         scope.thread === undefined
           ? null
@@ -373,19 +393,15 @@ const make = Effect.gen(function* () {
         request.providerInstanceId === "inherit"
           ? shell?.modelSelection.instanceId
           : request.providerInstanceId;
-      if (projectId === undefined) return here;
+      const model = request.model === "inherit" ? shell?.modelSelection.model : request.model;
+      if (projectId === undefined) return stayHere("no_repository_here");
       const key = yield* repositoryKeyOf(projectId);
-      if (key === undefined) return here;
+      if (key === undefined) return stayHere("no_repository_here");
       // Only a machine at this commit runs the task on the same code. Without one here, none matches:
       // a commit there that cannot be read is null too.
       const root = yield* workspaceRootOf(projectId);
       const hereHead = root === undefined ? null : yield* checkouts.head(root);
-      if (hereHead === null) return here;
-      // Not `links.list`, which probes every address of every link before it returns.
-      // A link that is expired or does not answer fails its read below instead.
-      const writable = (yield* links.stored.pipe(Effect.orElseSucceed(() => []))).filter(
-        (link) => link.access !== "read-only",
-      );
+      if (hereHead === null) return stayHere("checkout_unreadable_here");
       const read = Effect.fn("RemoteDelegation.placementRead")(function* (
         environmentId: EnvironmentId,
       ) {
@@ -412,73 +428,109 @@ const make = Effect.gen(function* () {
                   environmentId,
                   {
                     environmentId,
-                    ...(request.model === undefined ? {} : { search: request.model }),
+                    ...(model === undefined ? {} : { search: model }),
                   },
                 ),
           ],
           { concurrency: 3 },
         );
-        const providerUsable =
-          capabilities === undefined ||
-          capabilities.providers.some(
-            (provider) =>
-              provider.providerInstanceId === providerInstanceId &&
-              provider.canRunChildTask &&
-              (request.model === undefined ||
-                provider.models.some((model) => model.id === request.model)),
-          );
-        return environment.hostResources === undefined ||
-          matched === undefined ||
-          matched.head !== hereHead ||
-          !providerUsable
-          ? undefined
-          : {
-              environmentId,
-              projectId: matched.id,
-              resources: environment.hostResources,
-              machine: environment.platform.machine,
-              declared: environment.preferences.loadBalancingWeight,
-            };
+        return { environmentId, response: { environment, matched, capabilities } };
       });
       // Anything that keeps a machine from answering in time leaves it out.
-      const there = (yield* Effect.forEach(
+      const reads = yield* Effect.forEach(
         writable,
         (link) =>
           read(link.environmentId).pipe(
             Effect.timeout(PLACEMENT_READ_TIMEOUT),
-            Effect.orElseSucceed(() => undefined),
+            Effect.orElseSucceed(() => ({
+              environmentId: link.environmentId,
+              response: undefined,
+            })),
           ),
         { concurrency: "unbounded" },
-      )).filter((candidate) => candidate !== undefined);
+      );
+      const skipped: Array<OrchestratorMcpPlacementSkip> = stored
+        .filter((link) => link.access === "read-only")
+        .map((link) => ({ environmentId: link.environmentId, reason: "link_read_only" }));
+      const there: Array<{
+        readonly environmentId: EnvironmentId;
+        readonly projectId: ProjectId;
+        readonly resources: HostResourcesSnapshot;
+        readonly machine: EnvironmentMachineKind | undefined;
+        readonly declared: number | undefined;
+      }> = [];
+      for (const { environmentId, response } of reads) {
+        if (response === undefined) {
+          skipped.push({ environmentId, reason: "unreachable" });
+          continue;
+        }
+        const { environment, matched, capabilities } = response;
+        const instance = capabilities?.providers.find(
+          (provider) =>
+            provider.providerInstanceId === providerInstanceId && provider.canRunChildTask,
+        );
+        if (environment.hostResources === undefined) {
+          skipped.push({ environmentId, reason: "no_load_reading" });
+        } else if (matched === undefined) {
+          skipped.push({ environmentId, reason: "no_single_project" });
+        } else if (matched.head !== hereHead) {
+          skipped.push({
+            environmentId,
+            reason: "checkout_differs",
+            checkout: { here: shortCommit(hereHead), there: shortCommit(matched.head ?? null) },
+          });
+        } else if (capabilities !== undefined && instance === undefined) {
+          skipped.push({ environmentId, reason: "provider_cannot_run" });
+        } else if (
+          capabilities !== undefined &&
+          model !== undefined &&
+          !instance?.models.some((candidate) => candidate.id === model)
+        ) {
+          skipped.push({ environmentId, reason: "model_missing" });
+        } else {
+          there.push({
+            environmentId,
+            projectId: matched.id,
+            resources: environment.hostResources,
+            machine: environment.platform.machine,
+            declared: environment.preferences.loadBalancingWeight,
+          });
+        }
+      }
       const now = DateTime.toEpochMillis(yield* DateTime.now);
       // This machine comes first, so a tie stays here.
-      const chosen = chooseLoadBalancedEnvironment(
-        [
-          {
-            environmentId: hereId,
-            resources: yield* hostResources.read,
-            receivedAt: now,
-            weight: resolveLoadBalancingWeight({
-              declared: yield* settings.getSettings.pipe(
-                Effect.map((current) => current.loadBalancingWeight ?? undefined),
-                Effect.orElseSucceed(() => undefined),
-              ),
-              machine: (yield* hereEnvironment.getDescriptor).platform.machine,
-            }),
-          },
-          ...there.map(({ environmentId, resources, machine, declared }) => ({
-            environmentId,
-            resources,
-            receivedAt: now,
-            weight: resolveLoadBalancingWeight({ declared, machine }),
-          })),
-        ],
-        now,
-      );
+      const candidates = [
+        {
+          environmentId: hereId,
+          resources: yield* hostResources.read,
+          receivedAt: now,
+          weight: resolveLoadBalancingWeight({
+            declared: yield* settings.getSettings.pipe(
+              Effect.map((current) => current.loadBalancingWeight ?? undefined),
+              Effect.orElseSucceed(() => undefined),
+            ),
+            machine: (yield* hereEnvironment.getDescriptor).platform.machine,
+          }),
+        },
+        ...there.map(({ environmentId, resources, machine, declared }) => ({
+          environmentId,
+          resources,
+          receivedAt: now,
+          weight: resolveLoadBalancingWeight({ declared, machine }),
+        })),
+      ];
+      const chosen = chooseLoadBalancedEnvironment(candidates, now);
+      for (const candidate of candidates) {
+        if (candidate.environmentId === chosen) continue;
+        skipped.push({
+          environmentId: candidate.environmentId,
+          reason: loadBalancingExclusion(candidate, now) ?? "not_best",
+        });
+      }
       const picked = there.find((candidate) => candidate.environmentId === chosen);
       return picked === undefined
-        ? here
-        : { environmentId: picked.environmentId, projectId: picked.projectId };
+        ? { environmentId: undefined, projectId: undefined, skipped }
+        : { environmentId: picked.environmentId, projectId: picked.projectId, skipped };
     },
   );
 

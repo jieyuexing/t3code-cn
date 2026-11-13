@@ -108,6 +108,43 @@ export const OrchestratorMcpCheckout = Schema.Struct({
 });
 export type OrchestratorMcpCheckout = typeof OrchestratorMcpCheckout.Type;
 
+/** Why `"auto"` did not pick a machine, from the first condition it failed. */
+export const OrchestratorMcpPlacementSkipReason = Schema.Literals([
+  "here_only",
+  "linked_environments_off",
+  "no_repository_here",
+  "checkout_unreadable_here",
+  "link_read_only",
+  "unreachable",
+  "no_load_reading",
+  "no_single_project",
+  "checkout_differs",
+  "provider_cannot_run",
+  "model_missing",
+  "weight_zero",
+  "overloaded",
+  "not_best",
+]).annotate({
+  description:
+    "here_only: the request has a form only this machine runs. linked_environments_off. no_repository_here: this project has no repository to match. checkout_unreadable_here: this machine's commit is unreadable. link_read_only. unreachable: no answer within 3 seconds. no_load_reading: older version. no_single_project: not exactly one project there with this repository. checkout_differs: commits differ or are unreadable. provider_cannot_run: provider cannot run a task there. model_missing. weight_zero: set to manual only. overloaded: CPU or memory too busy, or the load reading is stale. not_best: qualified, scored lower.",
+});
+export type OrchestratorMcpPlacementSkipReason = typeof OrchestratorMcpPlacementSkipReason.Type;
+
+export const OrchestratorMcpPlacementSkip = Schema.Struct({
+  environmentId: EnvironmentId,
+  reason: OrchestratorMcpPlacementSkipReason,
+  /** With `checkout_differs`: both commits. */
+  checkout: Schema.optional(OrchestratorMcpCheckout),
+});
+export type OrchestratorMcpPlacementSkip = typeof OrchestratorMcpPlacementSkip.Type;
+
+/** Where `"auto"` put the work and each machine it passed over. */
+export const OrchestratorMcpPlacement = Schema.Struct({
+  environmentId: EnvironmentId,
+  skipped: Schema.Array(OrchestratorMcpPlacementSkip),
+});
+export type OrchestratorMcpPlacement = typeof OrchestratorMcpPlacement.Type;
+
 export const OrchestratorMcpTarget = Schema.Struct({
   providerInstanceId: Schema.optional(
     ProviderInstanceId.annotate({
@@ -232,6 +269,8 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
   ),
   link: Schema.optional(Schema.String),
   checkout: Schema.optional(OrchestratorMcpCheckout),
+  /** Set when `target.environmentId` was "auto". */
+  placement: Schema.optional(OrchestratorMcpPlacement),
   childRunId: Schema.NullOr(RunId),
   childNodeId: NodeId,
   status: OrchestratorMcpDelegatedTaskStatus,
@@ -649,9 +688,18 @@ export const OrchestratorMcpEnvironmentLink = Schema.Struct({
 });
 export type OrchestratorMcpEnvironmentLink = typeof OrchestratorMcpEnvironmentLink.Type;
 
+export const OrchestratorMcpEnvironmentLinksInput = Schema.Struct({
+  placement: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Also report where 'auto' would run work for this thread now, and why each other machine would not.",
+  }),
+});
+export type OrchestratorMcpEnvironmentLinksInput = typeof OrchestratorMcpEnvironmentLinksInput.Type;
+
 export const OrchestratorMcpEnvironmentLinksResult = Schema.Struct({
   environmentId: EnvironmentId,
   links: Schema.Array(OrchestratorMcpEnvironmentLink),
+  placement: Schema.optional(OrchestratorMcpPlacement),
   /** What to do when the machine the user means is not among `links`. */
   notListed: Schema.String,
 });

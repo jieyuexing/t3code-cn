@@ -891,6 +891,9 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
       hereProjectId?: ProjectId | undefined;
     }> = [];
     const drift = { here: "aaaaaaaa", there: "bbbbbbbb" };
+    const passedOver = [
+      { environmentId: EnvironmentId.make("environment-den"), reason: "weight_zero" as const },
+    ];
     const launchAuto = Effect.fn("test.launchAuto")(function* (
       placedOn: EnvironmentId | undefined,
       params: object,
@@ -920,8 +923,8 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
             asked.push(request);
             return Effect.succeed(
               request.hereOnly || placedOn === undefined
-                ? { environmentId: undefined, projectId: undefined }
-                : { environmentId: placedOn, projectId: boxProject },
+                ? { environmentId: undefined, projectId: undefined, skipped: passedOver }
+                : { environmentId: placedOn, projectId: boxProject, skipped: passedOver },
             );
           },
         },
@@ -943,7 +946,11 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
     const there = yield* launchAuto(box, {});
     expect(sent).toMatchObject([{ environmentId: box, params: { projectId: boxProject } }]);
     expect(there.launched).toHaveLength(0);
-    expect(there.result).toMatchObject({ environmentId: box, checkout: drift });
+    expect(there.result).toMatchObject({
+      environmentId: box,
+      checkout: drift,
+      placement: { environmentId: box, skipped: passedOver },
+    });
     // Compared against the project asked for here, which is not always the thread's.
     expect(checked).toEqual([
       { environmentId: box, projectId: boxProject, hereProjectId: there.projectId },
@@ -952,7 +959,10 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
     // Here: launched in the project asked for, and the result names this environment.
     const here = yield* launchAuto(undefined, {});
     expect(here.launched).toMatchObject([{ projectId: here.projectId }]);
-    expect(here.result).toMatchObject({ environmentId: "environment" });
+    expect(here.result).toMatchObject({
+      environmentId: "environment",
+      placement: { environmentId: "environment", skipped: passedOver },
+    });
     expect(here.result).not.toHaveProperty("checkout");
 
     // The provider and model it names are what the box must be able to run.
@@ -970,12 +980,14 @@ it.effect("a launch to auto goes where the placement says, and says where it wen
       params: { projectId: named.projectId },
     });
     expect(named.result).not.toHaveProperty("environmentId");
+    expect(named.result).not.toHaveProperty("placement");
     // The check names the project the caller gave, which is the box's, and rides along.
     expect(named.result).toMatchObject({ checkout: drift });
     expect(checked.at(-1)).toEqual({ environmentId: box, projectId: named.projectId });
     const unnamed = yield* launchAuto(box, { environmentId: undefined });
     expect(unnamed.launched).toHaveLength(1);
     expect(unnamed.result).not.toHaveProperty("environmentId");
+    expect(unnamed.result).not.toHaveProperty("placement");
 
     // A launch only this machine can run is never offered a choice.
     yield* launchAuto(box, { scratch: true, projectId: undefined });

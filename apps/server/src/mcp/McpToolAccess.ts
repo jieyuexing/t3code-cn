@@ -420,7 +420,7 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
           environmentId === OrchestratorMcpAutoEnvironment && placement !== undefined
             ? Option.isSome(delegation)
               ? yield* delegation.value.place(scope, placement(params))
-              : { environmentId: undefined, projectId: undefined }
+              : { environmentId: undefined, projectId: undefined, skipped: [] }
             : undefined;
         const chosen = placed === undefined ? environmentId : placed.environmentId;
         const reported = <A>(result: A, checkout?: OrchestratorMcpCheckout) =>
@@ -428,7 +428,15 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
             ? result
             : {
                 ...result,
-                ...(placed === undefined ? {} : { environmentId: chosen ?? scope.environmentId }),
+                ...(placed === undefined
+                  ? {}
+                  : {
+                      environmentId: chosen ?? scope.environmentId,
+                      placement: {
+                        environmentId: chosen ?? scope.environmentId,
+                        skipped: placed.skipped,
+                      },
+                    }),
                 ...(checkout === undefined ? {} : { checkout }),
               };
         const target = PeerForwarding.remoteTarget(scope, chosen);
