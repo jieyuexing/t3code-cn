@@ -1375,7 +1375,7 @@ export const layerWithOptions = (
             providerSessionId,
             reason: "manual_shutdown",
             detail: "Provider settings changed.",
-            keepIfBusyOtherThan: [],
+            keepIfBusyOtherThan: { providerThreadIds: [], throughRunOrdinal: 0 },
           }).pipe(logReleaseFailure(providerSessionId));
           // Runtime, not entry: activity updates replace the entry of a session that was kept.
           const live = (yield* Ref.get(sessions)).get(sessionKey(providerSessionId));
