@@ -184,11 +184,14 @@ const handlers = {
       return yield* service.waitForThread(scope, input);
     }),
   ),
-  t3_environment_links: McpToolAccess.reads(() =>
+  t3_environment_links: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const forwarding = yield* PeerForwarding.PeerForwarding;
-      return yield* forwarding.links(scope);
+      const links = yield* forwarding.links(scope);
+      if (input.placement !== true) return links;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      return { ...links, placement: yield* service.placement(scope) };
     }),
   ),
   // A link lets every agent here reach the other environment, so it is an

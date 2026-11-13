@@ -2722,6 +2722,54 @@ it.effect("a delegation to auto reports where it went and who was passed over", 
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+it.effect("the links list says where auto would run work now, for the calling thread", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const links = (args: Record<string, unknown>) => a.call("t3_environment_links", args);
+      const placement = Effect.gen(function* () {
+        const result = yield* links({ placement: true });
+        expect(result.isError, JSON.stringify(result.content)).toBe(false);
+        return result.structuredContent as { placement?: unknown; links: ReadonlyArray<unknown> };
+      });
+
+      // Without the flag the list is as before.
+      const plain = yield* links({});
+      expect(plain.structuredContent).toMatchObject({
+        links: [{ environmentId: box.environmentId }],
+      });
+      expect(plain.structuredContent).not.toHaveProperty("placement");
+
+      // The box is quieter, so the work would go there; this machine is the one passed over.
+      expect(yield* placement).toMatchObject({
+        links: [{ environmentId: box.environmentId }],
+        placement: { environmentId: box.environmentId, skipped: [passedOverLaptop("not_best")] },
+      });
+
+      // It is the same decision `auto` makes, with the thread's own provider and model.
+      const decided = yield* a.remote.place(parentScope, {
+        hereOnly: false,
+        providerInstanceId: "inherit",
+        model: "inherit",
+      });
+      expect((yield* placement).placement).toEqual({
+        environmentId: decided.environmentId ?? laptop.environmentId,
+        skipped: decided.skipped,
+      });
+      yield* Ref.set(thread.providers, [{ ...codexReady, auth: { status: "unauthenticated" } }]);
+      expect((yield* placement).placement).toEqual({
+        environmentId: laptop.environmentId,
+        skipped: [passedOverBox("provider_cannot_run")],
+      });
+      yield* Ref.set(thread.providers, [{ ...codexReady, models: [] }]);
+      expect((yield* placement).placement).toEqual({
+        environmentId: laptop.environmentId,
+        skipped: [passedOverBox("model_missing")],
+      });
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
 it.effect("auto does not pick a read-only link", () =>
   Effect.scoped(
     Effect.gen(function* () {

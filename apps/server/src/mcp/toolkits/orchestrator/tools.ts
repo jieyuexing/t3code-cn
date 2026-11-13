@@ -4,6 +4,7 @@ import {
   OrchestrationV2StopWorkflowInput,
   OrchestratorMcpEnvironmentLinkInput,
   OrchestratorMcpEnvironmentLinkResult,
+  OrchestratorMcpEnvironmentLinksInput,
   OrchestratorMcpEnvironmentLinksResult,
   OrchestratorMcpEnvironmentUnlinkInput,
   OrchestratorMcpEnvironmentUnlinkResult,
@@ -310,6 +311,7 @@ const ThreadInterruptTool = Tool.make("t3_thread_interrupt", {
 const EnvironmentLinksTool = Tool.make("t3_environment_links", {
   description:
     "List linked environments (the user's other machines) and whether each answers now. A tool's `environmentId` acts there (`delegate_task`: `target.environmentId`); 'auto' (it, `t3_thread_launch`): least loaded machine with the project. Expired: relink with `t3_environment_link`.",
+  parameters: OrchestratorMcpEnvironmentLinksInput,
   success: OrchestratorMcpEnvironmentLinksResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",

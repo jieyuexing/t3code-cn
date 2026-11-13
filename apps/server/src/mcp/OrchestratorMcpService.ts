@@ -166,6 +166,8 @@ export interface OrchestratorMcpServiceShape {
     scope: McpInvocationScope,
     input: OrchestratorMcpDelegateTaskInput,
   ) => Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure>;
+  /** Where `"auto"` would run work for the calling thread now, and why not on the others. */
+  readonly placement: (scope: McpInvocationScope) => Effect.Effect<OrchestratorMcpPlacement>;
   readonly taskStatus: (
     scope: McpInvocationScope,
     taskId: NodeId,
@@ -2613,6 +2615,17 @@ const make = Effect.gen(function* () {
           ? awaitTask(scope, taskId, key, input.timeoutMs)
           : readTask(scope, taskId, false, true),
       );
+    }),
+    placement: Effect.fn("OrchestratorMcpService.placement")(function* (scope) {
+      const placed = yield* remoteDelegation.place(scope, {
+        hereOnly: false,
+        providerInstanceId: "inherit",
+        model: "inherit",
+      });
+      return {
+        environmentId: placed.environmentId ?? scope.environmentId,
+        skipped: placed.skipped,
+      };
     }),
     taskStatus: Effect.fn("OrchestratorMcpService.taskStatus")(function* (callerScope, taskId) {
       const scope = yield* requireThreadScope(callerScope, "task_status");
