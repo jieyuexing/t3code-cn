@@ -140,6 +140,14 @@ export class RemoteDelegation extends Context.Service<
       },
     ) => Effect.Effect<OrchestratorMcpCheckout | undefined>;
     /**
+     * `checkout` for a task whose thread there has ended: the project there is the
+     * thread's, and a commit that moved or edits made while it ran show up here.
+     */
+    readonly finishedCheckout: (
+      scope: ThreadScope,
+      task: OrchestrationV2Subagent,
+    ) => Effect.Effect<OrchestratorMcpCheckout | undefined>;
+    /**
      * The least loaded of this machine and the linked ones that answer, have
      * the project's repository once at this machine's commit, and report their load. This machine when
      * none of them qualifies, including itself, or when the request is
@@ -301,46 +309,54 @@ const make = Effect.gen(function* () {
     projectId: ProjectId,
   ) => forwarding.call(scope, ProjectToolkit.tools.t3_project_read, environmentId, { projectId });
 
-  const checkout: RemoteDelegation["Service"]["checkout"] = Effect.fn("RemoteDelegation.checkout")(
-    function* (scope, request) {
-      const hereProjectId =
-        request.hereProjectId ??
-        (scope.thread === undefined
-          ? undefined
-          : (yield* threads
-              .getThreadShell(scope.thread.threadId)
-              .pipe(Effect.orElseSucceed(() => null)))?.projectId);
-      if (hereProjectId === undefined) return undefined;
-      // A failed or late read is an unreadable checkout, never a failed call.
-      const [here, there] = yield* Effect.all(
-        [
-          checkoutHere(hereProjectId).pipe(
-            Effect.timeout(PLACEMENT_READ_TIMEOUT),
-            Effect.orElseSucceed(() => unreadableHere),
-          ),
-          projectThere(scope, request.environmentId, request.projectId).pipe(
-            Effect.timeout(PLACEMENT_READ_TIMEOUT),
-            Effect.orElseSucceed(() => null),
-          ),
-        ],
-        { concurrency: 2 },
-      );
-      // A machine on an older version sends no commit at all, which is not the same as one it cannot read.
-      if (there !== null && there.head === undefined) return undefined;
-      const thereKey = there?.repositoryIdentity?.canonicalKey;
-      // A project there with another repository has no commit to compare.
-      if (here.key !== undefined && thereKey !== undefined && here.key !== thereKey) {
-        return undefined;
-      }
-      const thereHead = there?.head ?? null;
-      if (here.head !== null && here.head === thereHead && !here.uncommitted) return undefined;
-      return {
-        here: shortCommit(here.head),
-        there: shortCommit(thereHead),
-        ...(here.uncommitted ? { uncommittedHere: true as const } : {}),
-      };
+  const checkout = Effect.fn("RemoteDelegation.checkout")(function* (
+    scope: McpInvocationContext.McpInvocationScope,
+    request: {
+      /** Unknown counts as unreadable there. */
+      readonly projectId: ProjectId | undefined;
+      readonly environmentId: EnvironmentId;
+      readonly hereProjectId?: ProjectId | undefined;
     },
-  );
+  ) {
+    const hereProjectId =
+      request.hereProjectId ??
+      (scope.thread === undefined
+        ? undefined
+        : (yield* threads
+            .getThreadShell(scope.thread.threadId)
+            .pipe(Effect.orElseSucceed(() => null)))?.projectId);
+    if (hereProjectId === undefined) return undefined;
+    // A failed or late read is an unreadable checkout, never a failed call.
+    const [here, there] = yield* Effect.all(
+      [
+        checkoutHere(hereProjectId).pipe(
+          Effect.timeout(PLACEMENT_READ_TIMEOUT),
+          Effect.orElseSucceed(() => unreadableHere),
+        ),
+        request.projectId === undefined
+          ? Effect.succeed(null)
+          : projectThere(scope, request.environmentId, request.projectId).pipe(
+              Effect.timeout(PLACEMENT_READ_TIMEOUT),
+              Effect.orElseSucceed(() => null),
+            ),
+      ],
+      { concurrency: 2 },
+    );
+    // A machine on an older version sends no commit at all, which is not the same as one it cannot read.
+    if (there !== null && there.head === undefined) return undefined;
+    const thereKey = there?.repositoryIdentity?.canonicalKey;
+    // A project there with another repository has no commit to compare.
+    if (here.key !== undefined && thereKey !== undefined && here.key !== thereKey) {
+      return undefined;
+    }
+    const thereHead = there?.head ?? null;
+    if (here.head !== null && here.head === thereHead && !here.uncommitted) return undefined;
+    return {
+      here: shortCommit(here.head),
+      there: shortCommit(thereHead),
+      ...(here.uncommitted ? { uncommittedHere: true as const } : {}),
+    } satisfies OrchestratorMcpCheckout;
+  });
 
   const place: RemoteDelegation["Service"]["place"] = Effect.fn("RemoteDelegation.place")(
     function* (scope, request) {
@@ -698,6 +714,31 @@ const make = Effect.gen(function* () {
     client: undefined,
     capabilities: new Set(["orchestration"]),
     issuedAt: 0,
+  });
+
+  const finishedCheckout: RemoteDelegation["Service"]["finishedCheckout"] = Effect.fn(
+    "RemoteDelegation.finishedCheckout",
+  )(function* (scope, task) {
+    const remote = task.remoteChild;
+    if (remote === undefined) return undefined;
+    const via = followScope(scope.thread, remote);
+    // The task keeps no project there, so the thread says which one it ran in.
+    const projectId = yield* forwarding
+      .readThread(via, remote.environmentId, {
+        threadId: remote.threadId,
+        limit: 1,
+        runLimit: 1,
+      })
+      .pipe(
+        Effect.map((read) => read.thread.projectId),
+        Effect.timeout(PLACEMENT_READ_TIMEOUT),
+        Effect.orElseSucceed(() => undefined),
+      );
+    const hereProjectId = yield* projections.getThread(scope.thread.threadId).pipe(
+      Effect.map((thread) => thread.projectId),
+      Effect.orElseSucceed(() => undefined),
+    );
+    return yield* checkout(via, { environmentId: remote.environmentId, projectId, hereProjectId });
   });
 
   /**
@@ -1078,7 +1119,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.ignoreCause({ log: true })),
     );
 
-  return RemoteDelegation.of({ delegate, checkout, place, cancel, start });
+  return RemoteDelegation.of({ delegate, checkout, finishedCheckout, place, cancel, start });
 });
 
 const isTerminal = (status: string) =>

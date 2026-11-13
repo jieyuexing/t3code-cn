@@ -1038,8 +1038,9 @@ it.effect("a task delegated to the box wakes the laptop's parent when it ends th
         summary: "All 412 tests pass on the box.",
       });
       // Delivery validation still reads messages; choosing the observer does not need another read.
-      expect(messageReads).toHaveLength(2);
-      expect(messageReads.filter((query) => !/\bmessage_id\s+IN\b/i.test(query))).toHaveLength(1);
+      // The checkout comparison made now that the task ended reads the parent's project: two more thread reads.
+      expect(messageReads).toHaveLength(4);
+      expect(messageReads.filter((query) => !/\bmessage_id\s+IN\b/i.test(query))).toHaveLength(3);
       const acknowledged = yield* a.projections.getThreadRecords(parentThreadId, ["subagents"], {
         subagentIds: [delegated.taskId],
       });
@@ -2324,6 +2325,101 @@ it.effect("a task says whether the checkout it runs on is at the code here", () 
       expect(yield* delegate("auto")).toMatchObject({ checkout: edited });
       yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
       expect(yield* delegate("auto")).not.toHaveProperty("checkout");
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a task that ends says where the checkout stood when it ended", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const short = (sha: string) => sha.slice(0, 8);
+      const launched = yield* Deferred.make<void>();
+      yield* Ref.set(thread.afterLaunch, Deferred.succeed(launched, undefined));
+
+      // At the launch both are at the same commit; the box moves on while the task runs.
+      const waiting = yield* a
+        .call("delegate_task", {
+          task: "Run the suite.",
+          target: {
+            environmentId: box.environmentId,
+            providerInstanceId: instanceId,
+            model: "gpt-5.4",
+          },
+          mode: "wait",
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(launched);
+      yield* Ref.set(thread.head, otherCommit);
+      yield* Ref.set(thread.reply, "Done there.");
+      yield* Ref.set(thread.status, "completed");
+      yield* Deferred.succeed(thread.finished, undefined);
+      const ended = yield* Fiber.join(waiting);
+      expect(ended.isError, JSON.stringify(ended.content)).toBe(false);
+      expect(ended.structuredContent).toMatchObject({
+        status: "completed",
+        checkout: { here: short(commit), there: short(otherCommit) },
+      });
+
+      // A later read of the same task compares again.
+      const status = (taskId: unknown) => a.call("task_status", { taskId });
+      const { taskId } = ended.structuredContent as { taskId: NodeId };
+      expect((yield* status(taskId)).structuredContent).toMatchObject({
+        checkout: { here: short(commit), there: short(otherCommit) },
+      });
+      yield* Ref.set(thread.head, commit);
+      expect((yield* status(taskId)).structuredContent).not.toHaveProperty("checkout");
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: true });
+      expect((yield* status(taskId)).structuredContent).toMatchObject({
+        checkout: { here: short(commit), there: short(commit), uncommittedHere: true },
+      });
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
+
+      // A commit the box cannot say, or a box that does not answer in time, leaves `there` empty.
+      yield* Ref.set(thread.head, null);
+      expect((yield* status(taskId)).structuredContent).toMatchObject({
+        checkout: { here: short(commit), there: null },
+      });
+      yield* Ref.set(thread.head, commit);
+      yield* Ref.set(thread.holdRead, true);
+      const silent = yield* Effect.forkChild(status(taskId));
+      yield* Deferred.await(thread.readStarted);
+      yield* TestClock.adjust("3 seconds");
+      expect((yield* Fiber.join(silent)).structuredContent).toMatchObject({
+        checkout: { here: short(commit), there: null },
+      });
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("an ended task is not blamed for a difference that was gone by then", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const launched = yield* Deferred.make<void>();
+      yield* Ref.set(thread.afterLaunch, Deferred.succeed(launched, undefined));
+      yield* Ref.set(thread.head, otherCommit);
+
+      const waiting = yield* a
+        .call("delegate_task", {
+          task: "Run the suite.",
+          target: {
+            environmentId: box.environmentId,
+            providerInstanceId: instanceId,
+            model: "gpt-5.4",
+          },
+          mode: "wait",
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(launched);
+      // The box was behind at the launch and has caught up by the time it ends.
+      yield* Ref.set(thread.head, commit);
+      yield* Ref.set(thread.reply, "Done there.");
+      yield* Ref.set(thread.status, "completed");
+      yield* Deferred.succeed(thread.finished, undefined);
+      const ended = yield* Fiber.join(waiting);
+      expect(ended.structuredContent).toMatchObject({ status: "completed" });
+      expect(ended.structuredContent).not.toHaveProperty("checkout");
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

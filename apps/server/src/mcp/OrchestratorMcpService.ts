@@ -1775,6 +1775,8 @@ const make = Effect.gen(function* () {
           ? task.status
           : "completed";
     const terminal = isTerminalTaskStatus(status);
+    // Compared again now that it ended: the commit there may have moved while it ran.
+    const checkout = terminal ? yield* remoteDelegation.finishedCheckout(scope, task) : undefined;
     if (
       acknowledgeTerminal &&
       terminal &&
@@ -1817,6 +1819,7 @@ const make = Effect.gen(function* () {
             remoteChild: task.remoteChild,
             link: formatThreadLink(task.remoteChild, task.remoteChild.title),
           }),
+      ...(checkout === undefined ? {} : { checkout }),
       childRunId: null,
       childNodeId: task.id,
       status,
@@ -2446,7 +2449,10 @@ const make = Effect.gen(function* () {
         const task = yield* input.mode === "wait"
           ? awaitTask(scope, taskId, taskId, input.timeoutMs)
           : readTask(scope, taskId, false, true);
-        return checkout === undefined ? task : { ...task, checkout };
+        // An ended task carries the comparison made when it ended, not the one from the launch.
+        return checkout === undefined || isTerminalTaskStatus(task.status)
+          ? task
+          : { ...task, checkout };
       }
       const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
       if (
