@@ -263,7 +263,7 @@ NodeTest.test("draft state rejects wrong branch/tag/source/assets and published 
     const state = { originHead: source.head, release };
     NodeAssert.throws(
       () => checkRemoteState({ ...state, originHead: "another-remote-contains-head" }, p, tag),
-      /origin\/zh-main/,
+      /origin\/cn-main/,
     );
     NodeAssert.throws(
       () => checkRemoteState({ ...state, tagCommit: "0".repeat(40) }, p, tag),
@@ -272,7 +272,7 @@ NodeTest.test("draft state rejects wrong branch/tag/source/assets and published 
     for (const change of [
       { body: "old source" },
       { draft: false },
-      { target_commitish: "zh-main" },
+      { target_commitish: "cn-main" },
       { assets: [{ name: "extra", size: 1, digest: "sha256:x" }] },
     ])
       NodeAssert.throws(() =>
@@ -295,10 +295,10 @@ NodeTest.test("draft state rejects wrong branch/tag/source/assets and published 
 );
 
 NodeTest.test("revision tag is explicit and preserves product version", () => {
-  NodeAssert.throws(() => releaseTag(version, `zh-v${version}-r0`));
+  NodeAssert.throws(() => releaseTag(version, `cn-v${version}-r0`));
   NodeAssert.throws(() => releaseTag(version, "other"));
-  NodeAssert.equal(releaseTag(version), `zh-v${version}`);
-  NodeAssert.equal(releaseTag(version, `zh-v${version}-r1`), `zh-v${version}-r1`);
+  NodeAssert.equal(releaseTag(version), `cn-v${version}`);
+  NodeAssert.equal(releaseTag(version, `cn-v${version}-r1`), `cn-v${version}-r1`);
 });
 NodeTest.test(
   "source identity changes for untracked build inputs and scripts, with HEAD unchanged",

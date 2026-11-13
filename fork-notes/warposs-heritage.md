@@ -1,6 +1,6 @@
 # Warposs 定制思想传承
 
-Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `warp-flash`，分支 `master`），2026-08-27 至 08-29 集中开发（另有一条 09-23 的文档修正），在上游 `d5d12d90f` 之上累计 45 个定制提交、约 293 个文件。它的定位是"终端是产品宿主、agent CLI 自己执行"：把 Codex、Grok 等官方 CLI 的会话接到终端侧栏里管理，并为阅读 agent 输出补一层 Markdown 阅读器，同时全量中文化。2026-10-06 起，产品"展示与交互"层的载体改为 T3 Code 的中文 fork（`t3code-zh`），Warposs 的角色被取代，仓库归档为只读：https://github.com/jieyuexing/warp-flash （分支 `master`）。本文不是功能清单，而是把每项定制背后的问题、取舍和落地边界记下来，供 t3code-zh 判断哪些值得接、哪些随终端载体一起失效。文中"事实"来自源仓规格与提交，"对 T3 的判断"逐条标注依据；未核对的写"待核对"。
+Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `warp-flash`，分支 `master`），2026-08-27 至 08-29 集中开发（另有一条 09-23 的文档修正），在上游 `d5d12d90f` 之上累计 45 个定制提交、约 293 个文件。它的定位是"终端是产品宿主、agent CLI 自己执行"：把 Codex、Grok 等官方 CLI 的会话接到终端侧栏里管理，并为阅读 agent 输出补一层 Markdown 阅读器，同时全量中文化。2026-10-06 起，产品"展示与交互"层的载体改为 T3 Code 的中文 fork（`t3code-cn`，2026-11-13 前叫 `t3code-zh`），Warposs 的角色被取代，仓库归档为只读：https://github.com/jieyuexing/warp-flash （分支 `master`）。本文不是功能清单，而是把每项定制背后的问题、取舍和落地边界记下来，供 t3code-zh 判断哪些值得接、哪些随终端载体一起失效。文中"事实"来自源仓规格与提交，"对 T3 的判断"逐条标注依据；未核对的写"待核对"。
 
 ## 1. 完整中文化（`warp_i18n` crate）
 
@@ -10,7 +10,7 @@ Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `w
 
 **落地情况。** `845b29c`（主提交）、`a27d697`（文件树与 Git 菜单）、`3292ec5`（阅读器控件）及其他功能提交顺带补词条；文件在 `crates/warp_i18n/`、`crates/warp_i18n/locales/zh-CN.tsv`、`script/i18n/`。VALIDATION.md 记录审计通过 1170/1170。
 
-**对 T3 的适用性。** t3code-zh 已经走了同一条路且更进一步（事实来源：fork `i18n/README.md`）：构建期字典转换、英文原文为 key、"保护规则优先于词典"、ignore 与位置覆盖账本、覆盖率 CLI。`warp_i18n` 的 owned/borrowed 分类思想在 T3 里对应"保护规则 + 显式显示 helper"，可视为已被 fork 自身覆盖。Rust 侧具体实现随载体失效。
+**对 T3 的适用性。** t3code-cn 已经走了同一条路且更进一步（事实来源：fork `i18n/README.md`）：构建期字典转换、英文原文为 key、"保护规则优先于词典"、ignore 与位置覆盖账本、覆盖率 CLI。`warp_i18n` 的 owned/borrowed 分类思想在 T3 里对应"保护规则 + 显式显示 helper"，可视为已被 fork 自身覆盖。Rust 侧具体实现随载体失效。
 
 ## 2. 终端专用产品策略（terminal-only policy）
 
@@ -76,7 +76,7 @@ Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `w
 
 | 定制思想                                 | 落地程度（Warposs）                 | 状态（对 T3）                            | 依据                                      |
 | ---------------------------------------- | ----------------------------------- | ---------------------------------------- | ----------------------------------------- |
-| 中文化：owned/borrowed 边界分类 + 审计器 | 完整，100% 审计                     | 已被 T3 覆盖（由 fork 自身的字典层覆盖） | t3code-zh `i18n/README.md`                |
+| 中文化：owned/borrowed 边界分类 + 审计器 | 完整，100% 审计                     | 已被 T3 覆盖（由 fork 自身的字典层覆盖） | t3code-cn `i18n/README.md`                |
 | terminal-only 渠道策略                   | 完整                                | 随载体失效（方法论可借鉴）               | fork `README.md`                          |
 | embedded surface 生命周期 spike          | 仅合同，未链入                      | 随载体失效                               | 源仓 `spikes/`                            |
 | 外部会话索引（Codex/Grok 分组）          | 实现，flag 默认关，视觉验收 unknown | 已被 T3 覆盖（服务端线程）               | `orchestrationV2.ts` 线程命令             |

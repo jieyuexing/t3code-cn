@@ -19,15 +19,15 @@ import {
 } from "./release-source-zh.mjs";
 import { verifyReceipt } from "./release-validation-zh.mjs";
 
-const REPO = "jieyuexing/t3code-zh";
+const REPO = "jieyuexing/t3code-cn";
 export function releaseTag(version, explicit) {
-  const base = `zh-v${version}`;
+  const base = `cn-v${version}`;
   if (
     explicit !== undefined &&
     explicit !== base &&
     !new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-r[1-9][0-9]*$`).test(explicit)
   )
-    throw new Error("Tag must be zh-vV or explicit zh-vV-rN");
+    throw new Error("Tag must be cn-vV or explicit cn-vV-rN");
   return explicit ?? base;
 }
 export function preflightSuite(suiteFile, currentSource) {
@@ -132,7 +132,7 @@ export function suiteContents(prepared) {
 }
 export function checkRemoteState({ release, tagCommit, originHead }, prepared, tag) {
   if (originHead !== prepared.source.head)
-    throw new Error("HEAD must equal origin/zh-main exactly");
+    throw new Error("HEAD must equal origin/cn-main exactly");
   if (tagCommit !== undefined && tagCommit !== prepared.source.head)
     throw new Error("Tag points to another commit");
   if (!release) return;
@@ -174,7 +174,7 @@ export function assertAllUploaded(release, prepared) {
       throw new Error(`Stored digest/size mismatch: ${asset.name}`);
   }
 }
-// GitHub Actions（jieyuexing/t3code-zh-build）由工作流注入只授本仓发布权限的 GH_TOKEN，直连 GitHub。
+// GitHub Actions（jieyuexing/t3code-cn-build）由工作流注入只授本仓发布权限的 GH_TOKEN，直连 GitHub。
 export const onGitHubActions = (base) => base.GITHUB_ACTIONS === "true";
 export function ghEnvironment(base) {
   if (onGitHubActions(base)) {
@@ -209,7 +209,7 @@ export async function main() {
   });
   if (!values.suite)
     throw new Error(
-      "Usage: release-desktop-zh.mjs --suite suite.json [--dry-run] [--tag zh-vV-rN]",
+      "Usage: release-desktop-zh.mjs --suite suite.json [--dry-run] [--tag cn-vV-rN]",
     );
   const root = NodeURL.fileURLToPath(new URL("../", import.meta.url));
   ghEnvironment(process.env);
@@ -227,7 +227,7 @@ export async function main() {
   )
     throw new Error("Current upstream baseline mismatch");
   if (
-    !/^(?:git@github.com:|https:\/\/github.com\/|ssh:\/\/git@github.com\/)jieyuexing\/t3code-zh(?:\.git)?$/.test(
+    !/^(?:git@github.com:|https:\/\/github.com\/|ssh:\/\/git@github.com\/)jieyuexing\/t3code-cn(?:\.git)?$/.test(
       git(root, "remote", "get-url", "origin"),
     )
   )
@@ -281,7 +281,7 @@ export async function main() {
       root,
       "ls-remote",
       "origin",
-      "refs/heads/zh-main",
+      "refs/heads/cn-main",
       `refs/tags/${tag}`,
       `refs/tags/${tag}^{}`,
     );
@@ -296,7 +296,7 @@ export async function main() {
     );
     return {
       release: findRelease(),
-      originHead: map.get("refs/heads/zh-main"),
+      originHead: map.get("refs/heads/cn-main"),
       tagCommit: map.get(`refs/tags/${tag}^{}`) ?? map.get(`refs/tags/${tag}`),
     };
   };

@@ -10,15 +10,15 @@ import {
 const version = "1.2.4-nightly.20260912.7";
 
 describe("fork release source", () => {
-  it("downloads from the fork's own releases under its zh-v tags", () => {
+  it("downloads from the fork's own releases under its cn-v tags", () => {
     expect(cliReleaseAssetUrl(version, "SHA256SUMS")).toBe(
-      `https://github.com/jieyuexing/t3code-zh/releases/download/zh-v${version}/SHA256SUMS`,
+      `https://github.com/jieyuexing/t3code-cn/releases/download/cn-v${version}/SHA256SUMS`,
     );
     expect(cliReleaseDownloadBaseUrl(version)).toBe(
-      `https://github.com/jieyuexing/t3code-zh/releases/download/zh-v${version}`,
+      `https://github.com/jieyuexing/t3code-cn/releases/download/cn-v${version}`,
     );
     expect(cliReleaseIndexPageUrl(2)).toBe(
-      "https://api.github.com/repos/jieyuexing/t3code-zh/releases?per_page=100&page=2",
+      "https://api.github.com/repos/jieyuexing/t3code-cn/releases?per_page=100&page=2",
     );
   });
 
@@ -31,7 +31,17 @@ describe("fork release source", () => {
     );
   });
 
-  it("reads versions from zh-v tags and skips revisions of a version", () => {
+  it("reads versions from cn-v tags and skips revisions of a version", () => {
+    expect(
+      newestCliReleaseVersion(
+        [{ tag_name: `cn-v${version}-r1` }, { tag_name: `cn-v${version}` }],
+        "nightly",
+      ),
+    ).toBe(version);
+    expect(newestCliReleaseVersion([{ tag_name: `cn-v${version}-r1` }], "stable")).toBeUndefined();
+  });
+
+  it("still recognises releases published under the old zh-v tags", () => {
     expect(
       newestCliReleaseVersion(
         [{ tag_name: `zh-v${version}-r1` }, { tag_name: `zh-v${version}` }],

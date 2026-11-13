@@ -3,8 +3,9 @@ import * as Schema from "effect/Schema";
 
 import { compareSemverVersions } from "./semver.ts";
 
-// This fork publishes its own builds, tagged `zh-v<version>`, under upstream's version numbers.
-const CLI_RELEASE_REPOSITORY = "jieyuexing/t3code-zh";
+// This fork publishes its own builds, tagged `cn-v<version>` (`zh-v<version>` before the rename),
+// under upstream's version numbers.
+const CLI_RELEASE_REPOSITORY = "jieyuexing/t3code-cn";
 export const CLI_RELEASES_PAGE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases`;
 export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 export const CLI_RELEASE_BASE_URL_ENV = "T3CODE_RELEASE_BASE_URL";
@@ -47,7 +48,7 @@ const CLI_RELEASE_DEFAULT_BASE_URL = `https://github.com/${CLI_RELEASE_REPOSITOR
 
 /** The fork's tags on its own releases; a mirror or `T3CODE_RELEASE_BASE_URL` keeps `v<version>`. */
 function releaseTag(version: string, baseUrl: string): string {
-  return `${baseUrl === CLI_RELEASE_DEFAULT_BASE_URL ? "zh-v" : "v"}${version}`;
+  return `${baseUrl === CLI_RELEASE_DEFAULT_BASE_URL ? "cn-v" : "v"}${version}`;
 }
 
 export function cliReleaseDownloadBaseUrl(
@@ -154,8 +155,10 @@ export function newestCliReleaseVersion(
 ): string | undefined {
   for (const release of releases) {
     if (release.draft) continue;
-    const version = /^(?:zh-)?v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(release.tag_name)?.[1];
-    // A fork revision, `zh-v<version>-rN`, republishes its version's files and is not a version.
+    const version = /^(?:zh-|cn-)?v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(
+      release.tag_name,
+    )?.[1];
+    // A fork revision, `cn-v<version>-rN`, republishes its version's files and is not a version.
     if (version === undefined || /-r\d+$/.test(version)) continue;
     if (cliReleaseChannelOf(version) === channel) return version;
   }

@@ -1,6 +1,6 @@
-# t3code-zh i18n
+# t3code-cn i18n
 
-2026-11-13 起冻结：不再补译，现有词条照旧生效，上游新文案保持英文；上游官方多语言（gt-react，#31313）的跟进见总仓 `projects/README.md`「t3code-zh：定制面」。
+2026-11-13 起冻结：不再补译，现有词条照旧生效，上游新文案保持英文；上游官方多语言（gt-react，#31313）的跟进见总仓 `projects/README.md`「t3code-cn：定制面」。
 
 这是 fork 的构建时字典转换层，覆盖 web、desktop renderer 和 desktop 主进程，不改变上游业务组件的每条文案。英文原文是 key，`zh-CN.json` 是按 key 排序的扁平词典。未知 key 保持原样，`ignore.json` 中有原因的 key 在自动改写时保持英文（显式位置覆盖除外）。没有新依赖，构建工具复用 web 已安装的 Babel。
 
@@ -8,7 +8,7 @@ web 由 `web-build.mjs` 在上游原生 React Compiler 前运行 Babel 字典转
 
 运行时同步读取当前 origin 的 `localStorage["t3zh.locale"]`，默认 `zh-CN`，英文为 `en`。启动入口先加载运行时，设置 `<html lang>`，再加载应用。Map 查表不请求服务器、不观察 DOM；每次查表不再访问 storage。Settings → Appearance → Interface → **Language / 语言** 可在 English / 简体中文之间切换，先保存再刷新页面。语言属于当前客户端，不随项目、服务器或远程连接切换。
 
-desktop 通过现有 bridge / IPC 保存同一选项。主进程在启动求值前读取 Electron `appData/t3code-zh/locale.json`（dev 使用 `locale-dev.json`），缺失或无效时默认中文。renderer 刷新立即生效，所有主进程文案与 Chromium role 菜单在**下次启动应用**时统一生效；不强制重启正在运行的 agent。macOS 的部分系统菜单仍由系统管理，需在最终 DMG 上验收。可用绝对路径环境变量 `T3ZH_LOCALE_FILE` 隔离原生验证数据；没有读写 T3 的业务数据库。Electron 打包保留 `en-US` 和 `zh-CN` locale 资源。
+desktop 通过现有 bridge / IPC 保存同一选项。主进程在启动求值前读取 Electron `appData/t3code-zh/locale.json`（dev 使用 `locale-dev.json`；目录名沿用改名前的 `t3code-zh`，改了会丢本机语言偏好），缺失或无效时默认中文。renderer 刷新立即生效，所有主进程文案与 Chromium role 菜单在**下次启动应用**时统一生效；不强制重启正在运行的 agent。macOS 的部分系统菜单仍由系统管理，需在最终 DMG 上验收。可用绝对路径环境变量 `T3ZH_LOCALE_FILE` 隔离原生验证数据；没有读写 T3 的业务数据库。Electron 打包保留 `en-US` 和 `zh-CN` locale 资源。
 
 ## 候选规则
 
@@ -61,7 +61,7 @@ node scripts/build-desktop-zh.mjs --platform linux --target archive --arch x64 \
 # Windows 同命令改 --platform win，输入改为 t3-V-win32-x64.zip。
 ```
 
-CLI 包装内部调用 `build-cli-zh.mjs`，在同一 nightly 盖章事务中重新构建中文 web/client 和 fork SEA，再立即调用现有 `build-cli-archive.ts` 保存该目标，避免下一目标清理 dist-exe。SEA 用同一已校验目标 Node 再封装，将内嵌 main 文件名改为相对路径，避免泄漏本机构建目录；上游 bootstrap 从 SEA 资产 `binMain.mjs` 加载 CLI 本体，再封装须按同一 pack 配置重出该资产并带上 `--require-module`，缺了 `--version` 即报 `ERR_SINGLE_EXECUTABLE_APPLICATION_ASSET_NOT_FOUND`。SEA 宿主必须等于根 `package.json` 的 `engines.node`（`build-cli-zh.mjs` 读取并比对，不一致即拒绝），版本号不在本文重复。runner 上 DMG 与 publisher 作业不跟 `engines.node`，所用 Node 以 `jieyuexing/t3code-zh-build` 的 `.github/workflows/build.yml` 中 `dmg`、`publish` 作业的 `setup-node` 为准；`archives`、`windows-smoke` 作业按 `engines.node` 设置。设置任务独立 TMPDIR/TMP/TEMP 和构建子进程 home；不链接主树 node_modules 或 .env。
+CLI 包装内部调用 `build-cli-zh.mjs`，在同一 nightly 盖章事务中重新构建中文 web/client 和 fork SEA，再立即调用现有 `build-cli-archive.ts` 保存该目标，避免下一目标清理 dist-exe。SEA 用同一已校验目标 Node 再封装，将内嵌 main 文件名改为相对路径，避免泄漏本机构建目录；上游 bootstrap 从 SEA 资产 `binMain.mjs` 加载 CLI 本体，再封装须按同一 pack 配置重出该资产并带上 `--require-module`，缺了 `--version` 即报 `ERR_SINGLE_EXECUTABLE_APPLICATION_ASSET_NOT_FOUND`。SEA 宿主必须等于根 `package.json` 的 `engines.node`（`build-cli-zh.mjs` 读取并比对，不一致即拒绝），版本号不在本文重复。runner 上 DMG 与 publisher 作业不跟 `engines.node`，所用 Node 以 `jieyuexing/t3code-cn-build` 的 `.github/workflows/build.yml` 中 `dmg`、`publish` 作业的 `setup-node` 为准；`archives`、`windows-smoke` 作业按 `engines.node` 设置。设置任务独立 TMPDIR/TMP/TEMP 和构建子进程 home；不链接主树 node_modules 或 .env。
 
 官方模板的校验与复用在 fork 自有的 `scripts/cli-official-template-zh.ts`，上游 `build-cli-archive.ts` 只保留参数与调用点。官方模板必须来自精确同版 `pingdotgg/t3code` Release，元数据包含 asset size/digest/URL；同时校验 GitHub digest 和 SHA256SUMS（自身也校验 digest）。先检查本地 tag 是 HEAD 祖先、native/resource-monitor、lock、workspace 依赖配置、patches、外置依赖清单和 server manifest（仅忽略临时版本盖章）与 tag 完全一致。差异即拒绝。解包前检查全部路径与类型，拒绝链接、路径穿越、重复成员和特殊文件。只提取 node_modules 和 resource-monitor，Linux 另取 lib/（libatomic.so.1 与许可证，宿主没有 ldd/dpkg-query），再用 patchelf 给 fork t3 设 RUNPATH `$ORIGIN/lib`，因此 macOS 宿主需要 `brew install patchelf`；官方 t3/client 不进入候选。每个候选旁的 `.provenance.json` 记录来源 hash、复用成员逐文件 hash 和 fork 可执行文件 hash。node-pty 的其他 Windows 架构 vendor 文件与 ffi-rs ia32 sibling 原样保留，并按目录声明验架构；目标加载的二进制必须是 x64。
 
@@ -90,7 +90,7 @@ CLI 的原上游 `smoke-cli-archive.ts` 保持原合同；发行目标入口额�
 
 ### 套装发布
 
-`release-desktop-zh.mjs` 是唯一 publisher。协调者整合、提交并推送到 `origin/zh-main` 后，以同一 clean 源码构建要发布的产物并完成各自目标验证。publisher 只强制套装含 **Windows x64 archive**，DMG arm64、Linux x64 archive 对它可选。2026-10-30 起 Release 只由公开仓库 `jieyuexing/t3code-zh-build` 的 `build.yml` 在 GitHub runner 上发布：每次构建 DMG arm64、Linux x64 与 Windows x64 archive 三件，各自在目标系统验证后调用本 publisher。下游跟随依赖这套三件：141 的 `t3-141-update win --release` 取 Windows x64 包，台式机的 `t3-desktop-update --release` 取 Linux x64 包，两者都先核对 SHA256SUMS 与 PROVENANCE.json。本机不上传 Release，runner 不可用时停下报告，不从本机补发；脚本里本机上传的代码路径（非 Actions 分支）已不再使用，去留由每日同步决定。`suite.json` 留任务目录，三件齐全时结构为（只发 Windows 时 artifacts 只留最后一项）：
+`release-desktop-zh.mjs` 是唯一 publisher。协调者整合、提交并推送到 `origin/cn-main` 后，以同一 clean 源码构建要发布的产物并完成各自目标验证。publisher 只强制套装含 **Windows x64 archive**，DMG arm64、Linux x64 archive 对它可选。2026-10-30 起 Release 只由公开仓库 `jieyuexing/t3code-cn-build` 的 `build.yml` 在 GitHub runner 上发布：每次构建 DMG arm64、Linux x64 与 Windows x64 archive 三件，各自在目标系统验证后调用本 publisher。下游跟随依赖这套三件：141 的 `t3-141-update win --release` 取 Windows x64 包，台式机的 `t3-desktop-update --release` 取 Linux x64 包，两者都先核对 SHA256SUMS 与 PROVENANCE.json。本机不上传 Release，runner 不可用时停下报告，不从本机补发；脚本里本机上传的代码路径（非 Actions 分支）已不再使用，去留由每日同步决定。`suite.json` 留任务目录，三件齐全时结构为（只发 Windows 时 artifacts 只留最后一项）：
 
 ```json
 {
@@ -121,10 +121,10 @@ CLI 的原上游 `smoke-cli-archive.ts` 保持原合同；发行目标入口额�
 ```sh
 node scripts/release-desktop-zh.mjs --suite /task/suite.json --dry-run
 # 已发布过同版时，必须由协调者明确选尚未使用的修订 tag；不会自动选择。
-node scripts/release-desktop-zh.mjs --suite /task/suite.json --tag zh-vV-r1 --dry-run
+node scripts/release-desktop-zh.mjs --suite /task/suite.json --tag cn-vV-r1 --dry-run
 ```
 
-dry-run 无 GitHub 写入。完整本地预检通过后才查远端：HEAD 必须精确等于当前 origin/zh-main，tag 必须不存在或精确指向它，不能以任意远端包含 HEAD 代替。默认 tag 是 `zh-vV`，显式修订只接受 `zh-vV-rN`；产品版本和资产名不加 zh/rN。已有已发布 Release 永远不变。
+dry-run 无 GitHub 写入。完整本地预检通过后才查远端：HEAD 必须精确等于当前 origin/cn-main，tag 必须不存在或精确指向它，不能以任意远端包含 HEAD 代替。默认 tag 是 `cn-vV`，显式修订只接受 `cn-vV-rN`（改名前已发布的 `zh-vV*` 不动，客户端读发布索引时两种前缀都认）；产品版本和资产名不加 zh/rN。已有已发布 Release 永远不变。
 
 获准正式发布时才去掉 `--dry-run`：先建立 draft、上传套装产物和自动生成的 SHA256SUMS/PROVENANCE.json，逐件核对 GitHub 存储 digest/size，完整才 publish。同源码、同套装 draft 可恢复；同名异 hash、额外资产、错误 tag 或另一套源码均拒绝，不删除或覆盖修复。本机路径（已不再使用）经既有 2080 代理，令牌由 `gh auth token` 取出，只经 stdin 配置交给 `/usr/bin/curl` 上传，不进入 argv/env/日志；GitHub Actions 上（`GITHUB_ACTIONS=true`）只接受工作流注入的 `GH_TOKEN`，直连并用 `gh release upload`。公开 provenance 只含必要版本、仓库/commit、源码与产物 hash、目标与检查边界，不上传私有候选清单或回执。
 
