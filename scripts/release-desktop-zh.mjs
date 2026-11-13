@@ -132,7 +132,7 @@ export function suiteContents(prepared) {
 }
 export function checkRemoteState({ release, tagCommit, originHead }, prepared, tag) {
   if (originHead !== prepared.source.head)
-    throw new Error("HEAD must equal origin/cn-main exactly");
+    throw new Error("HEAD must equal origin/main exactly");
   if (tagCommit !== undefined && tagCommit !== prepared.source.head)
     throw new Error("Tag points to another commit");
   if (!release) return;
@@ -281,7 +281,7 @@ export async function main() {
       root,
       "ls-remote",
       "origin",
-      "refs/heads/cn-main",
+      "refs/heads/main",
       `refs/tags/${tag}`,
       `refs/tags/${tag}^{}`,
     );
@@ -296,7 +296,7 @@ export async function main() {
     );
     return {
       release: findRelease(),
-      originHead: map.get("refs/heads/cn-main"),
+      originHead: map.get("refs/heads/main"),
       tagCommit: map.get(`refs/tags/${tag}^{}`) ?? map.get(`refs/tags/${tag}`),
     };
   };
