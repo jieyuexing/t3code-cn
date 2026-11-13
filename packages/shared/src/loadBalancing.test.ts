@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { chooseLoadBalancedEnvironment } from "./loadBalancing.ts";
+import { ENVIRONMENT_MACHINE_KINDS, type EnvironmentMachineKind } from "@t3tools/contracts";
+
+import { chooseLoadBalancedEnvironment, resolveLoadBalancingWeight } from "./loadBalancing.ts";
 
 describe("load balancing shared project machines", () => {
   const now = 100_000;
@@ -63,5 +65,41 @@ describe("load balancing shared project machines", () => {
     };
     expect(chooseLoadBalancedEnvironment([candidate], now)).toBe("different-clock");
     expect(chooseLoadBalancedEnvironment([candidate], now + 15_001)).toBeNull();
+  });
+});
+
+describe("resolving a machine's load balancing weight", () => {
+  const defaults: Record<EnvironmentMachineKind, number> = {
+    laptop: 50,
+    server: 100,
+    cloud: 100,
+    linux: 100,
+    desktop: 100,
+    "mac-mini": 100,
+    "mac-studio": 100,
+  };
+
+  it.each(ENVIRONMENT_MACHINE_KINDS)("defaults a %s by its kind", (machine) => {
+    expect(resolveLoadBalancingWeight({ machine })).toBe(defaults[machine]);
+  });
+
+  it("is neutral when the kind is unknown, and the client's pick beats the kind", () => {
+    expect(resolveLoadBalancingWeight({})).toBe(50);
+    expect(resolveLoadBalancingWeight({ explicit: 25, machine: "server" })).toBe(25);
+  });
+
+  it("keeps a client's explicit zero, which leaves the machine out", () => {
+    const resources = {
+      sampledAt: 100_000,
+      cpuUtilization: 0.1,
+      cpuCount: 8,
+      availableMemoryBytes: 8_000,
+      totalMemoryBytes: 16_000,
+    };
+    const weight = resolveLoadBalancingWeight({ explicit: 0, machine: "server" });
+    expect(weight).toBe(0);
+    expect(
+      chooseLoadBalancedEnvironment([{ environmentId: "manual-only", resources, weight }], 100_000),
+    ).toBeNull();
   });
 });

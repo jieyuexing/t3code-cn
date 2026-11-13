@@ -20,6 +20,7 @@ import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { type EnvironmentPresentation, useEnvironmentProviders } from "../../state/environments";
 import { useProjects } from "../../state/entities";
 import type { DraftSessionState } from "../../composerDraftStore";
+import { environmentLoadWeight } from "./useDraftEnvironmentRouting.logic";
 
 interface DraftEnvironmentRoutingInput {
   readonly draftId: DraftId | null;
@@ -80,7 +81,10 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
           const environment = environmentById.get(candidate.environmentId);
           return (
             environment?.connection.phase === "connected" &&
-            (loadBalancingSettings.loadBalancingWeights[candidate.environmentId] ?? 50) > 0 &&
+            environmentLoadWeight(
+              environment,
+              loadBalancingSettings.loadBalancingWeights[candidate.environmentId],
+            ) > 0 &&
             referencedThreadContexts.every(
               (record) => record.environmentId === candidate.environmentId,
             ) &&
@@ -108,8 +112,13 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
         .map((candidate) => candidate.environmentId)
     : [];
   const loadBalancing = useLoadBalancedEnvironment(
-    loadBalancingCandidates,
-    loadBalancingSettings.loadBalancingWeights,
+    loadBalancingCandidates.map((environmentId) => ({
+      environmentId,
+      weight: environmentLoadWeight(
+        environmentById.get(environmentId),
+        loadBalancingSettings.loadBalancingWeights[environmentId],
+      ),
+    })),
   );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- writes the resolved load-balanced environment into the draft store once the async pick settles
   useEffect(() => {

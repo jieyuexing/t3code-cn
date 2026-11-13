@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   EventId,
+  type EnvironmentMachineKind,
   type HostResourcesSnapshot,
   MessageId,
   NodeId,
@@ -264,8 +265,8 @@ const boxProjects: ReadonlyArray<Project> = [
   },
 ];
 
-const serveBox = (thread: BoxThread) => {
-  return servePeer(box, boxToolkitLayer(thread));
+const serveBox = (thread: BoxThread, descriptor = box) => {
+  return servePeer(descriptor, boxToolkitLayer(thread));
 };
 
 const boxRunId = RunId.make("run:box");
@@ -629,6 +630,7 @@ const makeLaptop = (
   /** The laptop's links from before a restart, which keep their sessions there. */
   kept?: Context.Context<Layer.Success<ReturnType<typeof layerLinkingEnvironment>>>,
   load: HostResourcesSnapshot = idle,
+  descriptor = laptop,
 ) =>
   Effect.gen(function* () {
     const checkout = yield* Ref.make<{ head: string | null; uncommitted: boolean }>({
@@ -655,7 +657,7 @@ const makeLaptop = (
           )) as typeof forwarding.call,
       })),
     ).pipe(Layer.provide(PeerForwarding.layer));
-    const linking = kept ?? (yield* layerLinkingEnvironment(laptop).pipe(Layer.build));
+    const linking = kept ?? (yield* layerLinkingEnvironment(descriptor).pipe(Layer.build));
     const layerDatabase = Layer.succeedContext(database);
     const layerOrchestrator = Layer.mergeAll(
       layerDatabase,
@@ -2065,19 +2067,34 @@ it.effect("a local task runs in this thread's project", () =>
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+const withMachine = (descriptor: typeof box, machine: EnvironmentMachineKind | undefined) =>
+  machine === undefined
+    ? descriptor
+    : { ...descriptor, platform: { ...descriptor.platform, machine } };
+
 /** The laptop (busy by default) linked to the box, whose load the test sets through `thread.load`. */
 const autoPlacement = (
   access: Parameters<typeof linkTo>[2] = "full-access",
   laptopLoad: HostResourcesSnapshot = busy,
+  machines: {
+    readonly laptop?: EnvironmentMachineKind;
+    readonly box?: EnvironmentMachineKind;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const thread = yield* makeBoxThread;
-    const b = yield* serveBox(thread);
+    const b = yield* serveBox(thread, withMachine(box, machines.box));
     const offers = yield* SubscriptionRef.make<
       ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
     >([]);
     const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
-    const a = yield* makeLaptop(database, offers, undefined, laptopLoad);
+    const a = yield* makeLaptop(
+      database,
+      offers,
+      undefined,
+      laptopLoad,
+      withMachine(laptop, machines.laptop),
+    );
     yield* linkTo(a.links, b, access);
     yield* seedParent(a);
     return { thread, a };
@@ -2108,6 +2125,28 @@ it.effect("auto places a task on the less loaded machine, and ties stay here", (
         remoteChild: { environmentId: box.environmentId },
       });
       expect(yield* Ref.get(thread.launched)).not.toBeNull();
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+// Both machines are equally quiet, so only their kinds decide.
+it.effect.each([
+  { name: "ties stay here without kinds", machines: {}, placed: here },
+  {
+    name: "an always-on box outweighs a laptop here",
+    machines: { laptop: "laptop", box: "server" },
+    placed: { environmentId: box.environmentId, projectId: boxProject },
+  },
+  {
+    name: "a laptop box does not outweigh an always-on machine here",
+    machines: { laptop: "server", box: "laptop" },
+    placed: here,
+  },
+] as const)("auto weighs machines by kind: $name", ({ machines, placed }) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { a } = yield* autoPlacement("full-access", idle, machines);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(placed);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

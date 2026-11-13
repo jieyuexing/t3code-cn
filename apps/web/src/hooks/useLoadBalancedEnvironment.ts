@@ -41,8 +41,7 @@ const hostResourcesAtom = Atom.family((environmentIdsKey: string) =>
 
 /** Only mounted for unresolved automatic drafts, so idle clients do not poll hosts. */
 export function useLoadBalancedEnvironment(
-  environmentIds: readonly EnvironmentId[],
-  weights: Readonly<Record<string, number>>,
+  candidates: ReadonlyArray<{ readonly environmentId: EnvironmentId; readonly weight: number }>,
 ) {
   const registry = useContext(RegistryContext);
   const refresh = (ids: readonly EnvironmentId[]) => {
@@ -50,12 +49,17 @@ export function useLoadBalancedEnvironment(
       registry.refresh(serverEnvironment.hostResources({ environmentId, input: {} }));
     }
   };
-  const { evaluatedAt, resources } = useAtomValue(hostResourcesAtom(environmentIds.join("\n")));
+  const { evaluatedAt, resources } = useAtomValue(
+    hostResourcesAtom(candidates.map((candidate) => candidate.environmentId).join("\n")),
+  );
+  const weightById = new Map(
+    candidates.map((candidate) => [candidate.environmentId, candidate.weight]),
+  );
   const pending = resources.some((resource) => resource.pending);
   const environmentId = chooseLoadBalancedEnvironment(
     resources.map((resource) => ({
       ...resource,
-      weight: weights[resource.environmentId] ?? 50,
+      weight: weightById.get(resource.environmentId) ?? 0,
     })),
     evaluatedAt,
   ) as EnvironmentId | null;

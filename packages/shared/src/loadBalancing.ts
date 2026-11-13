@@ -1,4 +1,29 @@
-import type { HostResourcesSnapshot } from "@t3tools/contracts";
+import type { EnvironmentMachineKind, HostResourcesSnapshot } from "@t3tools/contracts";
+
+const DEFAULT_WEIGHT = 50;
+/** A laptop sleeps and moves; the other kinds are meant to stay on. */
+const DEFAULT_WEIGHT_BY_MACHINE: Record<EnvironmentMachineKind, number> = {
+  laptop: 50,
+  server: 100,
+  cloud: 100,
+  linux: 100,
+  desktop: 100,
+  "mac-mini": 100,
+  "mac-studio": 100,
+};
+
+/** The client's own pick wins, then what the machine declares, then its kind's default. */
+export function resolveLoadBalancingWeight(input: {
+  readonly explicit?: number | undefined;
+  readonly declared?: number | undefined;
+  readonly machine?: EnvironmentMachineKind | undefined;
+}): number {
+  return (
+    input.explicit ??
+    input.declared ??
+    (input.machine === undefined ? DEFAULT_WEIGHT : DEFAULT_WEIGHT_BY_MACHINE[input.machine])
+  );
+}
 
 /** Callers supply only connected machines hosting the project and selected provider. */
 export function chooseLoadBalancedEnvironment(

@@ -28,7 +28,10 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import type * as Tool from "effect/ai/Tool";
 import { withExecutedModelNote } from "@t3tools/provider-core/server/subagentProjection";
-import { chooseLoadBalancedEnvironment } from "@t3tools/shared/loadBalancing";
+import {
+  chooseLoadBalancedEnvironment,
+  resolveLoadBalancingWeight,
+} from "@t3tools/shared/loadBalancing";
 
 import type * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import { EnvironmentToolkit } from "../mcp/toolkits/environment/tools.ts";
@@ -192,9 +195,8 @@ const make = Effect.gen(function* () {
   const hostResources = yield* HostResources.HostResources;
   const checkouts = yield* ProjectCheckout.ProjectCheckout;
   const random = yield* SecureRandom.SecureRandom;
-  const hereId = yield* ServerEnvironment.ServerEnvironment.pipe(
-    Effect.flatMap((environment) => environment.getEnvironmentId),
-  );
+  const hereEnvironment = yield* ServerEnvironment.ServerEnvironment;
+  const hereId = yield* hereEnvironment.getEnvironmentId;
   // Followers live as long as this service, so shutting down stops them.
   const followers = yield* Scope.Scope;
 
@@ -412,7 +414,12 @@ const make = Effect.gen(function* () {
           matched.head !== hereHead ||
           !providerUsable
           ? undefined
-          : { environmentId, projectId: matched.id, resources: environment.hostResources };
+          : {
+              environmentId,
+              projectId: matched.id,
+              resources: environment.hostResources,
+              machine: environment.platform.machine,
+            };
       });
       // Anything that keeps a machine from answering in time leaves it out.
       const there = (yield* Effect.forEach(
@@ -432,13 +439,15 @@ const make = Effect.gen(function* () {
             environmentId: hereId,
             resources: yield* hostResources.read,
             receivedAt: now,
-            weight: 1,
+            weight: resolveLoadBalancingWeight({
+              machine: (yield* hereEnvironment.getDescriptor).platform.machine,
+            }),
           },
-          ...there.map(({ environmentId, resources }) => ({
+          ...there.map(({ environmentId, resources, machine }) => ({
             environmentId,
             resources,
             receivedAt: now,
-            weight: 1,
+            weight: resolveLoadBalancingWeight({ machine }),
           })),
         ],
         now,
