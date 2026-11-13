@@ -7,7 +7,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
-import { readDeepseekBalanceUsageLimits } from "./deepseekBalance-zh.ts";
+import { readDeepseekBalanceUsageLimits } from "./deepseekBalance-cn.ts";
 
 const checkedAt = "2026-11-10T00:00:00.000Z";
 

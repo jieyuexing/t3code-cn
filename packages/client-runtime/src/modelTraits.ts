@@ -111,15 +111,12 @@ export function buildTraitsTriggerDisplay(input: {
   ultrathinkPromptControlled: boolean;
   modelSelection?: ModelSelection | null;
   reportedModelSelection?: ModelSelection | null | undefined;
-  // Display-only label translation; the web client passes its locale dictionary.
-  displayLabel?: (label: string) => string;
 }): {
   label: string;
   /** "Fast" or "Ultrafast" when a speed option is on. */
   speedLabel: string | null;
   ultracode: boolean;
 } {
-  const displayLabel = input.displayLabel ?? ((label: string) => label);
   let fastModeFallbackLabel: string | null = null;
   let speedLabel: string | null = null;
   let reasoningLabelIndex = -1;
@@ -162,7 +159,7 @@ export function buildTraitsTriggerDisplay(input: {
       input.ultrathinkPromptControlled && descriptor.id === input.primarySelectDescriptorId
         ? "Ultrathink"
         : descriptor.type === "boolean"
-          ? `${displayLabel(descriptor.label)} ${descriptor.currentValue === true ? "On" : "Off"}`
+          ? `${descriptor.label} ${descriptor.currentValue === true ? "On" : "Off"}`
           : (getProviderOptionCurrentLabel(
               descriptor,
               input.modelSelection,
@@ -172,19 +169,19 @@ export function buildTraitsTriggerDisplay(input: {
       if (reasoningLabelIndex === -1 && isReasoningSelect(descriptor)) {
         reasoningLabelIndex = labels.length;
       }
-      labels.push(displayLabel(label));
+      labels.push(label);
     }
   }
 
   const ultracode = ultracodeLabelIndex >= 0;
   if (labels.length === 0 && fastModeFallbackLabel !== null) {
-    return { label: displayLabel(fastModeFallbackLabel), speedLabel, ultracode };
+    return { label: fastModeFallbackLabel, speedLabel, ultracode };
   }
   if (speedLabel) {
     if (reasoningLabelIndex >= 0) {
-      labels[reasoningLabelIndex] = `${labels[reasoningLabelIndex]} ${displayLabel(speedLabel)}`;
+      labels[reasoningLabelIndex] = `${labels[reasoningLabelIndex]} ${speedLabel}`;
     } else {
-      labels.push(displayLabel(speedLabel));
+      labels.push(speedLabel);
     }
   }
   return { label: labels.join(" · "), speedLabel, ultracode };

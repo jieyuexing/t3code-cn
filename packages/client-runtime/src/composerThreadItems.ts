@@ -7,7 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@t3tools/shared/paletteSearch";
 
-import { expandComposerThreadQuery } from "./composerThreadQuery.zh.ts";
+import { expandComposerThreadQuery } from "./composerThreadQuery.cn.ts";
 import type { EnvironmentThreadShell } from "./state/models.ts";
 import { threadSearchSubject, type ThreadSearchShell } from "./state/threadSearch.ts";
 

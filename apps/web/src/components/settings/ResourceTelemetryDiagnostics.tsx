@@ -1,4 +1,3 @@
-import { relativeTimeSuffix } from "../../../../../i18n/display.js";
 import { ProcessSignalActions } from "./ProcessSignalActions";
 import { AuthEnvironmentMaintainScope } from "@t3tools/contracts";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
@@ -209,7 +208,7 @@ function LastSampleLabel({ sampledAt }: { sampledAt: DateTime.Utc | null }) {
   return (
     <span className="text-2xs text-muted-foreground/60">
       Updated <span className="font-mono tabular-nums">{relative.value}</span>
-      {relativeTimeSuffix(relative.suffix)}
+      {relative.suffix ? ` ${relative.suffix}` : ""}
     </span>
   );
 }

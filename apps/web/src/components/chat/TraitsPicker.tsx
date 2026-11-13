@@ -1,4 +1,3 @@
-import { displayLabel } from "../../../../../i18n/display.js";
 import {
   buildTraitsTriggerDisplay,
   getDescriptorStringValue,
@@ -404,11 +403,9 @@ const TraitsMenuContent = memo(function TraitsMenuContentImpl(props: TraitsSelec
               {index > 0 ? <MenuDivider /> : null}
               <MenuGroup>
                 <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
-                  {displayLabel(descriptor.label)}
+                  {descriptor.label}
                 </div>
-                <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
-                  {displayLabel(value)}
-                </div>
+                <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">{value}</div>
               </MenuGroup>
             </div>
           );
@@ -424,7 +421,7 @@ const TraitsMenuContent = memo(function TraitsMenuContentImpl(props: TraitsSelec
           {index > 0 ? <MenuDivider /> : null}
           <MenuGroup>
             <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
-              {displayLabel(descriptor.label)}
+              {descriptor.label}
             </div>
             {ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id ? (
               <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
@@ -445,12 +442,12 @@ const TraitsMenuContent = memo(function TraitsMenuContentImpl(props: TraitsSelec
                 >
                   <span className="flex w-full min-w-0 flex-col">
                     <span className="flex min-w-0 items-center gap-1">
-                      <span className="min-w-0 truncate">{displayLabel(option.label)}</span>
+                      <span className="min-w-0 truncate">{option.label}</span>
                       {option.isDefault ? <DefaultBadge /> : null}
                     </span>
                     {option.description ? (
                       <span className="max-w-56 text-pretty text-muted-foreground/80 text-xs">
-                        {displayLabel(option.description)}
+                        {option.description}
                       </span>
                     ) : null}
                   </span>
@@ -465,7 +462,7 @@ const TraitsMenuContent = memo(function TraitsMenuContentImpl(props: TraitsSelec
           {index > 0 || selectDescriptors.length > 0 ? <MenuDivider /> : null}
           <MenuGroup>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-              {displayLabel(descriptor.label)}
+              {descriptor.label}
             </div>
             <MenuRadioGroup
               value={descriptor.currentValue === true ? "on" : "off"}
@@ -510,7 +507,6 @@ export const TraitsPicker = memo(function TraitsPicker({
         ? { instanceId: props.instanceId, model: props.model, options: props.modelOptions ?? [] }
         : null,
     reportedModelSelection: props.reportedModelSelection,
-    displayLabel,
   });
   const isCodexStyle = props.provider === "codex";
 

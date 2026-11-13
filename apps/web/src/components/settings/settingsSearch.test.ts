@@ -6,7 +6,6 @@ import {
 } from "@t3tools/contracts";
 import { UNKNOWN_SOURCE_CONTROL_CLIENT } from "@t3tools/client-runtime/source-control-clients";
 import * as Schema from "effect/Schema";
-import * as i18n from "../../../../../i18n/runtime.js";
 
 import {
   filterAvailableSettingsSearchItems,
@@ -20,7 +19,6 @@ import {
   sourceControlHostSearchItems,
   sourceControlHostSettingsSearchId,
   type SettingsSearchItem,
-  searchableSetting,
 } from "./settingsSearch";
 
 vi.mock("~/env", async (importOriginal) => ({
@@ -60,27 +58,6 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
-  it("also matches translated titles and aliases while retaining the original fields", () => {
-    const translate = vi.spyOn(i18n, "__t").mockImplementation((key) => {
-      return { "Word wrap": "自动换行", "long lines in code previews": "代码预览长行" }[key] ?? key;
-    });
-    try {
-      expect(searchSettings("自动换行", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
-      expect(searchSettings("代码预览", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
-      expect(searchSettings("word wrap", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
-      expect(searchSettings("long lines", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
-      translate.mockImplementation((key) => key);
-      expect(searchSettings("自动换行", ITEMS)).toEqual([]);
-      expect(searchSettings("word wrap", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
-    } finally {
-      translate.mockRestore();
-    }
-  });
-  it.each(["language", "语言", "English", "简体中文"])("finds device language for %s", (query) => {
-    expect(searchSettings(query).map((item) => item.id)).toContain("language");
-    expect(searchableSetting("language").title).toBe("Language / 语言");
-  });
-
   it("matches titles, sections, and remembered setting details", () => {
     expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);

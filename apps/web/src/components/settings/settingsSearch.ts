@@ -1,6 +1,5 @@
 import { HOSTED_APP_CHANNEL } from "~/branding";
 import { isElectron, isSecretsFeatureEnabled } from "~/env";
-import { __t } from "../../../../../i18n/runtime.js";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
 import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@t3tools/contracts";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -306,12 +305,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "new thread default runtime mode supervised approvals auto accept edits full access",
     ],
-  },
-  {
-    id: "language",
-    title: "Language / 语言",
-    to: "/settings/appearance",
-    searchTerms: ["English", "简体中文", "中文", "language", "locale"],
   },
   {
     id: "color-scheme",
@@ -1529,9 +1522,6 @@ export function searchSettings(
         title,
         normalizeSearchText(SETTINGS_SECTION_LABELS[item.to]),
         ...(item.searchTerms ?? []).map(normalizeSearchText),
-        ...[item.title, SETTINGS_SECTION_LABELS[item.to], ...(item.searchTerms ?? [])].map(
-          (field) => normalizeSearchText(__t(field)),
-        ),
       ];
       if (!queryTokens.every((token) => fields.some((field) => field.includes(token)))) return [];
 

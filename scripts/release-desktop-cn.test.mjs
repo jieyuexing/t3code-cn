@@ -12,8 +12,8 @@ import {
   assertAllUploaded,
   releaseTag,
   suiteContents,
-} from "./release-desktop-zh.mjs";
-import { fileIdentity, artifactSpec, sourceIdentity } from "./release-source-zh.mjs";
+} from "./release-desktop-cn.mjs";
+import { fileIdentity, artifactSpec, sourceIdentity } from "./release-source-cn.mjs";
 
 const version = "0.0.46-nightly.20261008.2833";
 const source = { head: "1".repeat(40), treeSha256: "2".repeat(64), dirty: false };
@@ -90,7 +90,6 @@ function fixture(kinds = ALL_KINDS) {
           version,
           arch: "arm64",
           feedFree: true,
-          chineseBundle: true,
           readOnlyMount: true,
           sourceHead: source.head,
           asarSha256: "4".repeat(64),

@@ -1,4 +1,3 @@
-import { relativeTimeSuffix } from "../../../../../i18n/display.js";
 import { SettingsGroup } from "./SettingsGroup";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import {
@@ -199,8 +198,8 @@ function ProviderLastChecked({ environmentId }: { environmentId: EnvironmentId }
     <span>
       {lastCheckedRelative.suffix ? (
         <>
-          Checked <span className="font-mono tabular-nums">{lastCheckedRelative.value}</span>
-          {relativeTimeSuffix(lastCheckedRelative.suffix)}
+          Checked <span className="font-mono tabular-nums">{lastCheckedRelative.value}</span>{" "}
+          {lastCheckedRelative.suffix}
         </>
       ) : (
         <>Checked {lastCheckedRelative.value}</>

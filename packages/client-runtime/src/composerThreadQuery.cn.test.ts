@@ -2,7 +2,7 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { matchComposerThreadItems, type ComposerThreadCandidate } from "./composerThreadItems.ts";
-import { expandComposerThreadQuery } from "./composerThreadQuery.zh.ts";
+import { expandComposerThreadQuery } from "./composerThreadQuery.cn.ts";
 
 const environmentId = EnvironmentId.make("env-composer");
 

@@ -1,4 +1,3 @@
-import { displayThreadTitle } from "../../../../../i18n/display.js";
 import { useAtomValue } from "@effect/atom-react";
 import { threadKey } from "@t3tools/client-runtime/state/entities";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
@@ -759,7 +758,7 @@ export function ThreadRelationshipsPanel(props: {
     const RelationshipPopup = agent ? ThreadHoverCardPopup : TooltipPopup;
     const relationshipTooltip = agent ? (
       <SubagentTooltipContent
-        title={displayThreadTitle(threadTitle)}
+        title={threadTitle}
         model={agent.model}
         providerInstanceId={agent.providerInstanceId}
         origin={agent.origin}
@@ -790,7 +789,7 @@ export function ThreadRelationshipsPanel(props: {
         />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-left text-sm font-medium leading-4 text-foreground/85">
-            {displayThreadTitle(threadTitle)}
+            {threadTitle}
           </span>
         </span>
         {agent ? null : (
@@ -863,7 +862,7 @@ export function ThreadRelationshipsPanel(props: {
                     size="sm"
                     variant="ghost"
                     part="primary"
-                    aria-label={`${displayThreadTitle(threadTitle)} ${threadRelationshipStatusLabel(rowStatus)}`}
+                    aria-label={`${threadTitle} ${threadRelationshipStatusLabel(rowStatus)}`}
                     onClick={() => openThread(threadId)}
                   />
                 }

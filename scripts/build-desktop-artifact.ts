@@ -982,8 +982,7 @@ interface StagePackageJson {
 }
 
 export const STAGE_INSTALL_ARGS = ["install", "--prod"] as const;
-// macOS ships Electron locales as zh_CN.lproj, Windows/Linux as zh-CN.pak.
-export const DESKTOP_ELECTRON_LANGUAGES = ["en-US", "zh-CN", "zh_CN"] as const;
+export const DESKTOP_ELECTRON_LANGUAGES = ["en-US"] as const;
 export const DESKTOP_FILE_EXCLUSIONS = [
   // Cursor walks from argv[1] to platform assets; helpers and native addons need real paths outside ASAR.
   "!**/node_modules/@cursor/sdk-*/**/*",

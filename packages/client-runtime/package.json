@@ -23,9 +23,9 @@
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"
     },
-    "./composer-thread-query-zh": {
-      "types": "./src/composerThreadQuery.zh.ts",
-      "default": "./src/composerThreadQuery.zh.ts"
+    "./composer-thread-query-cn": {
+      "types": "./src/composerThreadQuery.cn.ts",
+      "default": "./src/composerThreadQuery.cn.ts"
     },
     "./composer-model-mentions": {
       "types": "./src/composerModelMentions.ts",

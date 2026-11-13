@@ -54,24 +54,6 @@ const ContextMenuPosition = Schema.Struct({
   y: Schema.Number,
 });
 
-class DesktopLocaleError extends Schema.TaggedError<DesktopLocaleError>()("DesktopLocaleError", {
-  cause: Schema.Defect(),
-}) {}
-
-export const setLocale = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.SET_LOCALE_CHANNEL,
-  payload: Schema.Literals(["en", "zh-CN"]),
-  result: Schema.Void,
-  handler: (locale) =>
-    Effect.tryPromise({
-      try: async () => {
-        const { setDesktopLocale } = await import("../../../../../i18n/desktop-runtime.js");
-        setDesktopLocale(locale);
-      },
-      catch: (cause) => new DesktopLocaleError({ cause }),
-    }),
-});
-
 const ContextMenuInput = Schema.Struct({
   items: Schema.Array(ContextMenuItemSchema),
   position: Schema.optionalKey(ContextMenuPosition),

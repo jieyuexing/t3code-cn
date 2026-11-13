@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import * as NodeUtil from "node:util";
-import { readJson, assertCandidate } from "./release-source-zh.mjs";
-import { auditDmg, smokeCli } from "./candidate-target-checks-zh.mjs";
-import { verifyReceipt } from "./release-validation-zh.mjs";
+import { readJson, assertCandidate } from "./release-source-cn.mjs";
+import { auditDmg, smokeCli } from "./candidate-target-checks-cn.mjs";
+import { verifyReceipt } from "./release-validation-cn.mjs";
 const { values } = NodeUtil.parseArgs({
   options: {
     "audit-dmg": { type: "boolean" },

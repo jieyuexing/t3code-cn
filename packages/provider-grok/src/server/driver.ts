@@ -1,6 +1,6 @@
 import { ProviderDriverKind } from "@t3tools/contracts";
 import { GrokSettings } from "../settings.ts";
-import { makeGrokLoggedOutHold } from "./loggedOutHold.zh.ts";
+import { makeGrokLoggedOutHold } from "./loggedOutHold.cn.ts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

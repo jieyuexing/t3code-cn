@@ -2,7 +2,7 @@ import {
   matchComposerEnvironmentItems,
   matchComposerThreadItems,
 } from "@t3tools/client-runtime/composerThreadItems";
-import { expandComposerThreadQuery } from "@t3tools/client-runtime/composer-thread-query-zh";
+import { expandComposerThreadQuery } from "@t3tools/client-runtime/composer-thread-query-cn";
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import type {

@@ -1,4 +1,3 @@
-import { displayThreadTitle } from "../../../../i18n/display.js";
 import {
   parseScopedThreadKey,
   scopeProjectRef,
@@ -832,7 +831,7 @@ export function useThreadActions() {
     const resolved = resolveThreadTarget(target);
     const confirmationResult = await requestThreadUnpinConfirmation({
       enabled: confirmThreadUnpin,
-      title: displayThreadTitle(resolved?.thread.title ?? "this thread"),
+      title: resolved?.thread.title ?? "this thread",
       confirm: localApi ? (message) => localApi.dialogs.confirm(message) : null,
     });
     if (confirmationResult._tag === "Failure") {
@@ -969,7 +968,7 @@ export function useThreadActions() {
     const resolved = resolveThreadTarget(target);
 
     if (confirmThreadDelete && localApi) {
-      const title = displayThreadTitle(resolved?.thread.title ?? knownTitle ?? "this thread");
+      const title = resolved?.thread.title ?? knownTitle ?? "this thread";
       const confirmationResult = await settlePromise(() =>
         localApi.dialogs.confirm(
           [

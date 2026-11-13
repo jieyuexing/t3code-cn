@@ -861,14 +861,14 @@ export function ThemeLibrary({
       <ThemeImportDialog
         onImportedMany={(importedThemes, { updated }) => {
           if (updated) refreshTheme();
-          const verbLabel = updated ? "updated" : "added";
+          const verb = updated ? "updated" : "added";
           toastManager.add(
             stackedThreadToast({
               type: "success",
               title:
                 importedThemes.length === 1
-                  ? `${importedThemes[0]!.label} ${verbLabel}`
-                  : `${importedThemes.length} themes ${verbLabel}`,
+                  ? `${importedThemes[0]!.label} ${verb}`
+                  : `${importedThemes.length} themes ${verb}`,
               description: importedThemes.map((imported) => imported.label).join(", "),
             }),
           );

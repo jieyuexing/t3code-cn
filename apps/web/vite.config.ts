@@ -22,7 +22,6 @@ import { loadRepoEnv } from "../../scripts/lib/public-config";
 import { thirdPartyLicensesPlugin } from "../../scripts/lib/third-party-licenses";
 import { tailwindPlugins } from "./vite/tailwind";
 import { warmBundledDevPlugin } from "./vite/warmBundledDev";
-import { webI18nPlugin } from "../../i18n/web-build.mjs";
 import { formatAppDisplayName, resolveWebAppStageLabel } from "./src/branding.logic";
 
 const repoEnv = loadRepoEnv();
@@ -277,7 +276,7 @@ const configuredAllowedHosts = (process.env.T3CODE_DEV_ALLOWED_HOSTS ?? "")
   .filter((entry) => entry.length > 0);
 const allowedHosts = [".ts.net", ...configuredAllowedHosts];
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(() => {
   return {
     run: {
       tasks: {
@@ -305,7 +304,6 @@ export default defineConfig(({ mode }) => {
             ],
           }),
       tanstackRouter({ autoCodeSplitting: true }),
-      webI18nPlugin(mode),
       react({ compiler: true }),
       tailwindPlugins(bundledDev),
       warmBundledDevPlugin(),

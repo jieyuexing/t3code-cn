@@ -1,4 +1,3 @@
-import { displayThreadTitle } from "../../../../i18n/display.js";
 import {
   type EnvironmentThreadShell,
   type PendingSubagentRequest,
@@ -159,7 +158,7 @@ export function startThreadNotifications(
         onRemove: (): void => forgetToast(toastKey, toastId),
         type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
         title,
-        description: displayThreadTitle(thread.title),
+        description: thread.title,
         data: {
           hideCopyButton: true,
           leadingIcon:
@@ -198,7 +197,7 @@ export function startThreadNotifications(
       return;
     try {
       const notification = new Notification(title, {
-        body: displayThreadTitle(thread.title),
+        body: thread.title,
         tag: threadNotificationTag(environmentId, thread.id),
         silent: true,
         // Windows drops clicks after a toast moves into Notification Center.

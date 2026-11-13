@@ -8,7 +8,7 @@ import * as NodeOS from "node:os";
 import * as Effect from "effect/Effect";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
-// 由 build-desktop-zh 的同一盖章/恢复事务调用；两个目标串行且各自立即归档。
+// 由 build-desktop-cn 的同一盖章/恢复事务调用；两个目标串行且各自立即归档。
 const { values } = NodeUtil.parseArgs({
   options: Object.fromEntries(
     ["platform", "version", "official-archive", "release-metadata", "sha256sums", "output-dir"].map(

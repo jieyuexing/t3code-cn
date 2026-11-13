@@ -1,4 +1,3 @@
-import { displayUsageNotice } from "../../../../../i18n/display.js";
 import type { EnvironmentId, UsageLimitsReport } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import { limitsNotice } from "@t3tools/shared/usageLimits";
@@ -128,7 +127,7 @@ function UsageLimitsBannerBody({
                 </span>
               ) : null}
               {notice ? (
-                <span className="text-xs text-muted-foreground">{displayUsageNotice(notice)}</span>
+                <span className="text-xs text-muted-foreground">{notice}</span>
               ) : (
                 <LimitWindows
                   compact
@@ -161,7 +160,7 @@ function UsageLimitsBannerBody({
         })}
         {report.notices.map((notice) => (
           <span key={notice} className="text-xs text-muted-foreground">
-            {displayUsageNotice(notice)}
+            {notice}
           </span>
         ))}
       </ComposerBanner.Body>

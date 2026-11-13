@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 中文版 Release 的唯一发布入口。所有本地检查先于任何 GitHub 写入。
+// cn 版 Release 的唯一发布入口。所有本地检查先于任何 GitHub 写入。
 // 本脚本只强制套装含 Windows x64 运行包，DMG、Linux 运行包对它可选；现行 runner 每次发三件，
 // 141 取 Windows 包、台式机取 Linux 包，两者都核对 SHA256SUMS 与 PROVENANCE.json。
 import * as NodeChildProcess from "node:child_process";
@@ -16,8 +16,8 @@ import {
   artifactSpec,
   assertCandidate,
   sha256,
-} from "./release-source-zh.mjs";
-import { verifyReceipt } from "./release-validation-zh.mjs";
+} from "./release-source-cn.mjs";
+import { verifyReceipt } from "./release-validation-cn.mjs";
 
 const REPO = "jieyuexing/t3code-cn";
 export function releaseTag(version, explicit) {
@@ -131,8 +131,7 @@ export function suiteContents(prepared) {
     .join("、");
 }
 export function checkRemoteState({ release, tagCommit, originHead }, prepared, tag) {
-  if (originHead !== prepared.source.head)
-    throw new Error("HEAD must equal origin/main exactly");
+  if (originHead !== prepared.source.head) throw new Error("HEAD must equal origin/main exactly");
   if (tagCommit !== undefined && tagCommit !== prepared.source.head)
     throw new Error("Tag points to another commit");
   if (!release) return;
@@ -209,7 +208,7 @@ export async function main() {
   });
   if (!values.suite)
     throw new Error(
-      "Usage: release-desktop-zh.mjs --suite suite.json [--dry-run] [--tag cn-vV-rN]",
+      "Usage: release-desktop-cn.mjs --suite suite.json [--dry-run] [--tag cn-vV-rN]",
     );
   const root = NodeURL.fileURLToPath(new URL("../", import.meta.url));
   ghEnvironment(process.env);
@@ -234,7 +233,7 @@ export async function main() {
     throw new Error("Unexpected origin repository");
   if (!process.env.TMPDIR)
     throw new Error("Set task-owned TMPDIR/TMP/TEMP before release preflight");
-  const scratch = NodeFS.mkdtempSync(NodePath.join(process.env.TMPDIR, "zh-release-"));
+  const scratch = NodeFS.mkdtempSync(NodePath.join(process.env.TMPDIR, "cn-release-"));
   const merge = git(
     root,
     "log",
@@ -248,7 +247,7 @@ export async function main() {
   const start = body.search(/^更新说明/m);
   if (start < 0) throw new Error("Latest sync merge lacks release notes");
   const notes = [
-    `基于上游 v${version} 的简体中文版。`,
+    `基于上游 v${version} 的个人维护版。`,
     "",
     `包含 ${suiteContents(prepared)}。产品版本和资产名沿用默认值。`,
     `${prepared.artifacts.some((a) => a.candidate.kind === "dmg") ? "macOS 为 ad-hoc 签名，未公证。" : ""}验证范围与 SHA-256 见 PROVENANCE.json / SHA256SUMS；不含安装、GUI、provider 或生产环境验收。`,
@@ -367,7 +366,7 @@ export function publishPrepared({
   if (dryRun) {
     assertUnchanged();
     log(
-      `[zh-release] DRY RUN accepted ${tag}: ${prepared.assets.length} assets, same-source suite; no GitHub writes`,
+      `[cn-release] DRY RUN accepted ${tag}: ${prepared.assets.length} assets, same-source suite; no GitHub writes`,
     );
     return;
   }
@@ -390,7 +389,7 @@ export function publishPrepared({
       "--target",
       prepared.source.head,
       "--title",
-      `T3 Code 中文版 ${prepared.version}`,
+      `T3 Code cn ${prepared.version}`,
       "--notes-file",
       notesFile,
     );
@@ -420,6 +419,6 @@ export function publishPrepared({
   if (state.release?.draft !== false || state.tagCommit !== prepared.source.head)
     throw new Error("Publication response requires manual inspection");
   assertAllUploaded(state.release, prepared);
-  log(`[zh-release] Published https://github.com/${REPO}/releases/tag/${tag}`);
+  log(`[cn-release] Published https://github.com/${REPO}/releases/tag/${tag}`);
 }
 if (import.meta.main) await main();

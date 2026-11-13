@@ -4,7 +4,7 @@ import {
   validateTemplateMembers,
   verifyOfficialTemplate,
   assertX64Binary,
-} from "./cli-official-template-zh.ts";
+} from "./cli-official-template-cn.ts";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";

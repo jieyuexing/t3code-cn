@@ -1,7 +1,7 @@
 import { ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { sortFolderThreadsByStatus } from "./folderStatusOrder-zh";
+import { sortFolderThreadsByStatus } from "./folderStatusOrder-cn";
 
 const base = {
   hasActionableProposedPlan: false,

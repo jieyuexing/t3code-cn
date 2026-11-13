@@ -34,7 +34,7 @@ import {
   stageOfficialTemplate,
   templateReceipt,
   verifyOfficialTemplate,
-} from "./cli-official-template-zh.ts";
+} from "./cli-official-template-cn.ts";
 import { signWithJsign } from "./lib/windows-jsign.ts";
 import { windowsSystemTar } from "./lib/windows-tar.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";

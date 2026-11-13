@@ -10,7 +10,7 @@ Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `w
 
 **落地情况。** `845b29c`（主提交）、`a27d697`（文件树与 Git 菜单）、`3292ec5`（阅读器控件）及其他功能提交顺带补词条；文件在 `crates/warp_i18n/`、`crates/warp_i18n/locales/zh-CN.tsv`、`script/i18n/`。VALIDATION.md 记录审计通过 1170/1170。
 
-**对 T3 的适用性。** t3code-cn 已经走了同一条路且更进一步（事实来源：fork `i18n/README.md`）：构建期字典转换、英文原文为 key、"保护规则优先于词典"、ignore 与位置覆盖账本、覆盖率 CLI。`warp_i18n` 的 owned/borrowed 分类思想在 T3 里对应"保护规则 + 显式显示 helper"，可视为已被 fork 自身覆盖。Rust 侧具体实现随载体失效。
+**对 T3 的适用性。** t3code-cn 已经走了同一条路且更进一步（事实来源：fork `i18n` 分支的 `i18n/README.md`）：构建期字典转换、英文原文为 key、"保护规则优先于词典"、ignore 与位置覆盖账本、覆盖率 CLI。`warp_i18n` 的 owned/borrowed 分类思想在 T3 里对应"保护规则 + 显式显示 helper"，可视为已被 fork 自身覆盖。Rust 侧具体实现随载体失效。
 
 ## 2. 终端专用产品策略（terminal-only policy）
 
@@ -70,13 +70,13 @@ Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `w
 
 **落地情况。** Git 面板 `8313e69`（`app/src/workspace/view/version_control/{model,view,telemetry}.rs`、`crates/integration/src/test/version_control.rs`）；与 tab 关联 `2825e54`；symlink 安全展开 `0876eec`（`crates/repo_metadata/src/entry.rs`）；链接目录图标 `c8eccd3`；系统默认应用打开 `dfc0f6e`（`app/src/code/file_tree/view.rs`）。
 
-**对 T3 的适用性。** T3 有 diff 面板与文件操作（事实来源：`apps/web/src/diffPanelStore.ts`、`diffFileActions.ts`）以及 Git 操作菜单 Commit/Push（事实来源：fork `i18n/README.md`），Git 面板的核心需求可视为部分覆盖；暂存区级操作是否齐全待核对。symlink 目录展开与"用系统默认应用打开"在 T3 的现状待核对，若缺失属于小切片、值得迁移。
+**对 T3 的适用性。** T3 有 diff 面板与文件操作（事实来源：`apps/web/src/diffPanelStore.ts`、`diffFileActions.ts`）以及 Git 操作菜单 Commit/Push（事实来源：fork `i18n` 分支的 `i18n/README.md`），Git 面板的核心需求可视为部分覆盖；暂存区级操作是否齐全待核对。symlink 目录展开与"用系统默认应用打开"在 T3 的现状待核对，若缺失属于小切片、值得迁移。
 
 ## 汇总表
 
 | 定制思想                                 | 落地程度（Warposs）                 | 状态（对 T3）                            | 依据                                      |
 | ---------------------------------------- | ----------------------------------- | ---------------------------------------- | ----------------------------------------- |
-| 中文化：owned/borrowed 边界分类 + 审计器 | 完整，100% 审计                     | 已被 T3 覆盖（由 fork 自身的字典层覆盖） | t3code-cn `i18n/README.md`                |
+| 中文化：owned/borrowed 边界分类 + 审计器 | 完整，100% 审计                     | 已被 T3 覆盖（由 fork 自身的字典层覆盖） | t3code-cn `i18n` 分支的 `i18n/README.md`  |
 | terminal-only 渠道策略                   | 完整                                | 随载体失效（方法论可借鉴）               | fork `README.md`                          |
 | embedded surface 生命周期 spike          | 仅合同，未链入                      | 随载体失效                               | 源仓 `spikes/`                            |
 | 外部会话索引（Codex/Grok 分组）          | 实现，flag 默认关，视觉验收 unknown | 已被 T3 覆盖（服务端线程）               | `orchestrationV2.ts` 线程命令             |
@@ -91,5 +91,5 @@ Warposs 是 Warp 终端开源版（`warp-oss`）的个人定制 fork（仓库 `w
 | 共享阅读器：源码与投影分离、快照标注     | 实现                                | 值得迁移（作为原则）                     | —                                         |
 | Obsidian 阅读档案（行宽、行高、层级）    | 实现并目视验证                      | 值得迁移（是否已等价待核对）             | —                                         |
 | CLI 终端网格视觉快照阅读                 | 实现                                | 随载体失效                               | `effect-acp`、`effect-codex-app-server`   |
-| Git 工具面板 + tab 关联                  | 实现                                | 已被 T3 覆盖（部分；暂存操作待核对）     | `diffPanelStore.ts`、i18n README          |
+| Git 工具面板 + tab 关联                  | 实现                                | 已被 T3 覆盖（部分；暂存操作待核对）     | `diffPanelStore.ts`、`i18n` 分支的 README |
 | symlink 安全展开、系统默认应用打开       | 实现                                | 待核对（缺失则值得迁移）                 | —                                         |

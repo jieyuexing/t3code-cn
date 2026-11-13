@@ -40,10 +40,10 @@
         "prepare-server-compile-cache.cjs",
         "smoke-desktop-app.ts",
         "verify-windows-desktop-artifact.ts",
-        // Fork release tooling: build-desktop-zh.mjs spawns the CLI build by path, and the
+        // Fork release tooling: build-desktop-cn.mjs spawns the CLI build by path, and the
         // candidate verifier runs directly from the command line.
-        "build-cli-zh.mjs",
-        "verify-release-candidate-zh.mjs",
+        "build-cli-cn.mjs",
+        "verify-release-candidate-cn.mjs",
       ],
       "ignoreDependencies": ["esbuild"],
       // The `t3` npm package's files: copied into the package, never imported.

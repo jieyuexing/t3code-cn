@@ -1,4 +1,3 @@
-import { displayLabel } from "../../../../i18n/display.js";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import {
@@ -1385,7 +1384,7 @@ export default function GitActionsControl({
     if (quickAction.kind === "show_hint") {
       toastManager.add({
         type: "info",
-        title: displayLabel(quickAction.label),
+        title: quickAction.label,
         description: quickAction.hint,
         data: threadToastData,
       });
@@ -1508,7 +1507,7 @@ export default function GitActionsControl({
               >
                 <MenuItem className="w-full" disabled>
                   <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
-                  <MenuItemLabel>{displayLabel(item.label)}</MenuItemLabel>
+                  <MenuItemLabel>{item.label}</MenuItemLabel>
                 </MenuItem>
               </PopoverTrigger>
               <PopoverPopup tooltipStyle side="left" align="center">
@@ -1527,7 +1526,7 @@ export default function GitActionsControl({
             }}
           >
             <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
-            <MenuItemLabel>{displayLabel(item.label)}</MenuItemLabel>
+            <MenuItemLabel>{item.label}</MenuItemLabel>
           </MenuItem>
         );
       })}
@@ -1631,7 +1630,7 @@ export default function GitActionsControl({
                     cn("not-sr-only ml-0 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
                   )}
                 >
-                  {displayLabel(quickAction.label)}
+                  {quickAction.label}
                 </span>
               </PopoverTrigger>
               <PopoverPopup tooltipStyle side="bottom" align="start">
@@ -1658,7 +1657,7 @@ export default function GitActionsControl({
                   cn("not-sr-only ml-0 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
                 )}
               >
-                {displayLabel(quickAction.label)}
+                {quickAction.label}
               </span>
             </ThreadDetailsControl>
           )}

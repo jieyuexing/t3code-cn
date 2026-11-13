@@ -1,4 +1,3 @@
-import { changeLocale, getLocale } from "../../../../../i18n/runtime.js";
 import type { CSSProperties } from "react";
 import { useState } from "react";
 import {
@@ -86,8 +85,6 @@ const EFFORT_DISPLAY_LABELS: Record<EffortDisplay, string> = {
 };
 
 export function AppearanceSettingsPanel() {
-  const [languageError, setLanguageError] = useState<string | null>(null);
-  const [changingLanguage, setChangingLanguage] = useState(false);
   const {
     appearanceMode,
     refreshTheme,
@@ -166,38 +163,6 @@ export function AppearanceSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection id="appearance-interface" title="Interface">
-        <SettingsRow
-          {...searchableSetting("language")}
-          description="Reloads this page. Restart the desktop app to update native menus. / 刷新当前页面；原生菜单需重启桌面应用。"
-          control={
-            <Select
-              value={getLocale()}
-              disabled={changingLanguage}
-              onValueChange={(value) => {
-                if (value !== "en" && value !== "zh-CN") return;
-                setChangingLanguage(true);
-                setLanguageError(null);
-                void changeLocale(value, window.desktopBridge).catch(() => {
-                  setLanguageError("Could not save language. / 无法保存语言设置。");
-                  setChangingLanguage(false);
-                });
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Language / 语言">
-                <SelectValue>{getLocale() === "en" ? "English" : "简体中文"}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="en">
-                  <span lang="en">English</span>
-                </SelectItem>
-                <SelectItem hideIndicator value="zh-CN">
-                  <span lang="zh-CN">简体中文</span>
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-        {languageError ? <p role="alert">{languageError}</p> : null}
         <SettingsRow
           {...searchableSetting("setting-appearance-contrast")}
           description="Adjust the contrast of colors and borders across the interface."

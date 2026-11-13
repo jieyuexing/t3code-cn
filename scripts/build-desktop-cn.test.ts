@@ -19,12 +19,12 @@ function fixture(args: string[], mode = "ok", extraEnv: Record<string, string> =
     for (const dir of ["apps/server", "apps/web", "apps/desktop"])
       NodeFS.mkdirSync(NodePath.join(root, dir), { recursive: true });
     NodeFS.copyFileSync(
-      new URL("./release-source-zh.mjs", import.meta.url),
-      NodePath.join(root, "scripts/release-source-zh.mjs"),
+      new URL("./release-source-cn.mjs", import.meta.url),
+      NodePath.join(root, "scripts/release-source-cn.mjs"),
     );
     NodeFS.copyFileSync(
-      new URL("./build-desktop-zh.mjs", import.meta.url),
-      NodePath.join(root, "scripts/build-desktop-zh.mjs"),
+      new URL("./build-desktop-cn.mjs", import.meta.url),
+      NodePath.join(root, "scripts/build-desktop-cn.mjs"),
     );
     NodeFS.writeFileSync(
       NodePath.join(root, "bin/git"),
@@ -89,7 +89,7 @@ function fixture(args: string[], mode = "ok", extraEnv: Record<string, string> =
     fixtureGit("tag", "v0.0.46-nightly.20261008.2833");
     const result = NodeChildProcess.spawnSync(
       process.execPath,
-      [NodePath.join(root, "scripts/build-desktop-zh.mjs"), ...args],
+      [NodePath.join(root, "scripts/build-desktop-cn.mjs"), ...args],
       { cwd: root, env, encoding: "utf8" },
     );
     return {
@@ -155,7 +155,7 @@ describe("nightly build wrapper", () => {
 });
 
 describe("fork packaging config", () => {
-  effectIt.effect("keeps the Chinese Electron locales and ad-hoc signs unsigned macOS builds", () =>
+  effectIt.effect("keeps the en-US Electron locale and ad-hoc signs unsigned macOS builds", () =>
     Effect.gen(function* () {
       const config = yield* createBuildConfig(
         "mac",
@@ -166,7 +166,7 @@ describe("fork packaging config", () => {
         undefined,
         undefined,
       );
-      expect(DESKTOP_ELECTRON_LANGUAGES).toEqual(["en-US", "zh-CN", "zh_CN"]);
+      expect(DESKTOP_ELECTRON_LANGUAGES).toEqual(["en-US"]);
       expect(config.electronLanguages).toEqual(DESKTOP_ELECTRON_LANGUAGES);
       expect(config.mac).toMatchObject({ identity: "-", timestamp: "none", notarize: false });
       expect(String((config.mac as Record<string, unknown>).sign)).toMatch(

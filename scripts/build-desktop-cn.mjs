@@ -12,7 +12,7 @@ import {
   fileIdentity,
   artifactSpec,
   writeJson,
-} from "./release-source-zh.mjs";
+} from "./release-source-cn.mjs";
 
 const root = NodeURL.fileURLToPath(new URL("../", import.meta.url));
 const version = NodeChildProcess.execFileSync(
@@ -119,11 +119,11 @@ async function run(args) {
 
 let failure;
 try {
-  console.log(`[zh-desktop] 上游 nightly：${version}`);
+  console.log(`[cn-desktop] 上游 nightly：${version}`);
   await run(["scripts/update-release-package-versions.ts", version]);
   if (target === "archive") {
     await run([
-      "scripts/build-cli-zh.mjs",
+      "scripts/build-cli-cn.mjs",
       "--platform",
       platform,
       "--version",
@@ -189,5 +189,5 @@ writeJson(`${artifact}.candidate.json`, {
   native: "pending",
 });
 console.log(
-  `[zh-candidate] ${spec.name}: structure passed; target validation pending; NOT release-ready`,
+  `[cn-candidate] ${spec.name}: structure passed; target validation pending; NOT release-ready`,
 );

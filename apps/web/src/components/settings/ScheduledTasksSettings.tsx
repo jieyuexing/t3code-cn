@@ -1,4 +1,3 @@
-import { displayLabel, joinRelativeTime } from "../../../../../i18n/display.js";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
 import { AsyncResult } from "effect/reactivity";
@@ -331,7 +330,7 @@ function relativeLabel(value: string | null, nowMs: number): string {
   if (diffMs <= 0) {
     const relative = formatRelativeTime(value, nowMs);
     if (!relative) return "Not scheduled";
-    return joinRelativeTime(relative);
+    return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
   }
   const minutes = Math.ceil(diffMs / 60_000);
   if (minutes < 2) return "in under a minute";
@@ -611,7 +610,7 @@ function ScheduledTaskEnvironmentList({
       ) : null}
       {Object.entries(summaries).map(([label, entries]) => {
         if (entries.length === 0) return null;
-        const summary = `${displayLabel(label)} ${entries.join(", ")}`;
+        const summary = `${label} ${entries.join(", ")}`;
         return (
           <Tooltip key={label}>
             <TooltipTrigger

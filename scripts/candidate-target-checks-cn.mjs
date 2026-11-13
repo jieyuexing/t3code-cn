@@ -1,12 +1,12 @@
 /* eslint-disable t3code/no-global-process-runtime -- Standalone target runner must determine the actual native OS/arch without resolving application runtime services. */
-// 中文发行的目标回执入口：复用包内运行器，输出原始阶段记录供 publisher 重放。
+// cn 版发行的目标回执入口：复用包内运行器，输出原始阶段记录供 publisher 重放。
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import * as NodeNet from "node:net";
-import { readJson, writeJson, fileIdentity, assertCandidate } from "./release-source-zh.mjs";
-import { safeRelative, inventory } from "./release-validation-zh.mjs";
+import { readJson, writeJson, fileIdentity, assertCandidate } from "./release-source-cn.mjs";
+import { safeRelative, inventory } from "./release-validation-cn.mjs";
 
 function stageWriter(output) {
   return (stage, result) => {
@@ -116,24 +116,15 @@ export async function auditDmg({ artifact, candidateFile, output }) {
     for (const name of ["app-update.yml", "dev-app-update.yml", "latest.yml", "latest-mac.yml"])
       if (NodeFS.existsSync(NodePath.join(resources, name)))
         throw new Error("DMG update feed present");
-    let chineseFiles = 0;
     for (const member of asar.listPackage(archive)) {
       const name = member.replace(/^\//, "");
       if (/(?:^|\/)(?:\.env|userdata|\.ssh|\.aws|\.npmrc)(?:\/|$)|app-update\.yml$/.test(name))
         throw new Error("Private data or feed in ASAR");
-      if (/\.(?:js|mjs|cjs|html|json)$/.test(name)) {
-        const bytes = asar.extractFile(archive, name);
-        if (bytes.includes(Buffer.from("设置")) || bytes.includes(Buffer.from("简体中文")))
-          chineseFiles++;
-      }
     }
-    if (!chineseFiles) throw new Error("Chinese bundle markers absent");
     const content = {
       version: candidate.version,
       arch: "arm64",
       feedFree: true,
-      chineseBundle: true,
-      chineseFiles,
       readOnlyMount: true,
       sourceHead: candidate.source.head,
       asarSha256: fileIdentity(archive).sha256,
@@ -218,7 +209,7 @@ export async function smokeCli({ artifact, candidateFile, output }) {
   inventory(cwd);
   assertAncestors(cwd);
   const executable = NodePath.join(cwd, candidate.kind === "windows" ? "t3.exe" : "t3");
-  const { assertX64Binary } = await import("./cli-official-template-zh.ts");
+  const { assertX64Binary } = await import("./cli-official-template-cn.ts");
   assertX64Binary(executable, candidate.kind === "windows" ? "win" : "linux");
   const probeHome = NodePath.join(output, "home"),
     temp = NodePath.join(output, "temp");

@@ -1,6 +1,6 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { fileIdentity, readJson, sameSource, sha256 } from "./release-source-zh.mjs";
+import { fileIdentity, readJson, sameSource, sha256 } from "./release-source-cn.mjs";
 
 export function inventory(root, prefix = "") {
   const rows = [];
@@ -107,7 +107,6 @@ export function verifyReceipt(candidate, receiptFile) {
       content.version !== candidate.version ||
       content.arch !== "arm64" ||
       content.feedFree !== true ||
-      content.chineseBundle !== true ||
       content.readOnlyMount !== true ||
       content.sourceHead !== candidate.source.head ||
       !/^[a-f0-9]{64}$/.test(content.asarSha256 ?? "")

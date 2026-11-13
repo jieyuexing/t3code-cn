@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Synchronous build-input integrity checks need Git/tar output and exact file bytes before extraction.
-// 中文版 CLI 包复用官方 Release 的原生闭包：校验官方模板、解出 node_modules/resource-monitor/lib，并记录来源。
+// cn 版 CLI 包复用官方 Release 的原生闭包：校验官方模板、解出 node_modules/resource-monitor/lib，并记录来源。
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";

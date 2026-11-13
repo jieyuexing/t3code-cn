@@ -1,4 +1,3 @@
-import { displayThreadTitle } from "../../../../i18n/display.js";
 import {
   foldSearchQuery,
   PALETTE_SECONDARY_LIMIT,
@@ -51,7 +50,7 @@ export function buildLinkedThreadActionItems(
     kind: "action",
     value: `thread:${input.environmentId}:${thread.id}`,
     threadRef: { environmentId: input.environmentId, threadId: thread.id },
-    title: displayThreadTitle(thread.title) || "Untitled thread",
+    title: thread.title || "Untitled thread",
     description: thread.archivedAt === null ? "Linked thread" : "Archived thread",
     searchTerms: [input.query, thread.title],
     icon: input.icon,
@@ -481,7 +480,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
           projectTitle,
           input.environmentLabelOf?.(thread),
         ),
-        title: displayThreadTitle(thread.title),
+        title: thread.title,
         description,
         timestamp: formatRelativeTimeLabel(
           thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,

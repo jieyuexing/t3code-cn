@@ -1,4 +1,3 @@
-import { displayThreadTitle } from "../../../../i18n/display.js";
 import { attachSidebarTree } from "../lib/sidebarTree";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
@@ -264,7 +263,7 @@ import {
   type SidebarSweepAction,
 } from "./sidebar/SidebarThreadRow";
 import { SidebarDraftBlock } from "./sidebar/SidebarDraftBlock";
-import { sortFolderThreadsByStatus } from "./sidebar/folderStatusOrder-zh";
+import { sortFolderThreadsByStatus } from "./sidebar/folderStatusOrder-cn";
 import {
   SidebarProjectFolderHeader,
   sidebarFolderRowId,
@@ -2830,7 +2829,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           case "archive": {
             if (confirmThreadArchive) {
               const confirmed = await settlePromise(() =>
-                api.dialogs.confirm(`Archive thread "${displayThreadTitle(thread.title)}"?`),
+                api.dialogs.confirm(`Archive thread "${thread.title}"?`),
               );
               if (confirmed._tag === "Failure" || !confirmed.value) return;
             }
@@ -2860,7 +2859,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               const confirmed = await settlePromise(() =>
                 api.dialogs.confirm(
                   [
-                    `Delete thread "${displayThreadTitle(thread.title)}"?`,
+                    `Delete thread "${thread.title}"?`,
                     "This permanently clears conversation history for this thread.",
                   ].join("\n"),
                   { variant: "destructive" },

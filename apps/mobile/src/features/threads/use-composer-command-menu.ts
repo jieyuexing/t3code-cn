@@ -11,7 +11,7 @@ import {
   matchComposerEnvironmentItems,
   matchComposerThreadItems,
 } from "@t3tools/client-runtime/composerThreadItems";
-import { expandComposerThreadQuery } from "@t3tools/client-runtime/composer-thread-query-zh";
+import { expandComposerThreadQuery } from "@t3tools/client-runtime/composer-thread-query-cn";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 
 const EMPTY_THREAD_SHELLS: ReadonlyArray<EnvironmentThreadShell> = [];

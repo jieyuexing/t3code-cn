@@ -11,12 +11,10 @@ import * as Option from "effect/Option";
 import { vi } from "vite-plus/test";
 import type * as Electron from "electron";
 
-const { focusedWebContents, ownerWindow, persistLocale } = vi.hoisted(() => ({
+const { focusedWebContents, ownerWindow } = vi.hoisted(() => ({
   focusedWebContents: vi.fn(),
   ownerWindow: vi.fn(),
-  persistLocale: vi.fn(),
 }));
-vi.mock("../../../../../i18n/desktop-runtime.js", () => ({ setDesktopLocale: persistLocale }));
 vi.mock("electron", () => ({
   webContents: { getFocusedWebContents: focusedWebContents },
   BrowserWindow: { fromWebContents: ownerWindow },
@@ -37,30 +35,8 @@ import {
   pickProjectFavicon,
   probeRemoteEditors,
   readMedia,
-  setLocale,
   syncHtmlFullscreen,
 } from "./window.ts";
-
-describe("setLocale", () => {
-  it.effect("rejects invalid payloads before persistence", () =>
-    Effect.gen(function* () {
-      const result = yield* Effect.exit(setLocale.handler("fr"));
-      assert.equal(result._tag, "Failure");
-      assert.equal(persistLocale.mock.calls.length, 0);
-    }),
-  );
-  it.effect("acknowledges persistence and propagates write failures", () =>
-    Effect.gen(function* () {
-      yield* setLocale.handler("en");
-      assert.deepEqual(persistLocale.mock.lastCall, ["en"]);
-      persistLocale.mockImplementationOnce(() => {
-        throw new Error("disk write failed");
-      });
-      const result = yield* Effect.exit(setLocale.handler("zh-CN"));
-      assert.equal(result._tag, "Failure");
-    }),
-  );
-});
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
   executablePath: "wsl.exe",
