@@ -1492,7 +1492,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
             {
               kind: "eas",
               id: "eas",
-              label: "EAS Simulator",
+              label: "Expo Simulators",
               accessToken: "expo-secret",
               maxSessionMinutes: 30,
               idleMinutes: 10,
@@ -1809,7 +1809,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
             {
               kind: "eas",
               id: "eas",
-              label: "EAS Simulator",
+              label: "Expo Simulators",
               accessToken: easReference,
               maxSessionMinutes: 30,
               idleMinutes: 10,
@@ -1929,7 +1929,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           {
             kind: "eas",
             id: "eas",
-            label: "EAS Simulator",
+            label: "Expo Simulators",
             accessToken: personal("Expo/token"),
             maxSessionMinutes: 30,
             idleMinutes: 10,
