@@ -6,7 +6,12 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type { ReviewBranchCommitsResult, ScopedThreadRef, RunId } from "@t3tools/contracts";
+import {
+  CHECKPOINT_DIFF_TRUNCATED_MARKER,
+  type ReviewBranchCommitsResult,
+  type ScopedThreadRef,
+  type RunId,
+} from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -333,8 +338,11 @@ export default function DiffPanel({
       ? diffSelection.baseRef
       : null;
   const pluginReveal = usePluginDiffReveal(routeThreadRef);
+  // @pierre/diffs trims trailing whitespace from parsed file names; leading whitespace survives.
   const selectedFilePath =
-    diffSelection.kind === "turn" ? diffSelection.filePath : (pluginReveal?.filePath ?? null);
+    diffSelection.kind === "turn"
+      ? diffSelection.filePath?.trimEnd() || null
+      : (pluginReveal?.filePath ?? null);
   const selectedFileRevealRequestId =
     diffSelection.kind === "turn" ? diffSelection.revealRequestId : (pluginReveal?.requestId ?? 0);
   const selectedTurn =
@@ -486,7 +494,10 @@ export default function DiffPanel({
       : gitDiff;
   const isSelectedPatchTruncated =
     toolCallPreview?.truncated === true ||
-    (isGitSelection && selectedGitSource?.truncated === true);
+    (isGitSelection && selectedGitSource?.truncated === true) ||
+    (!toolCallSelection &&
+      selectedTurn !== undefined &&
+      selectedPatch?.endsWith(CHECKPOINT_DIFF_TRUNCATED_MARKER) === true);
   const selectedPatchQuery = toolCallSelection
     ? toolCallDetail
     : selectedTurn
