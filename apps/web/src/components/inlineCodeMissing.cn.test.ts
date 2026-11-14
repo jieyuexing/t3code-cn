@@ -107,6 +107,18 @@ describe("confirmMissingInlineCodePaths", () => {
     expect(search).not.toHaveBeenCalled();
   });
 
+  it("never stats below a network workspace root", async () => {
+    const stat = vi.fn(async () => []);
+    const missing = await confirmMissingInlineCodePaths([probe("src/a.ts")], {
+      cwd: "//host/share/project",
+      otherRoots: [],
+      stat,
+      search: async () => NONE,
+    });
+    expect(missing).toEqual(new Set());
+    expect(stat).not.toHaveBeenCalled();
+  });
+
   it("asks for at most one batch and leaves the overflow unknown", async () => {
     const probes = Array.from({ length: 70 }, (_, index) => probe(`dir/f${index}.ts`));
     const { result, stat } = run(probes, { search: async (_root, query) => found(query) });

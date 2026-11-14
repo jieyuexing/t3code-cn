@@ -5,7 +5,7 @@ import {
   workspaceLinkLookupQuery,
   type WorkspaceEntryCandidate,
 } from "@t3tools/client-runtime/workspace-basename-lookup";
-import { isAbsolutePath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
+import { isAbsolutePath, isNetworkPath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
 
 // Mirrors the filesystem RPC's path length cap; one over-long path would fail the whole batch.
 const STAT_PATH_MAX_LENGTH = 512;
@@ -90,5 +90,6 @@ export async function confirmMissingInlineCodePaths(
 function statTarget(path: string, cwd: string): string | null {
   if (isAbsolutePath(path) || path.startsWith("~/") || path.startsWith("~\\")) return null;
   const target = resolveWorkspaceFilePath(path, cwd);
-  return target.length <= STAT_PATH_MAX_LENGTH ? target : null;
+  // A network path leaks the Windows user's credentials to its host once a server stats it.
+  return target.length <= STAT_PATH_MAX_LENGTH && !isNetworkPath(target) ? target : null;
 }
