@@ -469,6 +469,87 @@ describe("ChatMarkdown workspace file opens", () => {
   });
 });
 
+describe("ChatMarkdown inline code paths", () => {
+  const environmentId = EnvironmentId.make("workspace");
+  const text = "Keep `history/OPS.md` and `src/a.ts`, then move `docs/gone.md:3`.";
+  const chips = (container: HTMLElement) =>
+    [...container.querySelectorAll(".chat-markdown-file-link")].map((chip) => chip.textContent);
+  const plainCode = (container: HTMLElement) =>
+    [...container.querySelectorAll("code")]
+      .filter((code) => code.closest(".chat-markdown-file-link") === null)
+      .map((code) => code.textContent);
+  const workspaceHas = (...paths: string[]) =>
+    filesystemMetadata.mockImplementation(async ({ input }: { input: { paths: string[] } }) =>
+      AsyncResult.success({
+        entries: input.paths.map((path) => (paths.includes(path) ? { kind: "file" } : null)),
+      }),
+    );
+  const searchFinds = (...paths: string[]) =>
+    workspaceSearch.mockResolvedValue(
+      AsyncResult.success({
+        entries: paths.map((path) => ({ path, kind: "file" })),
+        truncated: false,
+      }),
+    );
+
+  it("renders a path the workspace does not have as plain code, with one batch request", async () => {
+    setup();
+    workspaceHas("/work/real/src/a.ts");
+    searchFinds();
+    await using screen = await renderText(text, { cwd: "/work/real", environmentId });
+
+    await vi.waitFor(() =>
+      expect(plainCode(screen.container)).toEqual(["history/OPS.md", "docs/gone.md:3"]),
+    );
+    expect(chips(screen.container)).toEqual(["a.ts"]);
+    expect(filesystemMetadata).toHaveBeenCalledExactlyOnceWith({
+      environmentId,
+      input: {
+        paths: ["/work/real/history/OPS.md", "/work/real/src/a.ts", "/work/real/docs/gone.md"],
+      },
+    });
+  });
+
+  it("keeps the chip of a path only a deeper folder has, as a click would open it", async () => {
+    setup();
+    workspaceHas();
+    searchFinds("sub/src/a.ts");
+    await using screen = await renderText("See `src/a.ts`.", { cwd: "/work/real", environmentId });
+
+    await vi.waitFor(() => expect(workspaceSearch).toHaveBeenCalledOnce());
+    expect(chips(screen.container)).toEqual(["a.ts"]);
+    expect(plainCode(screen.container)).toEqual([]);
+  });
+
+  it("keeps every chip while the answer is unknown", async () => {
+    setup();
+    filesystemMetadata.mockResolvedValue(AsyncResult.initial());
+    await using screen = await renderText(text, { cwd: "/work/real", environmentId });
+    await vi.waitFor(() => expect(filesystemMetadata).toHaveBeenCalledOnce());
+    expect(chips(screen.container)).toHaveLength(3);
+
+    setup();
+    searchFinds();
+    workspaceSearch.mockResolvedValue(AsyncResult.success({ entries: [], truncated: true }));
+    await using truncated = await renderText(text, { cwd: "/work/real", environmentId });
+    await vi.waitFor(() => expect(workspaceSearch).toHaveBeenCalled());
+    expect(chips(truncated.container)).toHaveLength(3);
+  });
+
+  it("asks nothing while the text streams or without a workspace", async () => {
+    setup();
+    await using streaming = await renderText(text, {
+      cwd: "/work/real",
+      environmentId,
+      isStreaming: true,
+    });
+    await using unscoped = await renderText(text, { cwd: undefined, environmentId });
+    expect(filesystemMetadata).not.toHaveBeenCalled();
+    expect(chips(streaming.container)).toHaveLength(3);
+    expect(chips(unscoped.container)).toEqual([]);
+  });
+});
+
 describe("ChatMarkdown skill chips", () => {
   it("shows the skill's details and opens its instructions", async () => {
     setup();
