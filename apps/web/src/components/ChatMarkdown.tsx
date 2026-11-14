@@ -795,24 +795,27 @@ function useChatMarkdownState({
       meta.workspaceLookupPath === null ? [] : [{ text, path: meta.workspaceLookupPath }],
     ),
     confirm: (probes) =>
-      confirmMissingInlineCodePaths(probes, {
-        cwd: cwd!,
-        otherRoots: otherProjectRoots,
-        stat: async (paths) => {
-          const result = await getFilesystemMetadata({
-            environmentId: environmentId!,
-            input: { paths },
-          });
-          return result._tag === "Success" ? result.value.entries : null;
-        },
-        search: async (root, query) => {
-          const result = await searchProjectEntries({
-            environmentId: environmentId!,
-            input: { cwd: root, query, limit: WORKSPACE_BASENAME_LOOKUP_LIMIT, kind: "file" },
-          });
-          return result._tag === "Success" ? result.value : null;
-        },
-      }),
+      // Agent cd 进过的目录不在判定范围内，而点击时会去那里找，有这类目录就不判缺失。
+      (agentDirectories?.() ?? []).some((root) => root !== cwd)
+        ? Promise.resolve(new Set<string>())
+        : confirmMissingInlineCodePaths(probes, {
+            cwd: cwd!,
+            otherRoots: otherProjectRoots,
+            stat: async (paths) => {
+              const result = await getFilesystemMetadata({
+                environmentId: environmentId!,
+                input: { paths },
+              });
+              return result._tag === "Success" ? result.value.entries : null;
+            },
+            search: async (root, query) => {
+              const result = await searchProjectEntries({
+                environmentId: environmentId!,
+                input: { cwd: root, query, limit: WORKSPACE_BASENAME_LOOKUP_LIMIT, kind: "file" },
+              });
+              return result._tag === "Success" ? result.value : null;
+            },
+          }),
   });
   const findWorkspaceFileMatch = async (fileLinkMeta: MarkdownFileLinkMeta) => {
     const workspaceRelativePath = fileLinkMeta.workspaceLookupPath;

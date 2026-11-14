@@ -4435,9 +4435,14 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         });
         const stop = yield* harness.runtime
           .interruptTurn({ providerThread: harness.providerThread, providerTurnId })
-          .pipe(Effect.forkScoped);
+          .pipe(Effect.result, Effect.forkScoped);
         yield* TestClock.adjust("11 minutes");
-        yield* Fiber.join(stop);
+        // Codex 在预算之后才确认停止，Stop 本身先超时并提供 Force stop。
+        const stopped = yield* Fiber.join(stop);
+        assert.equal(
+          stopped._tag === "Failure" ? stopped.failure._tag : "confirmed",
+          "ProviderAdapterInterruptTimeoutError",
+        );
         yield* harness.awaitTerminal(1);
 
         assert.equal(interrupts, 1);
