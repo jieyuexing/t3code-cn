@@ -20,6 +20,8 @@ import {
 import { PlusIcon, SquareMenuIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import type { PanelLayoutControlsProps } from "~/components/chat/PanelLayoutControls";
+import { PopoverTrigger } from "~/components/ui/popover";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { shortcutLabelForCommand } from "~/keybindings";
@@ -62,8 +64,8 @@ export interface RailBuiltinAction {
 
 export interface AppRailProps {
   readonly threadRef: ScopedThreadRef;
-  readonly detailsOpen: boolean;
-  readonly onToggleDetails: () => void;
+  /** The same controls the title bar would show; the details card's open state and its popover trigger come from here. */
+  readonly controls: PanelLayoutControlsProps;
   /** Shows a tab the thread already has, opening the panel if it was folded. */
   readonly onActivate: (surface: RightPanelSurface) => void;
   readonly onCollapse: () => void;
@@ -88,25 +90,34 @@ function RailButton(props: {
   readonly showing?: boolean;
   readonly dimmed?: boolean;
   readonly pressed?: boolean;
+  /** Makes the button the trigger of this popover, which then opens and closes it itself. */
+  readonly popoverHandle?: PanelLayoutControlsProps["threadPanelPopoverHandle"];
   readonly onClick: () => void;
   readonly onContextMenu?: (event: React.MouseEvent) => void;
   readonly children: ReactNode;
 }) {
   const { label, shortcut, note, showing = false, dimmed = false, pressed } = props;
+  const button = (
+    <button
+      type="button"
+      aria-label={label}
+      aria-disabled={dimmed || undefined}
+      aria-pressed={pressed}
+      data-showing={showing || undefined}
+      className={itemClassName(showing, dimmed)}
+      onClick={dimmed || props.popoverHandle ? undefined : props.onClick}
+      onContextMenu={props.onContextMenu}
+    />
+  );
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <button
-            type="button"
-            aria-label={label}
-            aria-disabled={dimmed || undefined}
-            aria-pressed={pressed}
-            data-showing={showing || undefined}
-            className={itemClassName(showing, dimmed)}
-            onClick={dimmed ? undefined : props.onClick}
-            onContextMenu={props.onContextMenu}
-          />
+          props.popoverHandle ? (
+            <PopoverTrigger handle={props.popoverHandle} render={button} />
+          ) : (
+            button
+          )
         }
       >
         {props.children}
@@ -176,7 +187,7 @@ type RailDialog = { readonly app: WebAppItem | null };
  * and a plus that pins more. Its pins live on the server, per environment.
  */
 export function AppRail(props: AppRailProps) {
-  const { threadRef, builtins } = props;
+  const { threadRef, builtins, controls } = props;
   const { snapshot, config, canEdit, save } = useRailConfig(threadRef.environmentId);
   const plan = useThreadPlanProgress(threadRef);
   const runningPlan = plan !== null && !plan.complete && !plan.stopped ? plan : null;
@@ -316,9 +327,14 @@ export function AppRail(props: AppRailProps) {
           label="Thread details"
           shortcut={shortcutLabelForCommand(keybindings, "threadPanel.toggle")}
           note={runningPlan ? `Plan ${runningPlan.done}/${runningPlan.total}` : undefined}
-          pressed={props.detailsOpen}
-          showing={props.detailsOpen}
-          onClick={props.onToggleDetails}
+          pressed={controls.threadPanelOpen}
+          showing={controls.threadPanelOpen}
+          popoverHandle={
+            controls.threadPanelPresentation === "popover"
+              ? controls.threadPanelPopoverHandle
+              : undefined
+          }
+          onClick={controls.onToggleThreadPanel}
         >
           <SquareMenuIcon className="size-4" />
           {runningPlan ? (

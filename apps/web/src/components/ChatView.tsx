@@ -4054,8 +4054,7 @@ export default function ChatView(props: ChatViewProps) {
       {activeThreadRef && !embedded ? (
         <AppRail
           threadRef={activeThreadRef}
-          detailsOpen={threadPanelOpen}
-          onToggleDetails={toggleThreadPanelStable}
+          controls={panelToggleControlProps}
           onActivate={activateRightPanelSurfaceStable}
           onCollapse={closePreviewPanelStable}
           builtins={{
