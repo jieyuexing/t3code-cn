@@ -21,7 +21,7 @@ function run(
     exists?: ReadonlyArray<string>;
     stat?: (paths: string[]) => Promise<ReadonlyArray<unknown> | null>;
     search?: (root: string, query: string) => Promise<InlineCodeSearchResult | null>;
-    otherRoots?: ReadonlyArray<string>;
+    agentRoots?: ReadonlyArray<string>;
   } = {},
 ) {
   const stat = vi.fn(
@@ -35,7 +35,7 @@ function run(
     search,
     result: confirmMissingInlineCodePaths(probes, {
       cwd: CWD,
-      otherRoots: options.otherRoots ?? [],
+      agentRoots: options.agentRoots ?? [],
       stat,
       search,
     }),
@@ -63,13 +63,25 @@ describe("confirmMissingInlineCodePaths", () => {
     expect(await result).toEqual(new Set());
   });
 
-  it("keeps a path another project of the environment has", async () => {
-    const { result, search } = run([probe("src/a.ts")], {
-      otherRoots: ["/work/other"],
-      search: async (root) => (root === "/work/other" ? found("src/a.ts") : NONE),
+  it("keeps a path an agent folder has as written, in the same batch", async () => {
+    const { result, stat, search } = run([probe("src/a.ts"), probe("src/gone.ts")], {
+      agentRoots: ["/work/universe/pkg"],
+      exists: ["/work/universe/pkg/src/a.ts"],
     });
+    expect(await result).toEqual(new Set(["src/gone.ts"]));
+    expect(stat).toHaveBeenCalledExactlyOnceWith([
+      `${CWD}/src/a.ts`,
+      "/work/universe/pkg/src/a.ts",
+      `${CWD}/src/gone.ts`,
+      "/work/universe/pkg/src/gone.ts",
+    ]);
+    expect(search).toHaveBeenCalledExactlyOnceWith(CWD, "src/gone.ts");
+  });
+
+  it("leaves a bare file name to the click once the agent worked elsewhere", async () => {
+    const { result, stat } = run([probe("a.ts")], { agentRoots: ["/work/universe/pkg"] });
     expect(await result).toEqual(new Set());
-    expect(search).toHaveBeenCalledTimes(2);
+    expect(stat).not.toHaveBeenCalled();
   });
 
   it("treats a truncated, failed, or missing answer as unknown", async () => {
@@ -79,11 +91,6 @@ describe("confirmMissingInlineCodePaths", () => {
     expect(await truncated.result).toEqual(new Set());
     const failed = run([probe("a/b.ts")], { search: async () => null });
     expect(await failed.result).toEqual(new Set());
-    const otherFailed = run([probe("a/b.ts")], {
-      otherRoots: ["/work/other"],
-      search: async (root) => (root === CWD ? NONE : null),
-    });
-    expect(await otherFailed.result).toEqual(new Set());
     const statFailed = run([probe("a/b.ts")], { stat: async () => null });
     expect(await statFailed.result).toEqual(new Set());
     expect(statFailed.search).not.toHaveBeenCalled();
@@ -111,7 +118,7 @@ describe("confirmMissingInlineCodePaths", () => {
     const stat = vi.fn(async () => []);
     const missing = await confirmMissingInlineCodePaths([probe("src/a.ts")], {
       cwd: "//host/share/project",
-      otherRoots: [],
+      agentRoots: [],
       stat,
       search: async () => NONE,
     });

@@ -1,6 +1,6 @@
 import { FILESYSTEM_METADATA_BATCH_LIMIT } from "@t3tools/contracts";
 import {
-  pickProjectLinkMatch,
+  needsWorkspaceBasenameLookup,
   pickWorkspaceLinkMatch,
   workspaceLinkLookupQuery,
   type WorkspaceEntryCandidate,
@@ -27,8 +27,8 @@ export interface InlineCodeSearchResult {
 
 export interface InlineCodeMissingDeps {
   readonly cwd: string;
-  /** Other projects of the same environment, searched as a click does. */
-  readonly otherRoots: ReadonlyArray<string>;
+  /** Folders the agent worked in besides `cwd`; a click opens a path there as written. */
+  readonly agentRoots: ReadonlyArray<string>;
   /** One entry per path, null when it does not exist; null for the whole call when unanswered. */
   readonly stat: (paths: string[]) => Promise<ReadonlyArray<unknown> | null>;
   /** Null when the search failed. */
@@ -36,60 +36,59 @@ export interface InlineCodeMissingDeps {
 }
 
 /**
- * The inline code spans whose file chip would open nothing: the literal path does not exist and the
- * search a click runs finds no file either. Anything unanswered, truncated, or over budget is
- * unknown and left out, so its chip stays.
+ * The inline code spans that name no file of the thread's own project: the literal path is missing
+ * there and in every folder the agent worked in, and the project search finds no match. Another
+ * project's file with the same suffix does not count. Anything unanswered, truncated, or over
+ * budget is unknown and left out, so its chip stays.
  */
 export async function confirmMissingInlineCodePaths(
   probes: ReadonlyArray<InlineCodeProbe>,
   deps: InlineCodeMissingDeps,
 ): Promise<Set<string>> {
-  const { cwd, otherRoots } = deps;
-  const candidates = probes
-    .flatMap((probe) => {
-      const target = statTarget(probe.path, cwd);
-      return target === null ? [] : [{ ...probe, target }];
-    })
-    .slice(0, FILESYSTEM_METADATA_BATCH_LIMIT);
+  const { cwd, agentRoots } = deps;
+  const candidates: Array<InlineCodeProbe & { readonly targets: string[] }> = [];
+  let statCount = 0;
+  for (const probe of probes) {
+    // A bare file name is searched for in the agent's folders on click; leave that to the click.
+    if (agentRoots.length > 0 && needsWorkspaceBasenameLookup(probe.path)) continue;
+    const roots = [cwd, ...agentRoots];
+    const targets = roots.flatMap((root) => statTarget(probe.path, root) ?? []);
+    if (targets.length < roots.length) continue;
+    if (statCount + targets.length > FILESYSTEM_METADATA_BATCH_LIMIT) break;
+    statCount += targets.length;
+    candidates.push({ ...probe, targets });
+  }
   const missing = new Set<string>();
   if (candidates.length === 0) return missing;
 
-  const entries = await deps.stat(candidates.map((candidate) => candidate.target));
+  const entries = await deps.stat(candidates.flatMap((candidate) => candidate.targets));
   if (entries === null) return missing;
-  const unconfirmed = candidates.filter((_, index) => entries[index] === null);
+  let offset = 0;
+  const unconfirmed = candidates.filter((candidate) => {
+    const absent = candidate.targets.every((_, index) => entries[offset + index] === null);
+    offset += candidate.targets.length;
+    return absent;
+  });
 
   let budget = INLINE_CODE_SEARCH_BUDGET;
-  const roots = [cwd, ...otherRoots];
   const searched = await Promise.all(
     unconfirmed.map(async ({ text, path }) => {
-      if (workspaceLinkLookupQuery(path, cwd) === null) return text;
-      if (budget < roots.length) return null;
-      budget -= roots.length;
-      const results = await Promise.all(
-        roots.map(async (root) => {
-          const query = workspaceLinkLookupQuery(path, root);
-          const result =
-            query === null ? { entries: [], truncated: false } : await deps.search(root, query);
-          return { root, result };
-        }),
-      );
-      const answered = results.flatMap(({ root, result }) =>
-        result === null || result.truncated ? [] : [{ root, entries: result.entries }],
-      );
-      if (answered.length < roots.length) return null;
-      const [own, ...others] = answered;
-      const found =
-        pickWorkspaceLinkMatch(path, cwd, own!.entries) ?? pickProjectLinkMatch(path, others);
-      return found === null ? text : null;
+      const query = workspaceLinkLookupQuery(path, cwd);
+      if (query === null) return text;
+      if (budget === 0) return null;
+      budget -= 1;
+      const result = await deps.search(cwd, query);
+      if (result === null || result.truncated) return null;
+      return pickWorkspaceLinkMatch(path, cwd, result.entries) === null ? text : null;
     }),
   );
   for (const text of searched) if (text !== null) missing.add(text);
   return missing;
 }
 
-function statTarget(path: string, cwd: string): string | null {
+function statTarget(path: string, root: string): string | null {
   if (isAbsolutePath(path) || path.startsWith("~/") || path.startsWith("~\\")) return null;
-  const target = resolveWorkspaceFilePath(path, cwd);
+  const target = resolveWorkspaceFilePath(path, root);
   // A network path leaks the Windows user's credentials to its host once a server stats it.
   return target.length <= STAT_PATH_MAX_LENGTH && !isNetworkPath(target) ? target : null;
 }

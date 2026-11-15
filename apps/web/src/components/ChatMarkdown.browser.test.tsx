@@ -580,6 +580,22 @@ describe("ChatMarkdown inline code paths", () => {
     expect(plainCode(screen.container)).toEqual([]);
   });
 
+  it("checks the agent's folders instead of skipping the message", async () => {
+    setup();
+    workspaceHas("/work/real/pkg/src/a.ts");
+    searchFinds();
+    await using screen = await renderText(text, {
+      cwd: "/work/real",
+      environmentId,
+      agentDirectories: () => ["/work/real/pkg"],
+    });
+
+    await vi.waitFor(() =>
+      expect(plainCode(screen.container)).toEqual(["history/OPS.md", "docs/gone.md:3"]),
+    );
+    expect(chips(screen.container)).toEqual(["a.ts"]);
+  });
+
   it("keeps every chip while the answer is unknown", async () => {
     setup();
     filesystemMetadata.mockResolvedValue(AsyncResult.initial());

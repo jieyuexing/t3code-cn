@@ -783,43 +783,33 @@ function useChatMarkdownState({
       openPreview,
     });
   };
-  const threadProjectId = threadRef ? readThreadShell(threadRef)?.projectId : undefined;
-  const otherProjectRoots = projects.flatMap((project) =>
-    project.environmentId === environmentId &&
-    project.id !== threadProjectId &&
-    project.workspaceRoot !== cwd
-      ? [project.workspaceRoot]
-      : [],
-  );
   const canReadFiles = useEnvironmentScope(environmentId, AuthFilesystemReadScope);
   const missingInlineCodeTexts = useMissingInlineCode({
-    scope: JSON.stringify([environmentId, cwd, otherProjectRoots]),
+    scope: JSON.stringify([environmentId, cwd]),
     enabled: canReadFiles && !isStreaming && cwd !== undefined,
     probes: [...inlineCodeFileLinkMetaByText].flatMap(([text, meta]) =>
       meta.workspaceLookupPath === null ? [] : [{ text, path: meta.workspaceLookupPath }],
     ),
     confirm: (probes) =>
-      // Agent cd 进过的目录不在判定范围内，而点击时会去那里找，有这类目录就不判缺失。
-      (agentDirectories?.() ?? []).some((root) => root !== cwd)
-        ? Promise.resolve(new Set<string>())
-        : confirmMissingInlineCodePaths(probes, {
-            cwd: cwd!,
-            otherRoots: otherProjectRoots,
-            stat: async (paths) => {
-              const result = await getFilesystemMetadata({
-                environmentId: environmentId!,
-                input: { paths },
-              });
-              return result._tag === "Success" ? result.value.entries : null;
-            },
-            search: async (root, query) => {
-              const result = await searchProjectEntries({
-                environmentId: environmentId!,
-                input: { cwd: root, query, limit: WORKSPACE_BASENAME_LOOKUP_LIMIT, kind: "file" },
-              });
-              return result._tag === "Success" ? result.value : null;
-            },
-          }),
+      confirmMissingInlineCodePaths(probes, {
+        cwd: cwd!,
+        // Read on demand like a click does; a finished message's folders no longer change.
+        agentRoots: (agentDirectories?.() ?? []).filter((root) => root !== cwd),
+        stat: async (paths) => {
+          const result = await getFilesystemMetadata({
+            environmentId: environmentId!,
+            input: { paths },
+          });
+          return result._tag === "Success" ? result.value.entries : null;
+        },
+        search: async (root, query) => {
+          const result = await searchProjectEntries({
+            environmentId: environmentId!,
+            input: { cwd: root, query, limit: WORKSPACE_BASENAME_LOOKUP_LIMIT, kind: "file" },
+          });
+          return result._tag === "Success" ? result.value : null;
+        },
+      }),
   });
   const findWorkspaceFileMatch = async (fileLinkMeta: MarkdownFileLinkMeta) => {
     const workspaceRelativePath = fileLinkMeta.workspaceLookupPath;
@@ -859,8 +849,16 @@ function useChatMarkdownState({
     const own = await searchRoot(cwd);
     const ownMatch = pickWorkspaceLinkMatch(workspaceRelativePath, cwd, own.entries);
     if (ownMatch !== null) return ownMatch;
+    const threadProjectId = threadRef ? readThreadShell(threadRef)?.projectId : undefined;
+    const otherRoots = projects.flatMap((project) =>
+      project.environmentId === environmentId &&
+      project.id !== threadProjectId &&
+      project.workspaceRoot !== cwd
+        ? [project.workspaceRoot]
+        : [],
+    );
     const agentRoots = (agentDirectories?.() ?? []).filter((root) => root !== cwd);
-    if (otherProjectRoots.length === 0 && agentRoots.length === 0) return null;
+    if (otherRoots.length === 0 && agentRoots.length === 0) return null;
     // Another project's file never replaces a thread-local file the search missed.
     if (needsWorkspaceBasenameLookup(workspaceRelativePath)) {
       const metadata = await getFilesystemMetadata({
@@ -871,7 +869,7 @@ function useChatMarkdownState({
     }
     const projectMatch = pickProjectLinkMatch(
       workspaceRelativePath,
-      await Promise.all(otherProjectRoots.map(searchRoot)),
+      await Promise.all(otherRoots.map(searchRoot)),
     );
     if (projectMatch !== null || agentRoots.length === 0) return projectMatch;
     // No project has the file, so it opens where the agent last worked, as written.
