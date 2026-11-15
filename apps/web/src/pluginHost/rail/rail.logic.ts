@@ -18,7 +18,8 @@ export type PluginAppItem = Extract<RailItem, { _tag: "plugin" }>;
 export const railOf = (snapshot: PluginHostSnapshot | null): RailConfig =>
   snapshot?.rail ?? DEFAULT_RAIL_CONFIG;
 
-const SURFACE_KIND_OF_BUILTIN: Readonly<Record<RailBuiltinId, RightPanelSurface["kind"]>> = {
+/** `needsYou` opens a popup, not a tab. */
+const SURFACE_KIND_OF_BUILTIN: Readonly<Record<RailBuiltinId, RightPanelSurface["kind"] | null>> = {
   browser: "preview",
   terminal: "terminal",
   files: "files",
@@ -27,6 +28,7 @@ const SURFACE_KIND_OF_BUILTIN: Readonly<Record<RailBuiltinId, RightPanelSurface[
   pullRequests: "pull-requests",
   device: "device",
   sideChat: "side-chat",
+  needsYou: null,
 };
 
 /** What tells a browser tab opened for a web app from any other tab of the thread's browser. */

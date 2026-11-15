@@ -10,8 +10,8 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 - **视图**：整页 HTML，放在沙箱 iframe 里；可从命令面板、右侧面板空状态的「打开视图」列表和标签栏 “+” 菜单打开（后两处在内置项之后一行一个，没有快捷键，宿主关闭或没有视图时不出现，逻辑在 `launcherViews.ts`、`PluginLauncher.tsx`，用路由里的当前线程，草稿线程和拉取请求页没有），经 MessagePort 桥调用插件处理器，或调用插件注入的服务。消息见下文「视图桥」。
 - **开关**：设置页「插件」按环境管理，环境级总开关默认关。
 - **设置项**：清单 `settings` 声明字段（`text`、`boolean`、`number`，暂无 `select`、`secret`）。设置页插件行声明了设置项就显示「设置」按钮和“N 项设置”，点开在行下方展开表单（`PluginSettingsForm.tsx`），经已有的 `setSetting` 保存：文本、数字回车或离开输入框时保存，开关切换即保存，数字不是有限数字时就地提示、不保存；值不等于默认值时显示“恢复默认（默认值）”，保存成功短暂显示“已保存”，宿主拒绝时错误显示在字段下方、输入保留；没有管理权限时只读；停用、出错或被隔离的插件照样可以改。设置按环境保存，不分项目；写入后插件下一次读取即生效，不用重载。
-- **应用栏**：对话视图最右侧约 40px 的窄栏（`apps/web/src/pluginHost/rail/`，`ChatView.tsx` 在右侧面板之后插入一个元素，并在三图标的两处渲染按栏是否可见置空，嵌入的侧聊天窗格不显示）。自上而下：详情开关（与 `threadPanel.toggle` 同一动作，显示开合；详情卡弹出式时这个按钮本身就是弹层的 `PopoverTrigger`，开合交给 Base UI，否则点正在开着的弹层会被外部点击先关、自己的 click 再开）、固定的 T3 自带面板（默认浏览器、终端、Files、差异；可另加 PR、Linked PR、Device、Side chat）、插件应用（视图的 `icon`，缺省时无描边首字；插件停用时视图不在快照里，画 Puzzle）、网页应用（无描边首字，不取 favicon），类与类之间一条细线，底部依次是「Right panel」「Terminal drawer」两格开关（沿用 `PanelRight`、`PanelBottom` 图标，亮起表示开着，不可用时灰）和「＋」。栏可见（有线程、非嵌入侧聊、设置里栏开着）时标题栏不再画详情、终端抽屉、右侧面板三个图标，≤980px 的 Sheet 面板里自带的那组保留；关栏、嵌入侧聊时恢复原样。顶部让出 `--workspace-topbar-height`，最大化按钮与窗口右上角的标题栏控件落在这段空白上。选中项用 `bg-input/64`（与标题栏 Toggle 同值），悬停用 `bg-accent`。点击：本线程已有该类标签就切过去，没有就新开，点正在显示的那一项收起面板；网页应用与浏览器图标按各自的标签区分（`webAppTabs.ts` 记本次会话打开的标签，重载后按页面地址认）。图标右键：取消固定、编辑与删除（网页应用）；同类内可拖动排序。「＋」弹层勾选要固定的自带面板与插件应用，网页应用（标题、`http(s)` 地址、浏览器配置档）在这里添加、编辑、删除。网页应用经 `browserTab.ts` 的 `openBrowserTab` 打开，与插件视图的 `browser.open` 是同一条路径。
-  - **存放**：服务端按环境存 `<stateDir>/plugins/rail.json`（与 `registry.json` 同目录），契约在 `packages/contracts/src/pluginHost/rail.ts`。读走快照的 `rail` 字段（可缺省，旧服务端回落默认），写走 `pluginHost.call` 的 `setRail`（整份替换）；没有新增 RPC 方法。总开关关着也能读写：`setRail` 不受 `host-disabled` 限制，启动时读完 `rail.json` 一定发一帧。文件不存在用默认（应用栏开，固定浏览器、终端、Files、差异）；读不出或不合模式时显示默认并拒绝覆盖，与 `registry.json` 一样。条数、重复、`http(s)` 由契约校验，服务端同样受约束。
+- **应用栏**：对话视图最右侧约 40px 的窄栏（`apps/web/src/pluginHost/rail/`，`ChatView.tsx` 在右侧面板之后插入一个元素，并在三图标的两处渲染按栏是否可见置空，嵌入的侧聊天窗格不显示）。自上而下：详情开关（与 `threadPanel.toggle` 同一动作，显示开合；详情卡弹出式时这个按钮本身就是弹层的 `PopoverTrigger`，开合交给 Base UI，否则点正在开着的弹层会被外部点击先关、自己的 click 再开）、固定的 T3 自带面板（默认浏览器、终端、Files、差异；可另加 PR、Linked PR、Device、Side chat）和内置的「待你定」格（默认固定在差异之后，见下文「应用栏『待你定』格」）、插件应用（视图的 `icon`，缺省时无描边首字；插件停用时视图不在快照里，画 Puzzle）、网页应用（无描边首字，不取 favicon），类与类之间一条细线，底部依次是「Right panel」「Terminal drawer」两格开关（沿用 `PanelRight`、`PanelBottom` 图标，亮起表示开着，不可用时灰）和「＋」。栏可见（有线程、非嵌入侧聊、设置里栏开着）时标题栏不再画详情、终端抽屉、右侧面板三个图标，≤980px 的 Sheet 面板里自带的那组保留；关栏、嵌入侧聊时恢复原样。顶部让出 `--workspace-topbar-height`，最大化按钮与窗口右上角的标题栏控件落在这段空白上。选中项用 `bg-input/64`（与标题栏 Toggle 同值），悬停用 `bg-accent`。点击：本线程已有该类标签就切过去，没有就新开，点正在显示的那一项收起面板；网页应用与浏览器图标按各自的标签区分（`webAppTabs.ts` 记本次会话打开的标签，重载后按页面地址认）。图标右键：取消固定、编辑与删除（网页应用）；同类内可拖动排序。「＋」弹层勾选要固定的自带面板与插件应用，网页应用（标题、`http(s)` 地址、浏览器配置档）在这里添加、编辑、删除。网页应用经 `browserTab.ts` 的 `openBrowserTab` 打开，与插件视图的 `browser.open` 是同一条路径。
+  - **存放**：服务端按环境存 `<stateDir>/plugins/rail.json`（与 `registry.json` 同目录），契约在 `packages/contracts/src/pluginHost/rail.ts`。读走快照的 `rail` 字段（可缺省，旧服务端回落默认），写走 `pluginHost.call` 的 `setRail`（整份替换）；没有新增 RPC 方法。总开关关着也能读写：`setRail` 不受 `host-disabled` 限制，启动时读完 `rail.json` 一定发一帧。文件不存在用默认（应用栏开，固定浏览器、终端、Files、差异、待你定）；已有的 `rail.json` 不会自动补上待你定，要在「＋」弹层里勾选，或在 `items` 里加 `{"_tag":"builtin","id":"needsYou"}`；读不出或不合模式时显示默认并拒绝覆盖，与 `registry.json` 一样。条数、重复、`http(s)` 由契约校验，服务端同样受约束。
   - **开关**：设置页「插件」顶上的「Right app rail」，默认开，关掉整条栏消失、固定项保留。总开关关闭时不列插件应用，栏本身照常；没有 `pluginHost.call` 权限时栏只读。
   - **插件应用的灰态**：固定项自带标题，所以插件被撤下视图时仍显示；插件未启用、待同意、等待依赖、退避、隔离、或不再提供该视图时变灰且点不动，只有 `standby`（用到才启动）和运行中算可用；等待依赖、待同意的右上角带 6px 警告点，隔离带错误点，关闭、未安装不带点。
   - **只有 `preview.toggle`、`diff.toggle`、`threadPanel.toggle` 在提示里带快捷键**；终端的 `terminal.toggle` 开关的是底部抽屉，不是右侧面板的终端标签，所以不带。
@@ -85,7 +85,7 @@ git diff --numstat v0.1.10-nightly.20261114.4709 HEAD -- <表内文件>   # 整�
 git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行挑出插件宿主的部分
 ```
 
-插入行数里含改行（一行删一行加）的，在“挂的是什么”里写明。合计 **121 行插入（其中 9 行是改行）**：插件宿主 77 行、应用栏 38 行（含 2 行改行）、详情卡计划区 6 行（其中 1 行改行）；另有预算快照的 1 行数字、设置页路由新文件 5 行和生成的路由表 21 行。此前写的“75＋3”对不上，是漏计了 `McpHttpServer.ts` 把工具集 `export` 出来的改行、`DiffPanel.tsx` 少算 1 行。
+待你定格没有新增上游文件行。插入行数里含改行（一行删一行加）的，在“挂的是什么”里写明。合计 **121 行插入（其中 9 行是改行）**：插件宿主 77 行、应用栏 38 行（含 2 行改行）、详情卡计划区 6 行（其中 1 行改行）；另有预算快照的 1 行数字、设置页路由新文件 5 行和生成的路由表 21 行。此前写的“75＋3”对不上，是漏计了 `McpHttpServer.ts` 把工具集 `export` 出来的改行、`DiffPanel.tsx` 少算 1 行。
 
 | 文件                                                           | 插入              | 挂的是什么                                                                                           |
 | -------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
@@ -124,6 +124,17 @@ git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行�
 整个文件的增删比上表大的几处，多出来的不是插件宿主：`packages/client-runtime/package.json`（+4 `composer-thread-query-cn` 导出，另有删除 4 行 `load-balancing`）、`apps/server/src/server.ts`（+10 −1，`ProjectCheckout`）、`apps/server/src/provider/AgentContextBudget.test.ts`（+4，`HostResources`、`ProjectCheckout` 的测试替身）。
 
 `ChatView.tsx` 这 38 行里 33 行是把 8 个自带面板的“可用吗、怎么打开”从 `useRightPanelActions` 的返回值接到应用栏上，因为这些条件（终端能不能开、PR 页有没有目标、旁路对话是否提供）只在 `ChatView` 里能算。这是目前最大的单文件冲突面；同步时它冲突了，取上游版本再按此表插回，不要手合。要压到几行，办法是让 `useRightPanelActions` 返回一份现成的 `railBuiltins`，那是改上游 hook，不在这一步做。
+
+## 应用栏「待你定」格
+
+内置在 fork 自有目录 `apps/web/src/pluginHost/needsYou/`，取代 `t3-pending` 插件（插件退役由总仓做，本仓不依赖它）。栏上的一格（内置项 id `needsYou`，lucide `message-circle-question-mark`，提示文字 “Needs you”），右上角徽标是等你的线程数，0 时不显示；这格本身是弹出层的 `PopoverTrigger`，点一次开、再点一次关。点开是弹出列表，标题带条数，没有待决时显示“没有等你定的事”。弹出层内的 `pointerdown` 不向上冒泡，否则会触发栏上这一项的拖动排序。
+
+- **清单**：当前环境未归档、未 settle、未稍后处理的顶层线程，状态按 `pendingThreads.ts`（与侧栏同一份分类）。原生需要你的（待审批、待答提问、访客请求、失败含额度上限）直接列；状态是完成或等待的，读最后一条回复里的「待你定」段，有才列，只列第一条，写法与旧插件一致（`replyPending.ts`，测试一并搬来）。按等待起点从早到晚排，不知道起点的最后。
+- **取数与成本**：清单读客户端的 `navigationThreadShellsAtom`，经一个去重的派生 atom（`useNeedsYou.ts`）只在相关线程变化时才重算，**不轮询**。回复正文只有对话记录里有（线程摘要的 `latestVisibleMessage` 服务端始终填 `null`），但**不读整份对话**（真实库里单条线程可达 9–31 MB）：`threadTail.ts` 经 `ThreadSnapshotLoader`（`@t3tools/client-runtime/state/threads` 导出、网页运行时已提供的那个）取线程视图打开时用的有界快照，窗口上限约 1 MiB，在本地可见的行里找最后一条 `assistant_message`／`user_input_request`。每条线程只在它又完成一轮、或换了一张提问卡时读一次，一次 4 个并发，结果缩成一行文字存在本次会话内。实测一条 30 轮、1891 项的线程：整份 `transcript` 17,264,523 字节，有界快照 106,785 字节（75 行），约 1/160。读失败的下次线程清单变化时再试。服务端不动。
+- **没有往前翻页**：窗口里没有助手消息就当没有待决。分页读取封装 `fetchEnvironmentThreadHistoryPage`（`threadHistoryHttp.ts`）client-runtime 没有导出，要用得在上游 `threads.ts` 加一行 `export * as ThreadHistoryHttp from "./threadHistoryHttp.ts"`（外加自己拼签名和授权），这是上游改动，没有做。窗口至多 75 行或 10 个用户轮，窗口内没有助手消息只会出现在最新一轮全是工具调用而尚未回复时，此时线程本来也没有待决。
+- **行内动作**：打开线程；稍后处理（到本地次日 09:00，`threadEnvironment.snooze`）；审批「允许一次」「拒绝」（`respondToApproval`，`accept`／`decline`，请求 id 取自线程摘要的 `pendingRuntimeRequest`）；回复待决一个「按推荐」按钮和一行输入框，都是向该线程发一条新消息（`startTurn`，沿用线程自己的 `runtimeMode`，`dispatchMode` 缺省）并起新一轮。结构化提问只给「打开线程」：答案按题、选项、多选与附件逐项作答，选项只在对话记录里、不在线程摘要里，就地作答等于重做一遍问答卡。发送或回答成功后该行显示结果，线程进入处理中就从清单消失。命令失败时错误显示在行内。
+- **上游改动**：0 行。只动 fork 自有的 `pluginHost/rail/`、`pluginHost/needsYou/` 与契约 `pluginHost/rail.ts`（内置项 id 与默认固定）。
+- **没有覆盖**：Electron 桌面端与 141 Windows 上没有走查；远端环境只用当前线程所在环境的清单，不跨环境汇总；线程在稍后处理中又被举手时清单照常列出，与侧栏一致。
 
 ## 详情卡「Plan」
 

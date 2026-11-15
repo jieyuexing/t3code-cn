@@ -8,6 +8,7 @@ import { ThreadDetailsCard } from "~/components/chat/ThreadDetailsCard";
 import { PopoverCreateHandle } from "~/components/ui/popover";
 import { selectThreadPanelOpen, useRightPanelStore } from "~/rightPanelStore";
 import { render } from "../../../test/render";
+import type { NeedsYouEntry } from "../needsYou/needsYou.logic";
 import { AppRail } from "./AppRail";
 
 vi.mock("../usePluginHost", () => ({
@@ -16,6 +17,10 @@ vi.mock("../usePluginHost", () => ({
   usePluginHostAction: () => async () => ({ _tag: "Success" }),
 }));
 vi.mock("../threadPlan/useThreadPlan", () => ({ useThreadPlanProgress: () => null }));
+vi.mock("../needsYou/useNeedsYou", () => ({ useNeedsYou: () => needsYou.entries }));
+vi.mock("../needsYou/useNeedsYouActions", () => ({ useNeedsYouActions: () => ({}) }));
+
+const needsYou = vi.hoisted(() => ({ entries: [] as ReadonlyArray<NeedsYouEntry> }));
 
 const threadRef: ScopedThreadRef = {
   environmentId: EnvironmentId.make("environment"),
@@ -102,4 +107,41 @@ it("opens and closes the details popover from the rail with one click each", asy
 
   await userEvent.click(details);
   await expect.element(page.getByText("Details body")).toBeVisible();
+});
+
+const waiting = (threadId: string): NeedsYouEntry => ({
+  kind: "failed",
+  text: "失败",
+  thread: {
+    threadId,
+    title: `Thread ${threadId}`,
+    status: "failed",
+    request: null,
+    requestId: null,
+    lastTurnCompletedAt: null,
+    waitingSince: null,
+  },
+});
+
+it("opens and closes the needs-you list with one click each, and counts only what waits", async () => {
+  useRightPanelStore.setState({ threadPanelVisibilityByThreadKey: {} });
+  needsYou.entries = [];
+  const anchor = document.createElement("div");
+  document.body.append(anchor);
+  using _anchor = { [Symbol.dispose]: () => anchor.remove() };
+  await using screen = await render(<Harness anchor={anchor} handle={PopoverCreateHandle()} />);
+  const button = page.getByRole("button", { name: "Needs you" });
+  await expect.element(button).toBeVisible();
+  expect(screen.container.querySelector("[aria-label='Needs you'] span")).toBeNull();
+
+  await userEvent.click(button);
+  await expect.element(page.getByText("没有等你定的事")).toBeVisible();
+  await userEvent.click(button);
+  await expect.element(page.getByText("没有等你定的事")).not.toBeInTheDocument();
+
+  needsYou.entries = [waiting("a"), waiting("b")];
+  await screen.rerender(<Harness anchor={anchor} handle={PopoverCreateHandle()} />);
+  await expect.element(button).toHaveTextContent("2");
+  await userEvent.click(button);
+  await expect.element(page.getByText("待你定 · 2")).toBeVisible();
 });
