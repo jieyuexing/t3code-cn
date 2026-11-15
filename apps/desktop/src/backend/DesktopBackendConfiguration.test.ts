@@ -430,7 +430,7 @@ describe("DesktopBackendConfiguration", () => {
       runtimeId: string;
       sha256: string;
     }> = [];
-    const observedProbeRoots: string[] = [];
+    let probeCount = 0;
     let legacyCleanupCount = 0;
     const linuxAppRoot = "/home/test/.t3/wsl-runtime/1.2.3-x64";
     const resolvedPath = "/home/test/.local/bin:/usr/bin:/bin";
@@ -451,8 +451,8 @@ describe("DesktopBackendConfiguration", () => {
             });
             return { ok: true, linuxAppRoot };
           },
-          probeRuntime: (_distro, root) => {
-            observedProbeRoots.push(root);
+          probeRuntime: () => {
+            probeCount += 1;
             return { ok: true, resolvedPath };
           },
           ensureNodePty: () => {
@@ -473,7 +473,7 @@ describe("DesktopBackendConfiguration", () => {
               sha256: archiveHash,
             },
           ]);
-          assert.deepEqual(observedProbeRoots, [linuxAppRoot]);
+          assert.equal(probeCount, 1);
           assert.equal(
             config.entryPath,
             path.join(baseDir, "server.asar/apps/server/dist/bin.mjs"),
@@ -568,10 +568,10 @@ describe("DesktopBackendConfiguration", () => {
     );
   });
 
-  it.effect("resolveWsl retires a staged runtime whose executable does not start", () => {
+  it.effect("resolveWsl retires a staged runtime whose launch probe fails", () => {
     const archiveHash = "c".repeat(64);
     const stagedAppRoot = `/home/test/.t3/wsl-runtime/sha256-${archiveHash}`;
-    const observedProbeRoots: string[] = [];
+    let probeCount = 0;
     const observedNodePtyRoots: string[] = [];
     const invalidatedRuntimeIds: string[] = [];
     return withPackagedWslHarness(
@@ -583,9 +583,9 @@ describe("DesktopBackendConfiguration", () => {
             Effect.sync(() => {
               invalidatedRuntimeIds.push(runtimeId);
             }),
-          probeRuntime: (_distro, root) => {
-            observedProbeRoots.push(root);
-            return { ok: false, reason: `${root}/t3 --version failed (exit 127)` };
+          probeRuntime: () => {
+            probeCount += 1;
+            return { ok: false, reason: "WSL login-shell PATH could not be resolved" };
           },
           ensureNodePty: (_distro, root) => {
             observedNodePtyRoots.push(root);
@@ -598,7 +598,7 @@ describe("DesktopBackendConfiguration", () => {
           const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
           const config = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
 
-          assert.deepEqual(observedProbeRoots, [stagedAppRoot]);
+          assert.equal(probeCount, 1);
           assert.deepEqual(observedNodePtyRoots, [mountedAppRoot]);
           assert.include(config.args, "/usr/bin/node");
           assert.include(config.args, `${mountedAppRoot}/apps/server/dist/bin.mjs`);
@@ -623,7 +623,7 @@ describe("DesktopBackendConfiguration", () => {
             Effect.sync(() => {
               invalidatedRuntimeIds.push(runtimeId);
             }),
-          probeRuntime: () => ({ ok: false, reason: "t3 --version failed (exit 1)" }),
+          probeRuntime: () => ({ ok: false, reason: "WSL login-shell PATH could not be resolved" }),
           ensureNodePty: () => ({
             ok: false,
             reason: "WSL backend preflight timed out while probing for Node.js.",

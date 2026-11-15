@@ -126,12 +126,19 @@ export function useComposerMenuItems({
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
   const environmentThreadShells = useVisibleThreadShells(isPathTrigger);
-  // Mounts older settled threads matching the mention, which shells may leave out.
-  useThreadSearch(isPathTrigger ? [environmentId] : [], pathTriggerQuery, { titlesOnly: true });
+  // Mounts older settled threads matching the mention, here and on linked machines, which shells
+  // may leave out.
+  useThreadSearch(
+    isPathTrigger ? [environmentId, ...linkedEnvironments.keys()] : [],
+    pathTriggerQuery,
+    { titlesOnly: true },
+  );
   // Titles that skip a word only match the split query, so older settled ones need their own
   // search; the client's own fallback then ranks both from the shells they mount.
   useThreadSearch(
-    isPathTrigger && expandedPathTriggerQuery !== null ? [environmentId] : [],
+    isPathTrigger && expandedPathTriggerQuery !== null
+      ? [environmentId, ...linkedEnvironments.keys()]
+      : [],
     expandedPathTriggerQuery ?? "",
     { titlesOnly: true },
   );
