@@ -6,8 +6,8 @@
 
 - 合同：`packages/contracts/src/localReview.ts`，两个只读调用 `localReview.list`、`localReview.get`；差异不新增接口，复用 `review.getDiffPreview` 的 `diffFilePatch`。
 - 服务端 `apps/server/src/localReview/`：`attribution.ts`（归属规则，纯函数，不引入 `effect`，回放脚本可直接导入）、`mentions.ts`、`gitFacts.ts`（只读 git 事实接口的真实实现）、`snapshot.ts`（读库快照，注入查询函数）、`requests.ts`（列表与单请求读取）、`LocalReviewService.ts`（Effect 包装、单请求缓存 128 条，键含各仓 HEAD，进行中的请求不缓存）。`gitFacts.ts` 与服务直接用 `node:child_process`、`node:os`，没走 Effect 进程层，原因是回放脚本要在没有 Effect 运行时的环境里驱动同一份代码；若上游要求统一，改在 `LocalReviewService.ts` 里注入。
-- 网页 `apps/web/src/localReview/`：页面、来源切换、差异、详情卡行；原子在 `localReviewState.ts`，直接用 `client-runtime` 的查询原子工厂，没有改 `client-runtime` 包。
-- 列表只读库、不跑 git；单请求才跑 git，调用上限 150 次（超出标 `git-budget`），并发 4，文件显示上限 500。
+- 网页 `apps/web/src/localReview/`：页面（左侧按线程分组、组内每次请求按首行与分钟时间倒序）、来源切换、差异、详情卡行；来源标签用直白词并带悬停说明——总仓快照（检查点）、编辑记录（`file_change`）、本次提交（命令做出的提交）、合并带入（`a..b` 范围）、子会话——页面脚注“统计范围”里同词解释；原子在 `localReviewState.ts`，直接用 `client-runtime` 的查询原子工厂，没有改 `client-runtime` 包。
+- 列表只读库、不跑 git，每个请求带首行（该请求起点的用户消息，Agent 发起的由页面写明）；已完成轮与未变化子线程的粗信号在服务端内存里缓存（键含轮或线程的更新时间，上限 2 万条），暖启动约 30 ms、冷启动约 440 ms；单请求才跑 git，调用上限 150 次（超出标 `git-budget`），并发 4，文件显示上限 500。
 
 ## 归属规则摘要
 
