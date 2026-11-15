@@ -23,19 +23,16 @@ const millis = (value: unknown) => {
 };
 const marks = (values: ReadonlyArray<unknown>) => values.map(() => "?").join(",");
 
-export async function loadThreadRuns(query: Query, threadId: string): Promise<SnapshotRun[]> {
-  const rows = await query(
-    `SELECT r.run_id, r.thread_id, r.ordinal, r.requested_at, r.completed_at,
+export const RUN_COLUMNS = `r.run_id, r.thread_id, r.ordinal, r.requested_at, r.completed_at,
         json_extract(m.payload_json, '$.createdBy') AS created_by,
         json_extract(m.payload_json, '$.delegatedCompletion.parentRunId') AS parent_run_id,
-        json_type(m.payload_json, '$.notification') AS notification
-      FROM orchestration_v2_projection_runs r
-      LEFT JOIN orchestration_v2_projection_messages m
-        ON m.message_id = json_extract(r.payload_json, '$.userMessageId')
-      WHERE r.thread_id = ? ORDER BY r.ordinal`,
-    [threadId],
-  );
-  return rows.map((row) => ({
+        json_type(m.payload_json, '$.notification') AS notification`;
+
+export const RUN_MESSAGE_JOIN = `LEFT JOIN orchestration_v2_projection_messages m
+        ON m.message_id = json_extract(r.payload_json, '$.userMessageId')`;
+
+export function toRun(row: Row): SnapshotRun {
+  return {
     runId: String(row.run_id),
     threadId: String(row.thread_id),
     ordinal: Number(row.ordinal),
@@ -46,7 +43,16 @@ export async function loadThreadRuns(query: Query, threadId: string): Promise<Sn
       delegatedParentRunId: text(row.parent_run_id),
       backgroundNotification: row.notification !== null && row.notification !== undefined,
     },
-  }));
+  };
+}
+
+export async function loadThreadRuns(query: Query, threadId: string): Promise<SnapshotRun[]> {
+  const rows = await query(
+    `SELECT ${RUN_COLUMNS} FROM orchestration_v2_projection_runs r ${RUN_MESSAGE_JOIN}
+      WHERE r.thread_id = ? ORDER BY r.ordinal`,
+    [threadId],
+  );
+  return rows.map(toRun);
 }
 
 export async function loadSnapshot(

@@ -61,6 +61,7 @@ export interface Request {
   readonly origin: "user" | "agent";
   readonly startedAt: number;
   readonly endedAt: number;
+  readonly running: boolean;
 }
 
 export interface Scope {

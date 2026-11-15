@@ -144,6 +144,7 @@ const request: Request = {
   origin: "user",
   startedAt: T0 * 1000,
   endedAt: (T0 + 60) * 1000,
+  running: false,
 };
 
 const paths = (result: Awaited<ReturnType<typeof attributeRequest>>) =>

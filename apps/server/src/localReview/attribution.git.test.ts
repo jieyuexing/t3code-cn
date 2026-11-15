@@ -56,6 +56,7 @@ const request: Request = {
   origin: "user",
   startedAt: T0 * 1000,
   endedAt: (T0 + 60) * 1000,
+  running: false,
 };
 
 const command = (input: string, output: string, startSec: number): SnapshotCommand => ({

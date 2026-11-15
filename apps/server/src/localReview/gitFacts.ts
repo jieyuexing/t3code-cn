@@ -28,11 +28,15 @@ function parseCommits(output: string): ReadonlyArray<CommitInfo> {
     });
 }
 
+export interface GitFactsWithHead extends GitFacts {
+  readonly headOf: (repo: string) => Promise<string>;
+}
+
 export function createGitFacts(options: {
   readonly scanRoot: string;
   readonly home: string;
   readonly concurrency?: number;
-}): GitFacts {
+}): GitFactsWithHead {
   let calls = 0;
   let running = 0;
   const waiting: Array<() => void> = [];
@@ -144,6 +148,8 @@ export function createGitFacts(options: {
 
   return {
     callCount: () => calls,
+
+    headOf: async (repo) => (await git(repo, ["rev-parse", "HEAD"])).trim(),
 
     discoverRepos: async () => {
       const found: string[] = [];

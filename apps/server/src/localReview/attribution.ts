@@ -33,6 +33,7 @@ export function groupRequests(runs: ReadonlyArray<SnapshotRun>): ReadonlyArray<R
     origin: "user" | "agent";
     startedAt: number;
     endedAt: number;
+    running: boolean;
   }> = [];
   const requestOfRun = new Map<string, (typeof requests)[number]>();
   for (const run of sorted) {
@@ -54,12 +55,14 @@ export function groupRequests(runs: ReadonlyArray<SnapshotRun>): ReadonlyArray<R
           origin: createdBy === "user" ? ("user" as const) : ("agent" as const),
           startedAt: run.requestedAt,
           endedAt: run.requestedAt,
+          running: false,
         };
         requests.push(created);
         return created;
       })();
     target.runIds.push(run.runId);
     target.endedAt = Math.max(target.endedAt, run.completedAt ?? run.requestedAt);
+    if (run.completedAt === null) target.running = true;
     requestOfRun.set(run.runId, target);
   }
   return requests;
