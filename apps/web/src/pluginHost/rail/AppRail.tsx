@@ -17,7 +17,7 @@ import {
   type RailItem,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { PlusIcon, SquareMenuIcon } from "lucide-react";
+import { PlusIcon, PuzzleIcon, SquareMenuIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { PanelLayoutControlsProps } from "~/components/chat/PanelLayoutControls";
@@ -41,6 +41,7 @@ import { useThreadPlanProgress } from "../threadPlan/useThreadPlan";
 import { RAIL_BUILTIN_LABELS } from "./railBuiltins";
 import { RailPinPopover } from "./RailPinPopover";
 import { RailWebAppDialog } from "./RailWebAppDialog";
+import { railIconOf } from "./railIcons";
 import {
   groupRailItems,
   isRailItemShowing,
@@ -185,10 +186,19 @@ function RailGroup(props: {
 const Separator = () => <div role="separator" className="my-1 h-px w-5 shrink-0 bg-border" />;
 
 const AppGlyph = (props: { readonly title: string }) => (
-  <span className="flex size-5 items-center justify-center rounded-md border border-current/40 font-semibold text-2xs leading-none">
+  <span className="flex size-5 items-center justify-center font-semibold text-xs leading-none">
     {monogram(props.title)}
   </span>
 );
+
+/** A plugin app's icon; its view is missing while the plugin is stopped, which reads as a puzzle piece. */
+function PluginAppIcon(props: {
+  readonly view: PluginHostView | undefined;
+  readonly title: string;
+}) {
+  if (props.view === undefined) return <PuzzleIcon className="size-4" />;
+  return railIconOf(props.view.icon, "size-4") ?? <AppGlyph title={props.title} />;
+}
 
 type RailDialog = { readonly app: WebAppItem | null };
 
@@ -229,10 +239,10 @@ export function AppRail(props: AppRailProps) {
     else if (action._tag === "activate") props.onActivate(action.surface);
     else open();
   };
+  const viewOf = (item: PluginAppItem) =>
+    views.find((entry) => entry.pluginId === item.pluginId && entry.viewId === item.viewId);
   const openPlugin = (item: PluginAppItem) => {
-    const view = views.find(
-      (entry) => entry.pluginId === item.pluginId && entry.viewId === item.viewId,
-    );
+    const view = viewOf(item);
     if (view !== undefined) openPluginView(threadRef, view);
   };
   const openWeb = (app: WebAppItem) => {
@@ -298,7 +308,7 @@ export function AppRail(props: AppRailProps) {
               onClick={() => click(item, () => openPlugin(item))}
               onContextMenu={(event) => void showMenu(event, item)}
             >
-              <AppGlyph title={item.title} />
+              <PluginAppIcon view={viewOf(item)} title={item.title} />
             </RailButton>
           </SortableRailItem>
         );

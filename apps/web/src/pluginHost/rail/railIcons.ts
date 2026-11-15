@@ -1,0 +1,70 @@
+import {
+  BellIcon,
+  BookOpenIcon,
+  BookmarkIcon,
+  CalendarIcon,
+  ChartBarIcon,
+  CircleCheckIcon,
+  ClipboardListIcon,
+  ClockIcon,
+  CodeIcon,
+  DatabaseIcon,
+  FileTextIcon,
+  FolderOpenIcon,
+  GitBranchIcon,
+  HistoryIcon,
+  InboxIcon,
+  LayoutDashboardIcon,
+  ListTodoIcon,
+  MailIcon,
+  MessageCircleQuestionMarkIcon,
+  MessageSquareIcon,
+  NotebookIcon,
+  RssIcon,
+  SearchIcon,
+  SettingsIcon,
+  StarIcon,
+  TerminalIcon,
+  TimerIcon,
+  WrenchIcon,
+  type LucideIcon,
+} from "lucide-react";
+import { createElement, type ReactElement } from "react";
+
+/** The icons a plugin view may name; the whole lucide set would put every glyph in the bundle. */
+const RAIL_ICONS: Readonly<Record<string, LucideIcon>> = {
+  bell: BellIcon,
+  bookmark: BookmarkIcon,
+  "book-open": BookOpenIcon,
+  calendar: CalendarIcon,
+  "chart-bar": ChartBarIcon,
+  "circle-check": CircleCheckIcon,
+  "clipboard-list": ClipboardListIcon,
+  clock: ClockIcon,
+  code: CodeIcon,
+  database: DatabaseIcon,
+  "file-text": FileTextIcon,
+  "folder-open": FolderOpenIcon,
+  "git-branch": GitBranchIcon,
+  history: HistoryIcon,
+  inbox: InboxIcon,
+  "layout-dashboard": LayoutDashboardIcon,
+  "list-todo": ListTodoIcon,
+  mail: MailIcon,
+  "message-circle-question-mark": MessageCircleQuestionMarkIcon,
+  "message-square": MessageSquareIcon,
+  notebook: NotebookIcon,
+  rss: RssIcon,
+  search: SearchIcon,
+  settings: SettingsIcon,
+  star: StarIcon,
+  terminal: TerminalIcon,
+  timer: TimerIcon,
+  wrench: WrenchIcon,
+};
+
+/** The icon a view asked for, or `null` when it named none or one the host does not carry. */
+export const railIconOf = (name: string | undefined, className: string): ReactElement | null => {
+  const icon = name !== undefined && Object.hasOwn(RAIL_ICONS, name) ? RAIL_ICONS[name] : undefined;
+  return icon ? createElement(icon, { className }) : null;
+};

@@ -291,11 +291,13 @@ describe("PluginHost", () => {
       yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
       yield* invoke("echo");
       const before = entryOf((yield* latest(host))!)!;
+      expect((yield* latest(host))?.views[0]?.icon).toBe("clock");
       expect(spawns.count).toBe(1);
 
       const manifestPath = path.join(directory, "plugin.json");
       const manifest = (yield* fs.readFileString(manifestPath))
         .replaceAll('"title": "Echo Clock"', '"title": "Renamed Clock"')
+        .replace('"icon": "clock"', '"icon": "rss"')
         .replace('"version": "0.1.0"', '"version": "0.2.0"');
       yield* fs.writeFileString(manifestPath, manifest);
       yield* call(host, { _tag: "reload", pluginId });
@@ -313,6 +315,7 @@ describe("PluginHost", () => {
         "Renamed Clock",
         "Renamed Clock",
       ]);
+      expect(reloaded?.views[0]?.icon).toBe("rss");
       expect(reloaded?.views[0]?.generation).toBe(entry.generation);
       expect(spawns.count).toBe(1);
 

@@ -271,6 +271,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
           viewId: view.id,
           title: view.title,
           placement: view.placement,
+          ...(view.icon === undefined ? {} : { icon: view.icon }),
         });
     }).pipe(Effect.provideService(Scope.Scope, scope));
   });

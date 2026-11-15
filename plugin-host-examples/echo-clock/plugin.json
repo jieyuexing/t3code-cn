@@ -15,6 +15,7 @@
           "id": "clock",
           "title": "Echo Clock",
           "placement": "side-panel",
+          "icon": "clock",
           "html": "./view.html"
         }
       ],
