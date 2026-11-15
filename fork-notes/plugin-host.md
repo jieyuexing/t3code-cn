@@ -94,6 +94,9 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 | `apps/web/src/components/RightPanelTabs.tsx`                   | 8                 | 标签标题与图标；空状态与 “+” 菜单里的插件视图 |
 | `apps/web/src/closedViewStore.ts`                              | 2                 | 关闭后可重开                                  |
 | `apps/web/src/reopenClosedView.ts`                             | 3                 | 关闭后可重开                                  |
+| `apps/web/src/components/chat/threadDetailsItems.ts`           | 1                 | 详情卡条目 `plan`                             |
+| `apps/web/src/components/chat/ThreadDetailsPanel.tsx`          | 4                 | 详情卡顶部挂载 `ThreadPlanSection`            |
+| `apps/web/src/components/chat/ThreadDetailsCard.tsx`           | 改 1              | 计划步骤列表不计入档位高度                    |
 | `apps/web/src/components/CommandPalette.tsx`                   | 4（含 1 处改行）  | 命令面板「插件」组                            |
 | `apps/web/src/components/DiffPanel.tsx`                        | 5（含 2 处改行）  | 差异面板读插件要求定位的文件                  |
 | `apps/web/src/appInit.tsx`                                     | 2                 | 启动时订阅快照                                |
@@ -101,6 +104,14 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 | `apps/web/src/components/settings/settingsSearch.ts`           | 4                 | 设置搜索                                      |
 | `apps/web/src/routes/_chat.settings.plugins.tsx`               | 新文件 5          | 设置页路由                                    |
 | `apps/web/src/routeTree.gen.ts`                                | 生成              | 路由表                                        |
+
+## 详情卡「Plan」
+
+详情卡最上方的「Plan」项（条目 id `plan`，默认显示，设置与卡片右键可关）读本线程最新一份 `todo_list` 计划，逻辑与组件在 `apps/web/src/pluginHost/threadPlan/`，不新增订阅，跟着聊天页已有的线程结构走。
+
+- **取哪份**：非 `superseded` 的 `todo_list` 中，先比 run 先后，再比计划的 `todo_list` 条目先后（计划 id 是随机数，数组顺序不可信；条目不在已加载窗口时退回数组顺序）。步骤全部完成或计划状态为 `completed` 时显示 “Plan complete N/N” 一行，直到出现下一份计划；没有计划整项不渲染。
+- **三档**：full 为标题、细进度条、折叠的 “N done”、进行中步骤（run 仍在进行时显示分钟粒度的已用时长，来自 `durationAnchorAt`）、逐条待办（超过 5 条 “+N more”）；compact 只留标题行和当前步骤；essential 只留 “Plan 3/7”。步骤列表带 `data-thread-plan-list`，与服务器、PR 列表一样不计入档位高度，展开收起或计划更新不会让卡片在 full 与 compact 之间来回跳。
+- **对外接口**：`useThreadPlanProgress(threadRef)`（`threadPlan/useThreadPlan.ts`）返回 `{ done, total, complete, currentStep } | null`，供应用栏「详情」格的进度徽标使用。
 
 ## 同步上游时
 
