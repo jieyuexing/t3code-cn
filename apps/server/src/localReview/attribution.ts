@@ -112,6 +112,8 @@ interface FileEntry {
   readonly workDirs: Set<string>;
 }
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 function guarded(git: GitFacts, budget: number) {
   const startCalls = git.callCount();
   let exhausted = false;
@@ -374,8 +376,11 @@ export async function attributeRequest(
   }
 
   const fileChangeSuffixes = allFileChangePaths;
+  // Root-level file names (ETECH.md, plugin.json) exist in many repos, so only a path with a directory or the repo's own name counts.
   const hasPathEvidence = async (repo: string, command: PreparedCommand, info: CommitInfo) => {
-    const files = await git.changedFiles(repo, info.hash);
+    const name = repo.slice(repo.lastIndexOf("/") + 1);
+    if (new RegExp(`(?<![\\w-])${escapeRegExp(name)}(?![\\w-])`).test(command.input)) return true;
+    const files = (await git.changedFiles(repo, info.hash)).filter((file) => file.includes("/"));
     return files.some(
       (file) =>
         command.input.includes(file) || fileChangeSuffixes.some((p) => p.endsWith(`/${file}`)),

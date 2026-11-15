@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 
 import type { CommitInfo, GitFacts, MainlineMatch, RepoRef } from "./types.ts";
 
-const SKIPPED_DIRECTORIES = new Set(["node_modules", ".local", "dist", "target"]);
+const SKIPPED_DIRECTORIES = new Set(["node_modules", ".local", ".state", "dist", "target"]);
 const MAX_DISCOVERY_DEPTH = 7;
 const MAX_RANGE_COMMITS = 200;
 const MAX_MAINLINE_COMMITS = 300;

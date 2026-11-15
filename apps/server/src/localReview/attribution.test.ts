@@ -383,18 +383,49 @@ describe("attributeRequest", () => {
     const world: World = {
       repos: ["/u", repoA, repoB],
       commits: [
-        { repo: repoA, n: 1, subject: "mine", time: T0 + 11, files: ["mine.ts"] },
-        { repo: repoB, n: 2, subject: "someone else", time: T0 + 11, files: ["theirs.ts"] },
+        { repo: repoA, n: 1, subject: "mine", time: T0 + 11, files: ["src/mine.ts"] },
+        {
+          repo: repoB,
+          n: 2,
+          subject: "someone else",
+          time: T0 + 11,
+          files: ["theirs.ts", "src/theirs.ts"],
+        },
       ],
     };
     const result = await attributeRequest(
       snapshot({
-        commands: [command("git add mine.ts && git commit -q -m x", "", 10)],
+        commands: [command("git add src/mine.ts theirs.ts && git commit -q -m x", "", 10)],
       }),
       request,
       fakeGit(world),
     );
-    expect(paths(result)).toEqual([`${repoA}:mine.ts`]);
+    expect(paths(result)).toEqual([`${repoA}:src/mine.ts`]);
+  });
+
+  it("accepts a root-level file only when the command names the repo", async () => {
+    const named = "/u/t3-x-plugin";
+    const world: World = {
+      repos: ["/u", named, repoB],
+      commits: [
+        { repo: named, n: 1, subject: "icon", time: T0 + 11, files: ["plugin.json"] },
+        { repo: repoB, n: 2, subject: "elsewhere", time: T0 + 11, files: ["plugin.json"] },
+      ],
+    };
+    const result = await attributeRequest(
+      snapshot({
+        commands: [
+          command(
+            "for d in t3-x-plugin; do (cd $d && sed -i s/old/new/ plugin.json && git commit -qam x); done",
+            "",
+            10,
+          ),
+        ],
+      }),
+      request,
+      fakeGit(world),
+    );
+    expect(paths(result)).toEqual([`${named}:plugin.json`]);
   });
 
   it("recovers a commit made in a deleted temporary worktree and propagates the evidence repo", async () => {
