@@ -120,7 +120,7 @@ function RailButton(props: {
 }
 
 function SortableRailItem(props: { readonly id: string; readonly children: ReactNode }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: props.id,
   });
   return (
@@ -128,7 +128,6 @@ function SortableRailItem(props: { readonly id: string; readonly children: React
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn("flex", isDragging && "z-10 opacity-70")}
-      {...attributes}
       {...listeners}
     >
       {props.children}

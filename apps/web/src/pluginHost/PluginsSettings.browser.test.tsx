@@ -1,4 +1,9 @@
-import { PluginId, type PluginHostEntry, type PluginHostSnapshot } from "@t3tools/contracts";
+import {
+  DEFAULT_RAIL_CONFIG,
+  PluginId,
+  type PluginHostEntry,
+  type PluginHostSnapshot,
+} from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
@@ -213,14 +218,20 @@ it("adds a folder by path and removes a plugin after confirmation", async () => 
   );
 });
 
-it("shows only the switch and the registered count while plugins are off", async () => {
+it("shows only the rail switch, the plugin switch and the registered count while plugins are off", async () => {
   setup({ hostEnabled: false });
   await using screen = await render(settings, { router: "/" });
   await expect.element(screen.getByText("9 registered")).toBeVisible();
-  expect(screen.container.querySelectorAll("[data-slot=settings-row]")).toHaveLength(1);
+  expect(screen.container.querySelectorAll("[data-slot=settings-row]")).toHaveLength(2);
+  await screen.getByRole("switch", { name: "Right app rail" }).click();
+  await vi.waitFor(() =>
+    expect(fixture.actions).toEqual([
+      { _tag: "setRail", rail: { ...DEFAULT_RAIL_CONFIG, enabled: false } },
+    ]),
+  );
   await screen.getByRole("switch", { name: "Enable plugins" }).click();
   await vi.waitFor(() =>
-    expect(fixture.actions).toEqual([{ _tag: "setHostEnabled", enabled: true }]),
+    expect(fixture.actions.at(-1)).toEqual({ _tag: "setHostEnabled", enabled: true }),
   );
 });
 
