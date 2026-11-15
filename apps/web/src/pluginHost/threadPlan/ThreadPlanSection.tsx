@@ -137,7 +137,17 @@ function ToggleRow({
 }
 
 /** The newest todo list of a thread, at the top of the details card. Renders nothing without one. */
-export function ThreadPlanSection({
+export function ThreadPlanSection(props: { threadRef: ScopedThreadRef; density: PlanDensity }) {
+  // The card keeps one instance across threads, so open lists reset with the thread.
+  return (
+    <ThreadPlanBody
+      key={`${props.threadRef.environmentId}:${props.threadRef.threadId}`}
+      {...props}
+    />
+  );
+}
+
+function ThreadPlanBody({
   threadRef,
   density,
 }: {
@@ -166,16 +176,22 @@ export function ThreadPlanSection({
     >
       <div className="flex flex-col">
         <PlanTitle threadRef={threadRef} />
-        {rows.bar && !complete ? (
+        {rows.bar ? (
+          // Kept when complete, so the title and bar are the same height at every progress.
           <div
-            role="progressbar"
-            aria-label="Plan progress"
-            aria-valuemin={0}
-            aria-valuemax={plan.steps.length}
-            aria-valuenow={groups.done.length}
-            className="mx-2.5 mb-1 h-0.5 overflow-hidden rounded-full bg-foreground/10"
+            role={complete ? undefined : "progressbar"}
+            aria-label={complete ? undefined : "Plan progress"}
+            aria-valuemin={complete ? undefined : 0}
+            aria-valuemax={complete ? undefined : plan.steps.length}
+            aria-valuenow={complete ? undefined : groups.done.length}
+            className={cn(
+              "mx-2.5 mb-1 h-0.5 overflow-hidden rounded-full",
+              !complete && "bg-foreground/10",
+            )}
           >
-            <div className="h-full rounded-full bg-success" style={{ width: `${percent}%` }} />
+            {complete ? null : (
+              <div className="h-full rounded-full bg-success" style={{ width: `${percent}%` }} />
+            )}
           </div>
         ) : null}
         {showCurrentOnly && groups.current ? (
@@ -188,14 +204,16 @@ export function ThreadPlanSection({
           </ul>
         ) : null}
         {rows.lists && !complete ? (
-          <>
+          // Everything under the bar grows and shrinks with progress, so the card's density
+          // measure leaves it out, as it does for the other lists.
+          <div data-thread-plan-list>
             {groups.done.length > 0 ? (
               <>
                 <ToggleRow expanded={doneOpen} onToggle={() => setDoneOpen(!doneOpen)}>
                   {`${groups.done.length} done`}
                 </ToggleRow>
                 {doneOpen ? (
-                  <ul data-thread-plan-list className={LIST_CLASS}>
+                  <ul className={LIST_CLASS}>
                     {groups.done.map((step) => (
                       <StepRow key={step.id} step={step} live={live} tone="done" />
                     ))}
@@ -211,7 +229,7 @@ export function ThreadPlanSection({
               </ul>
             ) : null}
             {pending.shown.length > 0 ? (
-              <ul data-thread-plan-list className={LIST_CLASS}>
+              <ul className={LIST_CLASS}>
                 {pending.shown.map((step) => (
                   <StepRow key={step.id} step={step} live={live} tone="pending" />
                 ))}
@@ -222,7 +240,7 @@ export function ThreadPlanSection({
                 {pendingOpen ? "Show less" : `+${pending.hidden} more`}
               </ToggleRow>
             ) : null}
-          </>
+          </div>
         ) : null}
       </div>
     </section>
