@@ -8,6 +8,8 @@ import {
   type PluginHostState,
   type PluginId,
   type PluginSettingValue,
+  DEFAULT_RAIL_CONFIG,
+  type RailConfig,
 } from "@t3tools/contracts";
 import { resolveSelfInvocation, selfInvocationArgs } from "@t3tools/shared/nodeRuntime";
 import * as Clock from "effect/Clock";
@@ -130,6 +132,8 @@ export const make = Effect.fn("PluginHost.make")(function* (
   const dataLock = yield* Semaphore.make(1);
   const slots = new Map<PluginId, Slot>();
   let registryProblem: string | undefined;
+  let rail: RailConfig = DEFAULT_RAIL_CONFIG;
+  let railProblem: string | undefined;
   let hostEnabled = false;
   let consent: Record<string, string> = {};
   const snapshotRef = yield* SubscriptionRef.make<PluginHostSnapshot>({
@@ -138,6 +142,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
     plugins: [],
     views: [],
     services: [],
+    rail,
   });
 
   /** Plugins that want to run: eligible and not held down by a reload. */
@@ -145,7 +150,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
   const owners = (include: (slot: Slot) => boolean) => serviceOwners(slots.values(), include);
 
   const emit = Effect.suspend(() =>
-    SubscriptionRef.set(snapshotRef, buildSnapshot({ slots, hostEnabled, claims })),
+    SubscriptionRef.set(snapshotRef, buildSnapshot({ slots, hostEnabled, claims, rail })),
   );
 
   const setState = (slot: Slot, state: PluginHostState) =>
@@ -650,7 +655,17 @@ export const make = Effect.fn("PluginHost.make")(function* (
 
   const none = Effect.succeed({ value: null } satisfies PluginHostCallResult);
 
+  /** The rail belongs to the user, not to a plugin, so it saves and reports whether or not the host switch is on. */
+  const setRail = Effect.fn("PluginHost.setRail")(function* (next: RailConfig) {
+    if (railProblem !== undefined) return yield* fail("io-failed", railProblem);
+    yield* store.writeRail(next).pipe(Effect.mapError((error) => fail("io-failed", error.message)));
+    rail = next;
+    yield* emit;
+  });
+
   const call = Effect.fn("PluginHost.call")(function* (input: PluginHostCallInput) {
+    if (input._tag === "setRail")
+      return yield* mutate(setRail(input.rail)).pipe(Effect.andThen(none));
     if (!hostEnabled && input._tag !== "setHostEnabled") return yield* fail("host-disabled");
     switch (input._tag) {
       case "setHostEnabled":
@@ -718,8 +733,19 @@ export const make = Effect.fn("PluginHost.make")(function* (
     if (!slots.has(record.id)) slots.set(record.id, makeSlot(record));
   }
   hostEnabled = registry.enabled;
+  // A broken rail file is reported and left alone, like the registry; the default rail shows meanwhile.
+  rail = yield* store.readRail.pipe(
+    Effect.tapError((error) =>
+      Effect.sync(() => {
+        railProblem = error.message;
+      }),
+    ),
+    Effect.tapError((error) => Effect.logWarning(error.message)),
+    Effect.map((saved) => saved ?? DEFAULT_RAIL_CONFIG),
+    Effect.orElseSucceed(() => DEFAULT_RAIL_CONFIG),
+  );
   if (hostEnabled) yield* activateAll();
-  else if (slots.size > 0) yield* emit;
+  else yield* emit;
 
   return PluginHost.of({
     subscribe: SubscriptionRef.changes(snapshotRef),

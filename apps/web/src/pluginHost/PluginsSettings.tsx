@@ -14,6 +14,7 @@ import {
 } from "../components/settings/settingsLayout";
 import { useSettingsScope } from "../components/settings/SettingsScopeContext";
 import { PluginSettingsForm } from "./PluginSettingsForm";
+import { useRailConfig } from "./rail/useRailConfig";
 import {
   clearPluginSettingsReveal,
   pluginSettingsKey,
@@ -48,9 +49,24 @@ function PluginsSettingsBody(props: { readonly environmentId: EnvironmentId }) {
   const { snapshot } = usePluginHostSnapshot(environmentId);
   const canManage = useCanCallPluginHost(environmentId);
   const act = usePluginHostAction(environmentId);
+  const rail = useRailConfig(environmentId);
 
   return (
     <SettingsPageContainer>
+      <SettingsSection title="App rail">
+        <SettingsRow
+          title="Right app rail"
+          description="A narrow bar beside the right panel that pins thread details, panels, plugin apps and web apps. Turning it off keeps what is pinned."
+          control={
+            <Switch
+              checked={rail.config.enabled}
+              disabled={rail.snapshot === null || !rail.canEdit}
+              aria-label="Right app rail"
+              onCheckedChange={(enabled) => void rail.save({ ...rail.config, enabled })}
+            />
+          }
+        />
+      </SettingsSection>
       <SettingsSection title="Plugins">
         <SettingsRow
           title="Enable plugins"

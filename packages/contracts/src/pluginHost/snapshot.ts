@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 import { IsoDateTime, NonNegativeInt } from "../baseSchemas.ts";
 import { PluginId, PluginSettingField, PluginSettingValue } from "./manifest.ts";
+import { RailConfig } from "./rail.ts";
 
 const FailureReason = Schema.String.check(Schema.isMaxLength(1000));
 
@@ -96,5 +97,7 @@ export const PluginHostSnapshot = Schema.Struct({
   services: Schema.Array(
     Schema.Struct({ name: Schema.String, provider: PluginId, available: Schema.Boolean }),
   ),
+  /** The right app rail's pins; known whether or not the host switch is on. A server without the rail leaves it out. */
+  rail: Schema.optionalKey(RailConfig),
 });
 export type PluginHostSnapshot = typeof PluginHostSnapshot.Type;

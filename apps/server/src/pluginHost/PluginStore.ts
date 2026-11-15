@@ -1,5 +1,5 @@
 // Files live under <stateDir>/plugins and are created on first write, so a server without plugins touches nothing.
-import { PluginId } from "@t3tools/contracts";
+import { PluginId, RailConfig } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -23,6 +23,7 @@ const isRegistryFile = Schema.is(
 );
 const isJsonObject = Schema.is(Schema.Record(Schema.String, Schema.String));
 const decodeData = Schema.decodeUnknownOption(PluginDataFile);
+const decodeRail = Schema.decodeUnknownEffect(RailConfig);
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const parseJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 
@@ -43,6 +44,7 @@ export const makePluginStore = Effect.fn("PluginStore.make")(function* (stateDir
   const directory = path.join(stateDir, "plugins");
   const registryPath = path.join(directory, "registry.json");
   const consentPath = path.join(directory, "consent.json");
+  const railPath = path.join(directory, "rail.json");
   const dataPath = (id: string) => path.join(directory, "data", `${id}.json`);
 
   /** A missing file is empty; an unreadable one is an error so a write never replaces it. */
@@ -82,6 +84,17 @@ export const makePluginStore = Effect.fn("PluginStore.make")(function* (stateDir
     Effect.map((value) => (isJsonObject(value) ? value : ({} as Record<string, string>))),
   );
 
+  /** Missing is `undefined`; a file that does not parse or fit the schema is an error so a write never replaces it. */
+  const readRail = readJson(railPath).pipe(
+    Effect.flatMap((value) =>
+      value === undefined
+        ? Effect.undefined
+        : decodeRail(value).pipe(
+            Effect.mapError((cause) => new PluginStoreError({ file: "rail.json", cause })),
+          ),
+    ),
+  );
+
   const readData = (id: string) =>
     readJson(dataPath(id)).pipe(
       Effect.map((value) => {
@@ -96,6 +109,8 @@ export const makePluginStore = Effect.fn("PluginStore.make")(function* (stateDir
       readonly enabled: boolean;
       readonly plugins: ReadonlyArray<RegistryRecord>;
     }) => writeJson(registryPath, registry),
+    readRail,
+    writeRail: (rail: RailConfig) => writeJson(railPath, rail),
     readConsent,
     writeConsent: (consent: Readonly<Record<string, string>>) => writeJson(consentPath, consent),
     readData,

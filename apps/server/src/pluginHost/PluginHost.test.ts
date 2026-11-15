@@ -1,10 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import {
+  DEFAULT_RAIL_CONFIG,
+  PluginHostCallInput as PluginHostCallInputSchema,
   pluginViewHandler,
   type PluginHostCallInput,
   type PluginHostSnapshot,
+  type RailConfig,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -663,6 +667,7 @@ describe("PluginHost", () => {
         plugins: [],
         views: [],
         services: [],
+        rail: DEFAULT_RAIL_CONFIG,
       });
       const refused = yield* call(host, { _tag: "add", path: good }).pipe(Effect.flip);
       expect(refused.reason).toBe("host-disabled");
@@ -689,6 +694,7 @@ describe("PluginHost", () => {
         plugins: [],
         views: [],
         services: [],
+        rail: DEFAULT_RAIL_CONFIG,
       });
       const afterOff = yield* call(host, {
         _tag: "invoke",
@@ -735,9 +741,65 @@ describe("PluginHost", () => {
         plugins: [],
         views: [],
         services: [],
+        rail: DEFAULT_RAIL_CONFIG,
       });
       expect(spawns.count).toBe(0);
       expect(yield* fs.exists(path.join(stateDir, "plugins"))).toBe(false);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
+
+  const isCallInput = Schema.is(PluginHostCallInputSchema);
+
+  const pinned: RailConfig = {
+    enabled: false,
+    items: [
+      { _tag: "builtin", id: "terminal" },
+      { _tag: "web", id: "w1", title: "Docs", url: "https://example.com/", profileId: "incognito" },
+    ],
+  };
+
+  it.live("the rail saves to rail.json with the host switch off and a new host reads it back", () =>
+    Effect.gen(function* () {
+      const { fs, path, root, stateDir, host } = yield* setup({ hostEnabled: false });
+      yield* call(host, { _tag: "setRail", rail: pinned });
+      expect((yield* latest(host))?.rail).toEqual(pinned);
+      expect(yield* fs.exists(path.join(stateDir, "plugins", "registry.json"))).toBe(false);
+      const text = yield* fs.readFileString(path.join(stateDir, "plugins", "rail.json"));
+      expect(JSON.parse(text)).toEqual(pinned);
+
+      const reopened = yield* PluginHost.make({
+        stateDir,
+        ...makeOptions({ count: 0 }, root),
+      });
+      expect((yield* latest(reopened))?.rail).toEqual(pinned);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("a broken rail.json shows the default rail and is never overwritten", () =>
+    Effect.gen(function* () {
+      const { fs, path, root, stateDir } = yield* setup({ hostEnabled: false });
+      const file = path.join(stateDir, "plugins", "rail.json");
+      yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+      yield* fs.writeFileString(file, '{"enabled":');
+      const host = yield* PluginHost.make({ stateDir, ...makeOptions({ count: 0 }, root) });
+      expect((yield* latest(host))?.rail).toEqual(DEFAULT_RAIL_CONFIG);
+      const refused = yield* call(host, { _tag: "setRail", rail: pinned }).pipe(Effect.flip);
+      expect(refused.reason).toBe("io-failed");
+      expect(yield* fs.readFileString(file)).toBe('{"enabled":');
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it("the rail payload takes web pages once each and nothing else", () => {
+    const decode = (rail: unknown) => isCallInput({ _tag: "setRail", rail });
+    expect(decode(pinned)).toBe(true);
+    const web = (url: string, id = "w1") => ({ _tag: "web", id, title: "Docs", url });
+    expect(decode({ enabled: true, items: [web("javascript:alert(1)")] })).toBe(false);
+    expect(decode({ enabled: true, items: [web("file:///etc/passwd")] })).toBe(false);
+    expect(decode({ enabled: true, items: [web("https://a.test/"), web("https://b.test/")] })).toBe(
+      false,
+    );
+    expect(
+      decode({ enabled: true, items: [web("https://a.test/"), web("https://b.test/", "w2")] }),
+    ).toBe(true);
+  });
 });

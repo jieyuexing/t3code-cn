@@ -1,4 +1,4 @@
-import type { PluginHostEntry, PluginHostSnapshot } from "@t3tools/contracts";
+import type { PluginHostEntry, PluginHostSnapshot, RailConfig } from "@t3tools/contracts";
 
 import { serviceOwners } from "./PluginReconcile.ts";
 import { serviceAvailable, type Slot } from "./PluginSlot.ts";
@@ -48,6 +48,7 @@ export const buildSnapshot = (input: {
   readonly slots: ReadonlyMap<unknown, Slot>;
   readonly hostEnabled: boolean;
   readonly claims: (slot: Slot) => boolean;
+  readonly rail: RailConfig;
 }): PluginHostSnapshot => {
   const active = input.hostEnabled ? [...input.slots.values()] : [];
   return {
@@ -64,5 +65,6 @@ export const buildSnapshot = (input: {
     views: active.flatMap((slot) =>
       slot.views.map((view) => ({ ...view, generation: slot.generation })),
     ),
+    rail: input.rail,
   };
 };
