@@ -58,6 +58,26 @@ function textOf(
   return "";
 }
 
+async function readTexts(
+  jobs: ReadonlyArray<TextJob>,
+  load: (
+    threadId: ThreadId,
+  ) => Promise<ReadonlyArray<OrchestrationV2ProjectedTurnItem["item"]> | null>,
+) {
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const job = jobs[next++]!;
+      const items = await load(ThreadId.make(job.threadId));
+      reading.delete(job.key);
+      if (items === null) continue;
+      const text = textOf(job, items);
+      useTexts.setState((state) => ({ texts: { ...state.texts, [job.key]: text } }));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, jobs.length) }, worker));
+}
+
 /**
  * The threads waiting on the user, longest first. The list follows the client's own thread state, so it
  * needs no polling; a transcript is read only for a thread that finished a turn or opened a question
@@ -69,25 +89,12 @@ export function useNeedsYou(environmentId: EnvironmentId): ReadonlyArray<NeedsYo
   const loadTranscript = useAtomCommand(orchestrationEnvironment.threadTranscript, {
     reportFailure: false,
   });
-  const read = useStableCallback(async (jobs: ReadonlyArray<TextJob>) => {
-    const queue = [...jobs];
-    const worker = async () => {
-      for (let job = queue.shift(); job !== undefined; job = queue.shift()) {
-        const result = await loadTranscript({
-          environmentId,
-          input: { threadId: ThreadId.make(job.threadId) },
-        });
-        reading.delete(job.key);
-        if (result._tag !== "Success") continue;
-        const text = textOf(
-          job,
-          result.value.items.map(({ item }) => item),
-        );
-        useTexts.setState((state) => ({ texts: { ...state.texts, [job.key]: text } }));
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, jobs.length) }, worker));
-  });
+  const read = useStableCallback((jobs: ReadonlyArray<TextJob>) =>
+    readTexts(jobs, async (threadId) => {
+      const result = await loadTranscript({ environmentId, input: { threadId } });
+      return result._tag === "Success" ? result.value.items.map(({ item }) => item) : null;
+    }),
+  );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads transcripts from the server for threads that changed
   useEffect(() => {
     const jobs = missingTextJobs(threads, useTexts.getState().texts).filter(
