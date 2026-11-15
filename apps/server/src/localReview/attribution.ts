@@ -1,4 +1,4 @@
-import { isCommitCommand, literalPaths, parseMentions } from "./mentions.ts";
+import { isCommitCommand, lastChangedDirectory, literalPaths, parseMentions } from "./mentions.ts";
 import type {
   BlindSpot,
   CommitInfo,
@@ -258,16 +258,27 @@ export async function attributeRequest(
   let truncated = false;
   for (const [index, scope] of scopes.entries()) {
     const child = index > 0;
-    for (const command of snapshot.commands) {
-      if (!inScope(scope, command)) continue;
+    let shellDir: string | null = null;
+    const scopeCommands = snapshot.commands
+      .filter((command) => inScope(scope, command))
+      .toSorted((a, b) => a.startedAt - b.startedAt);
+    for (const command of scopeCommands) {
       if (command.output.length >= OUTPUT_LIMIT) truncated = true;
       const candidates = new Set<string>(scopeFcRepos[index]);
+      let named = false;
       for (const path of literalPaths(command.input)) {
         const ref = await resolveInRepo(path);
-        if (ref !== null) candidates.add(ref.root);
+        if (ref !== null) {
+          candidates.add(ref.root);
+          named = true;
+        }
       }
-      const cwdRepo = cwdRepos[index];
-      if (cwdRepo !== null && cwdRepo !== undefined) candidates.add(cwdRepo);
+      if (!named) {
+        const ref = shellDir === null ? null : await resolveInRepo(shellDir);
+        const fallback = ref?.root ?? cwdRepos[index];
+        if (fallback !== null && fallback !== undefined) candidates.add(fallback);
+      }
+      shellDir = lastChangedDirectory(command.input) ?? shellDir;
       prepared.push({
         child,
         input: command.input,
@@ -326,7 +337,7 @@ export async function attributeRequest(
     }),
   );
 
-  let mentioned = 0;
+  const mentioned = new Set<string>();
   const tokensByRepo = new Map<string, Set<string>>();
   const mentionsOf = new Map<PreparedCommand, ReturnType<typeof parseMentions>>();
   for (const command of prepared) {
@@ -358,7 +369,7 @@ export async function attributeRequest(
         if (info === undefined || info.subject.startsWith(CHECKPOINT_SUBJECT)) continue;
         if (!inInterval(command, info)) continue;
         if (mention.form === "bracket" || command.verb) accept(repo, info, "output", command.child);
-        else mentioned += 1;
+        else mentioned.add(`${repo}\0${info.hash}`);
       }
     }
     if (/\bgit\b[^\n]*?\b(push|pull|merge)\b/.test(command.input)) {
@@ -379,7 +390,7 @@ export async function attributeRequest(
   // Root-level file names (ETECH.md, plugin.json) exist in many repos, so only a path with a directory or the repo's own name counts.
   const hasPathEvidence = async (repo: string, command: PreparedCommand, info: CommitInfo) => {
     const name = repo.slice(repo.lastIndexOf("/") + 1);
-    if (new RegExp(`(?<![\\w-])${escapeRegExp(name)}(?![\\w-])`).test(command.input)) return true;
+    if (new RegExp(`(?<![\\w-])${escapeRegExp(name)}(?![\\w/-])`).test(command.input)) return true;
     const files = (await git.changedFiles(repo, info.hash)).filter((file) => file.includes("/"));
     return files.some(
       (file) =>
@@ -393,7 +404,7 @@ export async function attributeRequest(
     for (const repo of command.candidates) {
       const commits = await logSpan(repo, command.startSec - 3, command.endSec + 3);
       for (const info of commits) {
-        if (!inInterval(command, info)) continue;
+        if (!inInterval(command, info) || info.subject.startsWith(CHECKPOINT_SUBJECT)) continue;
         found += 1;
         accept(repo, info, "output", command.child);
       }
@@ -543,7 +554,7 @@ export async function attributeRequest(
     files,
     commits: requestCommits.toSorted((a, b) => a.time - b.time),
     deliverables: [...deliverables].toSorted(),
-    mentionedCommits: mentioned,
+    mentionedCommits: mentioned.size,
     clearedWorktrees,
     omittedFiles: Math.max(0, sorted.length - maxFiles),
     blindSpots,

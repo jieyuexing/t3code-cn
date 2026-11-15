@@ -347,6 +347,22 @@ describe("attributeRequest", () => {
     expect(result.files).toEqual([]);
   });
 
+  it("does not let a checkpoint commit in the candidate repo suppress the all-repos fallback", async () => {
+    const world: World = {
+      repos: ["/u", repoA, repoB],
+      commits: [
+        { repo: "/u", n: 1, subject: "t3 checkpoint 9", time: T0 + 11, files: ["c.ts"] },
+        { repo: repoB, n: 2, subject: "mine", time: T0 + 11, files: ["src/mine.ts"] },
+      ],
+    };
+    const result = await attributeRequest(
+      snapshot({ commands: [command("git add src/mine.ts && git commit -q -m x", "", 10)] }),
+      request,
+      fakeGit(world),
+    );
+    expect(paths(result)).toEqual([`${repoB}:src/mine.ts`]);
+  });
+
   it("prefers the evidence repo when a commit exists in two checkouts", async () => {
     const world: World = {
       repos: ["/u", repoA, repoB],
@@ -428,6 +444,46 @@ describe("attributeRequest", () => {
     expect(paths(result)).toEqual([`${named}:plugin.json`]);
   });
 
+  it("ignores a repo name that only appears inside a longer path", async () => {
+    const root = "/u/jieyuexing-universe";
+    const world: World = {
+      repos: [root, repoA],
+      commits: [{ repo: root, n: 1, subject: "someone else", time: T0 + 11, files: ["README.md"] }],
+    };
+    const result = await attributeRequest(
+      snapshot({
+        threads: [{ threadId: "T", cwd: repoA }],
+        commands: [
+          command("cd /elsewhere/jieyuexing-universe/projects/y && git commit -q -m x", "", 10),
+        ],
+      }),
+      request,
+      fakeGit(world),
+    );
+    expect(result.files).toEqual([]);
+  });
+
+  it("follows the directory an earlier command changed into", async () => {
+    const world: World = {
+      repos: ["/u", repoB],
+      commits: [
+        { repo: "/u", n: 1, subject: "concurrent", time: T0 + 21, files: ["other.md"] },
+        { repo: repoB, n: 2, subject: "mine", time: T0 + 21, files: ["mine.ts"] },
+      ],
+    };
+    const result = await attributeRequest(
+      snapshot({
+        commands: [
+          command(`cd ${repoB} && git status`, "", 10),
+          command("git commit -q -am x", "", 20),
+        ],
+      }),
+      request,
+      fakeGit(world),
+    );
+    expect(paths(result)).toEqual([`${repoB}:mine.ts`]);
+  });
+
   it("recovers a commit made in a deleted temporary worktree and propagates the evidence repo", async () => {
     const wt = "/u/.local/tmp/job/wt-x";
     const world: World = {
@@ -457,15 +513,16 @@ describe("attributeRequest", () => {
     };
     const result = await attributeRequest(
       snapshot({
+        threads: [{ threadId: "T", cwd: repoA }],
         commands: [command(`git -C ${repoA} commit -q -m x`, "", 10)],
         fileChanges: [{ threadId: "T", runId: "T:1", path: `${repoA}/x.ts` }],
-        checkpoints: [],
+        checkpoints: [{ threadId: "T", runId: "T:1", files: ["x.ts"] }],
       }),
       request,
       fakeGit(world),
     );
     expect(result.files).toHaveLength(1);
-    expect(result.files[0]?.sources.toSorted()).toEqual(["fileChange", "output"]);
+    expect(result.files[0]?.sources.toSorted()).toEqual(["checkpoint", "fileChange", "output"]);
   });
 
   it("combines a child's files with the request's checkpoint and tags them", async () => {

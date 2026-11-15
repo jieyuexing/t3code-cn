@@ -51,3 +51,15 @@ export function literalPaths(input: string): ReadonlyArray<string> {
 export function isCommitCommand(input: string): boolean {
   return COMMIT_VERB.test(input);
 }
+
+const CHANGE_DIRECTORY =
+  /(?:^|[;&|\n(]\s*)cd\s+(?:--\s+)?(?:"([^"\n]+)"|'([^'\n]+)'|([^\s;&|)]+))/g;
+
+export function lastChangedDirectory(input: string): string | null {
+  let last: string | null = null;
+  for (const m of input.matchAll(CHANGE_DIRECTORY)) {
+    const target = m[1] ?? m[2] ?? m[3] ?? "";
+    if (target.startsWith("/") || target.startsWith("~/")) last = target;
+  }
+  return last;
+}
