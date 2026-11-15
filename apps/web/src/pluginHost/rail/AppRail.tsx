@@ -17,9 +17,17 @@ import {
   type RailItem,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { PlusIcon, SquareMenuIcon } from "lucide-react";
+import {
+  PanelBottomIcon,
+  PanelRightIcon,
+  PlusIcon,
+  PuzzleIcon,
+  SquareMenuIcon,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import type { PanelLayoutControlsProps } from "~/components/chat/PanelLayoutControls";
+import { PopoverTrigger } from "~/components/ui/popover";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { shortcutLabelForCommand } from "~/keybindings";
@@ -39,6 +47,7 @@ import { useThreadPlanProgress } from "../threadPlan/useThreadPlan";
 import { RAIL_BUILTIN_LABELS } from "./railBuiltins";
 import { RailPinPopover } from "./RailPinPopover";
 import { RailWebAppDialog } from "./RailWebAppDialog";
+import { railIconOf } from "./railIcons";
 import {
   groupRailItems,
   isRailItemShowing,
@@ -62,8 +71,8 @@ export interface RailBuiltinAction {
 
 export interface AppRailProps {
   readonly threadRef: ScopedThreadRef;
-  readonly detailsOpen: boolean;
-  readonly onToggleDetails: () => void;
+  /** The same controls the title bar would show; the details card's open state and its popover trigger come from here. */
+  readonly controls: PanelLayoutControlsProps;
   /** Shows a tab the thread already has, opening the panel if it was folded. */
   readonly onActivate: (surface: RightPanelSurface) => void;
   readonly onCollapse: () => void;
@@ -76,8 +85,8 @@ const BUILTIN_SHORTCUT_COMMAND = { browser: "preview.toggle", diff: "diff.toggle
 
 const itemClassName = (showing: boolean, dimmed: boolean) =>
   cn(
-    "relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-(--control-radius) text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-    showing && "bg-accent text-foreground",
+    "relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-(--control-radius) text-muted-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+    showing ? "bg-input/64 text-foreground" : "hover:bg-accent hover:text-foreground",
     dimmed && "opacity-40",
   );
 
@@ -87,29 +96,48 @@ function RailButton(props: {
   readonly note?: string | undefined;
   readonly showing?: boolean;
   readonly dimmed?: boolean;
+  /** A 6px dot on the corner: a plugin that waits or is awaiting consent warns, a quarantined one errs. */
+  readonly tone?: "warning" | "error" | undefined;
   readonly pressed?: boolean;
+  /** Makes the button the trigger of this popover, which then opens and closes it itself. */
+  readonly popoverHandle?: PanelLayoutControlsProps["threadPanelPopoverHandle"];
   readonly onClick: () => void;
   readonly onContextMenu?: (event: React.MouseEvent) => void;
   readonly children: ReactNode;
 }) {
   const { label, shortcut, note, showing = false, dimmed = false, pressed } = props;
+  const button = (
+    <button
+      type="button"
+      aria-label={label}
+      aria-disabled={dimmed || undefined}
+      aria-pressed={pressed}
+      data-showing={showing || undefined}
+      className={itemClassName(showing, dimmed)}
+      onClick={dimmed || props.popoverHandle ? undefined : props.onClick}
+      onContextMenu={props.onContextMenu}
+    />
+  );
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <button
-            type="button"
-            aria-label={label}
-            aria-disabled={dimmed || undefined}
-            aria-pressed={pressed}
-            data-showing={showing || undefined}
-            className={itemClassName(showing, dimmed)}
-            onClick={dimmed ? undefined : props.onClick}
-            onContextMenu={props.onContextMenu}
-          />
+          props.popoverHandle ? (
+            <PopoverTrigger handle={props.popoverHandle} render={button} />
+          ) : (
+            button
+          )
         }
       >
         {props.children}
+        {props.tone ? (
+          <span
+            className={cn(
+              "absolute top-0.75 right-0.75 size-1.5 rounded-full",
+              props.tone === "error" ? "bg-error" : "bg-warning",
+            )}
+          />
+        ) : null}
       </TooltipTrigger>
       <TooltipPopup side="left">
         {label}
@@ -164,10 +192,19 @@ function RailGroup(props: {
 const Separator = () => <div role="separator" className="my-1 h-px w-5 shrink-0 bg-border" />;
 
 const AppGlyph = (props: { readonly title: string }) => (
-  <span className="flex size-5 items-center justify-center rounded-md border border-current/40 font-semibold text-2xs leading-none">
+  <span className="flex size-5 items-center justify-center font-semibold text-xs leading-none">
     {monogram(props.title)}
   </span>
 );
+
+/** A plugin app's icon; its view is missing while the plugin is stopped, which reads as a puzzle piece. */
+function PluginAppIcon(props: {
+  readonly view: PluginHostView | undefined;
+  readonly title: string;
+}) {
+  if (props.view === undefined) return <PuzzleIcon className="size-4" />;
+  return railIconOf(props.view.icon, "size-4") ?? <AppGlyph title={props.title} />;
+}
 
 type RailDialog = { readonly app: WebAppItem | null };
 
@@ -176,7 +213,7 @@ type RailDialog = { readonly app: WebAppItem | null };
  * and a plus that pins more. Its pins live on the server, per environment.
  */
 export function AppRail(props: AppRailProps) {
-  const { threadRef, builtins } = props;
+  const { threadRef, builtins, controls } = props;
   const { snapshot, config, canEdit, save } = useRailConfig(threadRef.environmentId);
   const plan = useThreadPlanProgress(threadRef);
   const runningPlan = plan !== null && !plan.complete && !plan.stopped ? plan : null;
@@ -208,10 +245,10 @@ export function AppRail(props: AppRailProps) {
     else if (action._tag === "activate") props.onActivate(action.surface);
     else open();
   };
+  const viewOf = (item: PluginAppItem) =>
+    views.find((entry) => entry.pluginId === item.pluginId && entry.viewId === item.viewId);
   const openPlugin = (item: PluginAppItem) => {
-    const view = views.find(
-      (entry) => entry.pluginId === item.pluginId && entry.viewId === item.viewId,
-    );
+    const view = viewOf(item);
     if (view !== undefined) openPluginView(threadRef, view);
   };
   const openWeb = (app: WebAppItem) => {
@@ -273,10 +310,11 @@ export function AppRail(props: AppRailProps) {
               note={state.ready ? undefined : state.reason}
               showing={isRailItemShowing(panel, item, webContext)}
               dimmed={!state.ready}
+              tone={state.ready ? undefined : state.tone}
               onClick={() => click(item, () => openPlugin(item))}
               onContextMenu={(event) => void showMenu(event, item)}
             >
-              <AppGlyph title={item.title} />
+              <PluginAppIcon view={viewOf(item)} title={item.title} />
             </RailButton>
           </SortableRailItem>
         );
@@ -316,9 +354,14 @@ export function AppRail(props: AppRailProps) {
           label="Thread details"
           shortcut={shortcutLabelForCommand(keybindings, "threadPanel.toggle")}
           note={runningPlan ? `Plan ${runningPlan.done}/${runningPlan.total}` : undefined}
-          pressed={props.detailsOpen}
-          showing={props.detailsOpen}
-          onClick={props.onToggleDetails}
+          pressed={controls.threadPanelOpen}
+          showing={controls.threadPanelOpen}
+          popoverHandle={
+            controls.threadPanelPresentation === "popover"
+              ? controls.threadPanelPopoverHandle
+              : undefined
+          }
+          onClick={controls.onToggleThreadPanel}
         >
           <SquareMenuIcon className="size-4" />
           {runningPlan ? (
@@ -337,6 +380,32 @@ export function AppRail(props: AppRailProps) {
         ))}
       </div>
       <div className="flex shrink-0 flex-col items-center pb-2">
+        <Separator />
+        <div className="flex flex-col items-center gap-1">
+          <RailButton
+            label="Right panel"
+            shortcut={controls.rightPanelShortcutLabel}
+            note={controls.rightPanelAvailable ? undefined : "Unavailable in this thread"}
+            pressed={controls.rightPanelOpen}
+            showing={controls.rightPanelOpen}
+            dimmed={!controls.rightPanelAvailable}
+            onClick={controls.onToggleRightPanel}
+          >
+            <PanelRightIcon className="size-4" />
+          </RailButton>
+          <RailButton
+            label="Terminal drawer"
+            shortcut={controls.terminalShortcutLabel}
+            note={controls.terminalAvailable ? undefined : "Unavailable in this thread"}
+            pressed={controls.terminalOpen}
+            showing={controls.terminalOpen}
+            dimmed={!controls.terminalAvailable}
+            onClick={controls.onToggleTerminal}
+          >
+            <PanelBottomIcon className="size-4" />
+          </RailButton>
+        </div>
+        <Separator />
         <RailPinPopover
           config={config}
           views={views}

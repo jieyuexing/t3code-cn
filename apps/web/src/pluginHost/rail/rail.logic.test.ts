@@ -17,6 +17,7 @@ import {
   type RailWebContext,
   type WebAppItem,
 } from "./rail.logic";
+import { railIconOf } from "./railIcons";
 
 const docs: WebAppItem = { _tag: "web", id: "w1", title: "Docs", url: "https://docs.test/" };
 const wiki: WebAppItem = { _tag: "web", id: "w2", title: "Wiki", url: "https://wiki.test/" };
@@ -203,6 +204,16 @@ const snapshotWith = (
   services: [],
 });
 
+describe("railIconOf", () => {
+  it("knows the icons the host carries and nothing else", () => {
+    expect(railIconOf("rss", "size-4")).not.toBeNull();
+    expect(railIconOf("message-circle-question-mark", "size-4")).not.toBeNull();
+    expect(railIconOf("no-such-icon", "size-4")).toBeNull();
+    expect(railIconOf("constructor", "size-4")).toBeNull();
+    expect(railIconOf(undefined, "size-4")).toBeNull();
+  });
+});
+
 describe("railPluginState", () => {
   const item: PluginAppItem = {
     _tag: "plugin",
@@ -220,8 +231,12 @@ describe("railPluginState", () => {
     expect(railPluginState(item, snapshotWith("waiting"))).toEqual({
       ready: false,
       reason: "Waiting for services",
+      tone: "warning",
     });
-    expect(railPluginState(item, snapshotWith("quarantined")).ready).toBe(false);
+    expect(railPluginState(item, snapshotWith("quarantined"))).toMatchObject({
+      ready: false,
+      tone: "error",
+    });
     expect(railPluginState(item, snapshotWith("standby", { viewId: "other" })).ready).toBe(false);
     expect(
       railPluginState({ ...item, pluginId: "gone" as never }, snapshotWith("standby")).ready,

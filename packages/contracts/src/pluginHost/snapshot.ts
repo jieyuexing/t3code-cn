@@ -81,6 +81,7 @@ export const PluginHostView = Schema.Struct({
   viewId: Schema.String,
   title: Schema.String,
   placement: Schema.String,
+  icon: Schema.optionalKey(Schema.String),
 });
 export type PluginHostView = typeof PluginHostView.Type;
 

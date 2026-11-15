@@ -85,6 +85,8 @@ const PluginViewDeclaration = Schema.Struct({
   id: Schema.String.check(Schema.isMaxLength(32), Schema.isPattern(/^[a-z][a-z0-9-]*$/)),
   title: TrimmedNonEmptyString.check(Schema.isMaxLength(60)),
   placement: Schema.Literal("side-panel"),
+  /** A lucide icon name for the app rail; the host draws a letter when it does not know the name. */
+  icon: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
   /** A whole HTML page inside the plugin directory; the loader checks it per view, so one bad page rejects only that view. */
   html: Schema.String.check(Schema.isMaxLength(256)),
 });
