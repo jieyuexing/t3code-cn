@@ -17,7 +17,13 @@ import {
   type RailItem,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { PlusIcon, PuzzleIcon, SquareMenuIcon } from "lucide-react";
+import {
+  PanelBottomIcon,
+  PanelRightIcon,
+  PlusIcon,
+  PuzzleIcon,
+  SquareMenuIcon,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { PanelLayoutControlsProps } from "~/components/chat/PanelLayoutControls";
@@ -374,6 +380,32 @@ export function AppRail(props: AppRailProps) {
         ))}
       </div>
       <div className="flex shrink-0 flex-col items-center pb-2">
+        <Separator />
+        <div className="flex flex-col items-center gap-1">
+          <RailButton
+            label="Right panel"
+            shortcut={controls.rightPanelShortcutLabel}
+            note={controls.rightPanelAvailable ? undefined : "Unavailable in this thread"}
+            pressed={controls.rightPanelOpen}
+            showing={controls.rightPanelOpen}
+            dimmed={!controls.rightPanelAvailable}
+            onClick={controls.onToggleRightPanel}
+          >
+            <PanelRightIcon className="size-4" />
+          </RailButton>
+          <RailButton
+            label="Terminal drawer"
+            shortcut={controls.terminalShortcutLabel}
+            note={controls.terminalAvailable ? undefined : "Unavailable in this thread"}
+            pressed={controls.terminalOpen}
+            showing={controls.terminalOpen}
+            dimmed={!controls.terminalAvailable}
+            onClick={controls.onToggleTerminal}
+          >
+            <PanelBottomIcon className="size-4" />
+          </RailButton>
+        </div>
+        <Separator />
         <RailPinPopover
           config={config}
           views={views}
