@@ -85,7 +85,7 @@ git diff --numstat v0.1.10-nightly.20261114.4709 HEAD -- <表内文件>   # 整�
 git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行挑出插件宿主的部分
 ```
 
-插入行数里含改行（一行删一行加）的，在“挂的是什么”里写明。合计 **112 行插入（其中 6 行是改行）**：插件宿主 77 行加本次应用栏的 35 行；另有预算快照的 1 行数字、设置页路由新文件 5 行和生成的路由表 21 行。此前写的“75＋3”对不上，是漏计了 `McpHttpServer.ts` 把工具集 `export` 出来的改行、`DiffPanel.tsx` 少算 1 行。
+插入行数里含改行（一行删一行加）的，在“挂的是什么”里写明。合计 **118 行插入（其中 7 行是改行）**：插件宿主 77 行、应用栏 35 行、详情卡计划区 6 行（其中 1 行改行）；另有预算快照的 1 行数字、设置页路由新文件 5 行和生成的路由表 21 行。此前写的“75＋3”对不上，是漏计了 `McpHttpServer.ts` 把工具集 `export` 出来的改行、`DiffPanel.tsx` 少算 1 行。
 
 | 文件                                                           | 插入              | 挂的是什么                                                  |
 | -------------------------------------------------------------- | ----------------- | ----------------------------------------------------------- |
@@ -112,6 +112,9 @@ git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行�
 | `apps/web/src/components/CommandPalette.tsx`                   | 4（含 1 处改行）  | 命令面板「插件」组                                          |
 | `apps/web/src/components/DiffPanel.tsx`                        | 6（含 2 处改行）  | 差异面板读插件要求定位的文件                                |
 | `apps/web/src/components/ChatView.tsx`                         | 35                | 应用栏：1 行导入，34 行元素与各自带面板的打开方式、可用条件 |
+| `apps/web/src/components/chat/threadDetailsItems.ts`           | 1                 | 详情卡条目 `plan`                                           |
+| `apps/web/src/components/chat/ThreadDetailsPanel.tsx`          | 4                 | 详情卡顶部挂载 `ThreadPlanSection`                          |
+| `apps/web/src/components/chat/ThreadDetailsCard.tsx`           | 改 1              | 计划步骤列表不计入档位高度                                  |
 | `apps/web/src/appInit.tsx`                                     | 2                 | 启动时订阅快照                                              |
 | `apps/web/src/components/settings/SettingsSidebarNav.tsx`      | 2                 | 设置页导航项                                                |
 | `apps/web/src/components/settings/settingsSearch.ts`           | 4                 | 设置搜索                                                    |
@@ -121,6 +124,14 @@ git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行�
 整个文件的增删比上表大的几处，多出来的不是插件宿主：`packages/client-runtime/package.json`（+4 `composer-thread-query-cn` 导出，另有删除 4 行 `load-balancing`）、`apps/server/src/server.ts`（+10 −1，`ProjectCheckout`）、`apps/server/src/provider/AgentContextBudget.test.ts`（+4，`HostResources`、`ProjectCheckout` 的测试替身）。
 
 `ChatView.tsx` 这 35 行里 34 行是把 8 个自带面板的“可用吗、怎么打开”从 `useRightPanelActions` 的返回值接到应用栏上，因为这些条件（终端能不能开、PR 页有没有目标、旁路对话是否提供）只在 `ChatView` 里能算。这是目前最大的单文件冲突面；同步时它冲突了，取上游版本再按此表插回，不要手合。要压到几行，办法是让 `useRightPanelActions` 返回一份现成的 `railBuiltins`，那是改上游 hook，不在这一步做。
+
+## 详情卡「Plan」
+
+详情卡最上方的「Plan」项（条目 id `plan`，默认显示，设置与卡片右键可关）读本线程最新一份 `todo_list` 计划，逻辑与组件在 `apps/web/src/pluginHost/threadPlan/`，不新增订阅，跟着聊天页已有的线程结构走。
+
+- **取哪份**：非 `superseded` 的 `todo_list` 中，先比 run 先后，再比计划的 `todo_list` 条目先后（计划 id 是随机数，数组顺序不可信；条目不在已加载窗口时退回数组顺序）。步骤全部完成或计划状态为 `completed` 时显示 “Plan complete N/N” 一行，直到出现下一份计划；没有计划整项不渲染。计划所属 run 已不在进行（`queued`、`preparing`、`starting`、`running`、`waiting` 以外）而计划未完成时显示 “Plan N/M · stopped”：标题 muted，原 running 的步骤用 muted 暂停图标、不高亮、不显示已用时长。判断条件与已用时长是同一个 `live`。
+- **三档**：full 为标题、细进度条、折叠的 “N done”、进行中步骤（run 仍在进行时显示分钟粒度的已用时长，来自 `durationAnchorAt`）、逐条待办（超过 5 条 “+N more”）；compact 只留标题行和当前步骤；essential 只留 “Plan 3/7”。进度条以下的整块（“N done”、进行中步骤、待办、“+N more”）包在 `data-thread-plan-list` 里，与服务器、PR 列表一样不计入档位高度，所以计划推进、展开收起都不会让卡片在 full 与 compact 之间来回跳（实测计入高度在 0/3 与 1/3 时都是 288px，修前是 316 与 348）。展开状态按线程重置。
+- **对外接口**：`useThreadPlanProgress(threadRef)`（`threadPlan/useThreadPlan.ts`）返回 `{ done, total, complete, stopped, currentStep } | null`，供应用栏「详情」格的进度徽标使用。
 
 ## 同步上游时
 
