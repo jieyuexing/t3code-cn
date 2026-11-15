@@ -29,6 +29,10 @@ const source = (parts: Partial<ThreadPlanSource>): ThreadPlanSource => ({
   turnItems: [],
   ...parts,
 });
+const selected = (status: Plan["status"], steps: ReadonlyArray<Step>, live: boolean) => ({
+  plan: todo("p", "r", status, steps) as Extract<Plan, { kind: "todo_list" }>,
+  live,
+});
 const idOf = (selected: ReturnType<typeof selectThreadPlan>) => selected?.plan.id;
 
 describe("selectThreadPlan", () => {
@@ -130,10 +134,11 @@ describe("plan progress and grouping", () => {
   ];
 
   it("counts done steps and names the running one as current", () => {
-    expect(planProgress(todo("p", "r", "active", steps) as never)).toEqual({
+    expect(planProgress(selected("active", steps, true))).toEqual({
       done: 2,
       total: 5,
       complete: false,
+      stopped: false,
       currentStep: "Step 3",
     });
   });
@@ -151,9 +156,26 @@ describe("plan progress and grouping", () => {
   ] as const)(
     "is complete=$complete for $status with these steps",
     ({ status, steps: given, complete }) => {
-      expect(planProgress(todo("p", "r", status, given) as never).complete).toBe(complete);
+      expect(planProgress(selected(status, given, true)).complete).toBe(complete);
     },
   );
+
+  it.each([
+    { name: "a run that ended before its plan did", status: "active", live: false, stopped: true },
+    { name: "a run that is still working", status: "active", live: true, stopped: false },
+    { name: "a finished plan, whatever its run", status: "completed", live: false, stopped: false },
+  ] as const)("is stopped=$stopped for $name", ({ status, live, stopped }) => {
+    const steps = [step("1", "completed"), step("2", "running")];
+    expect(planProgress(selected(status, steps, live)).stopped).toBe(stopped);
+  });
+
+  it("is not stopped once every step is done, though the run ended and the plan is active", () => {
+    const steps = [step("1", "completed"), step("2", "completed")];
+    expect(planProgress(selected("active", steps, false))).toMatchObject({
+      complete: true,
+      stopped: false,
+    });
+  });
 
   it("previews five pending steps and lists all once expanded", () => {
     const pending = Array.from({ length: 8 }, (_, index) => step(String(index), "pending"));

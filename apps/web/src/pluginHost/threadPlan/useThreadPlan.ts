@@ -11,6 +11,6 @@ export function useThreadPlan(threadRef: ScopedThreadRef | null) {
 
 /** Done and total steps with the current one, or null while the thread has no plan. */
 export function useThreadPlanProgress(threadRef: ScopedThreadRef | null) {
-  const plan = useThreadPlan(threadRef)?.plan ?? null;
-  return plan === null ? null : planProgress(plan);
+  const selected = useThreadPlan(threadRef);
+  return selected === null ? null : planProgress(selected);
 }

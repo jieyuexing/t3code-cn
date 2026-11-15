@@ -109,9 +109,9 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 
 详情卡最上方的「Plan」项（条目 id `plan`，默认显示，设置与卡片右键可关）读本线程最新一份 `todo_list` 计划，逻辑与组件在 `apps/web/src/pluginHost/threadPlan/`，不新增订阅，跟着聊天页已有的线程结构走。
 
-- **取哪份**：非 `superseded` 的 `todo_list` 中，先比 run 先后，再比计划的 `todo_list` 条目先后（计划 id 是随机数，数组顺序不可信；条目不在已加载窗口时退回数组顺序）。步骤全部完成或计划状态为 `completed` 时显示 “Plan complete N/N” 一行，直到出现下一份计划；没有计划整项不渲染。
+- **取哪份**：非 `superseded` 的 `todo_list` 中，先比 run 先后，再比计划的 `todo_list` 条目先后（计划 id 是随机数，数组顺序不可信；条目不在已加载窗口时退回数组顺序）。步骤全部完成或计划状态为 `completed` 时显示 “Plan complete N/N” 一行，直到出现下一份计划；没有计划整项不渲染。计划所属 run 已不在进行（`queued`、`preparing`、`starting`、`running`、`waiting` 以外）而计划未完成时显示 “Plan N/M · stopped”：标题 muted，原 running 的步骤用 muted 暂停图标、不高亮、不显示已用时长。判断条件与已用时长是同一个 `live`。
 - **三档**：full 为标题、细进度条、折叠的 “N done”、进行中步骤（run 仍在进行时显示分钟粒度的已用时长，来自 `durationAnchorAt`）、逐条待办（超过 5 条 “+N more”）；compact 只留标题行和当前步骤；essential 只留 “Plan 3/7”。进度条以下的整块（“N done”、进行中步骤、待办、“+N more”）包在 `data-thread-plan-list` 里，与服务器、PR 列表一样不计入档位高度，所以计划推进、展开收起都不会让卡片在 full 与 compact 之间来回跳（实测计入高度在 0/3 与 1/3 时都是 288px，修前是 316 与 348）。展开状态按线程重置。
-- **对外接口**：`useThreadPlanProgress(threadRef)`（`threadPlan/useThreadPlan.ts`）返回 `{ done, total, complete, currentStep } | null`，供应用栏「详情」格的进度徽标使用。
+- **对外接口**：`useThreadPlanProgress(threadRef)`（`threadPlan/useThreadPlan.ts`）返回 `{ done, total, complete, stopped, currentStep } | null`，供应用栏「详情」格的进度徽标使用。
 
 ## 同步上游时
 

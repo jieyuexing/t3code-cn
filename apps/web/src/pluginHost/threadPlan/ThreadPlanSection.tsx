@@ -5,6 +5,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CircleDotIcon,
+  CirclePauseIcon,
   CircleIcon,
   ListTodoIcon,
 } from "lucide-react";
@@ -18,7 +19,7 @@ import { cn } from "~/lib/utils";
 import {
   formatPlanElapsed,
   groupPlanSteps,
-  isPlanComplete,
+  planProgress,
   planRows,
   previewPendingSteps,
   type PlanDensity,
@@ -50,26 +51,37 @@ function PlanTitle({ threadRef }: { threadRef: ScopedThreadRef }) {
       ) : (
         <ListTodoIcon aria-hidden className={THREAD_DETAILS_PANEL_ICON_CLASS} />
       )}
-      <span className="min-w-0 truncate text-sm font-medium text-foreground/80">
+      <span
+        className={cn(
+          "min-w-0 truncate text-sm font-medium",
+          progress.stopped ? "text-muted-foreground" : "text-foreground/80",
+        )}
+      >
         {progress.complete ? "Plan complete" : "Plan"}{" "}
         <span className="font-normal tabular-nums text-muted-foreground">
           {progress.done}/{progress.total}
+          {progress.stopped ? " · stopped" : ""}
         </span>
       </span>
     </div>
   );
 }
 
+const STEP_ICONS = {
+  done: CheckIcon,
+  running: CircleDotIcon,
+  stopped: CirclePauseIcon,
+  pending: CircleIcon,
+};
+
 function StepRow({
   step,
-  live,
   tone,
 }: {
   step: PlanStep;
-  live: boolean;
-  tone: "done" | "running" | "pending";
+  tone: "done" | "running" | "stopped" | "pending";
 }) {
-  const Icon = tone === "done" ? CheckIcon : tone === "running" ? CircleDotIcon : CircleIcon;
+  const Icon = STEP_ICONS[tone];
   return (
     <li className={cn(STEP_ROW_CLASS, tone === "running" && "bg-primary/8")} data-plan-step={tone}>
       <Icon
@@ -78,6 +90,7 @@ function StepRow({
           STEP_ICON_CLASS,
           tone === "done" && "text-success",
           tone === "running" && "text-primary",
+          tone === "stopped" && "text-muted-foreground",
           tone === "pending" && "text-muted-foreground/40",
         )}
       />
@@ -98,7 +111,7 @@ function StepRow({
         </TooltipTrigger>
         <TooltipPopup side="left">{step.text}</TooltipPopup>
       </Tooltip>
-      {tone === "running" && live && step.durationAnchorAt !== undefined ? (
+      {tone === "running" && step.durationAnchorAt !== undefined ? (
         <Elapsed anchor={step.durationAnchorAt} />
       ) : null}
       {tone === "done" && step.durationMs !== undefined ? (
@@ -158,9 +171,10 @@ function ThreadPlanBody({
   const [doneOpen, setDoneOpen] = useState(false);
   const [pendingOpen, setPendingOpen] = useState(false);
   if (selected === null) return null;
-  const { plan, live } = selected;
+  const { plan } = selected;
+  const { complete, stopped } = planProgress(selected);
   const groups = groupPlanSteps(plan.steps);
-  const complete = isPlanComplete(plan);
+  const runningTone = stopped ? "stopped" : "running";
   const rows = planRows(density);
   const pending = previewPendingSteps(groups.pending, pendingOpen);
   const percent = Math.round((groups.done.length / plan.steps.length) * 100);
@@ -198,8 +212,8 @@ function ThreadPlanBody({
           <ul className="m-0 list-none p-0">
             <StepRow
               step={groups.current}
-              live={live}
-              tone={groups.current.status === "running" ? "running" : "pending"}
+
+              tone={groups.current.status === "running" ? runningTone : "pending"}
             />
           </ul>
         ) : null}
@@ -215,7 +229,7 @@ function ThreadPlanBody({
                 {doneOpen ? (
                   <ul className={LIST_CLASS}>
                     {groups.done.map((step) => (
-                      <StepRow key={step.id} step={step} live={live} tone="done" />
+                      <StepRow key={step.id} step={step} tone="done" />
                     ))}
                   </ul>
                 ) : null}
@@ -224,14 +238,14 @@ function ThreadPlanBody({
             {groups.running.length > 0 ? (
               <ul className="m-0 list-none p-0">
                 {groups.running.map((step) => (
-                  <StepRow key={step.id} step={step} live={live} tone="running" />
+                  <StepRow key={step.id} step={step} tone={runningTone} />
                 ))}
               </ul>
             ) : null}
             {pending.shown.length > 0 ? (
               <ul className={LIST_CLASS}>
                 {pending.shown.map((step) => (
-                  <StepRow key={step.id} step={step} live={live} tone="pending" />
+                  <StepRow key={step.id} step={step} tone="pending" />
                 ))}
               </ul>
             ) : null}

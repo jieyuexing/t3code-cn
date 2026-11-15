@@ -82,7 +82,7 @@ export function groupPlanSteps(steps: ReadonlyArray<PlanStep>): PlanGroups {
 }
 
 /** Claude marks a finished list completed; Codex leaves it active, so the steps decide too. */
-export function isPlanComplete(plan: TodoListPlan): boolean {
+function isPlanComplete(plan: TodoListPlan): boolean {
   return plan.status === "completed" || plan.steps.every((step) => step.status === "completed");
 }
 
@@ -90,15 +90,19 @@ export interface ThreadPlanProgress {
   readonly done: number;
   readonly total: number;
   readonly complete: boolean;
+  /** The plan's run ended before the plan did, so nothing is working on it. */
+  readonly stopped: boolean;
   readonly currentStep: string | null;
 }
 
-export function planProgress(plan: TodoListPlan): ThreadPlanProgress {
+export function planProgress({ plan, live }: SelectedThreadPlan): ThreadPlanProgress {
   const { done, current } = groupPlanSteps(plan.steps);
+  const complete = isPlanComplete(plan);
   return {
     done: done.length,
     total: plan.steps.length,
-    complete: isPlanComplete(plan),
+    complete,
+    stopped: !live && !complete,
     currentStep: current?.text ?? null,
   };
 }
