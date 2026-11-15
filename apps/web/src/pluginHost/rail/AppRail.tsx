@@ -35,6 +35,7 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { openPluginView } from "../launcherViews";
+import { useThreadPlanProgress } from "../threadPlan/useThreadPlan";
 import { RAIL_BUILTIN_LABELS } from "./railBuiltins";
 import { RailPinPopover } from "./RailPinPopover";
 import { RailWebAppDialog } from "./RailWebAppDialog";
@@ -177,6 +178,8 @@ type RailDialog = { readonly app: WebAppItem | null };
 export function AppRail(props: AppRailProps) {
   const { threadRef, builtins } = props;
   const { snapshot, config, canEdit, save } = useRailConfig(threadRef.environmentId);
+  const plan = useThreadPlanProgress(threadRef);
+  const runningPlan = plan !== null && !plan.complete && !plan.stopped ? plan : null;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const panel = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, threadRef),
@@ -312,11 +315,17 @@ export function AppRail(props: AppRailProps) {
         <RailButton
           label="Thread details"
           shortcut={shortcutLabelForCommand(keybindings, "threadPanel.toggle")}
+          note={runningPlan ? `Plan ${runningPlan.done}/${runningPlan.total}` : undefined}
           pressed={props.detailsOpen}
           showing={props.detailsOpen}
           onClick={props.onToggleDetails}
         >
           <SquareMenuIcon className="size-4" />
+          {runningPlan ? (
+            <span className="absolute -right-0.5 -bottom-0.5 rounded-sm bg-primary px-0.5 text-3xs leading-3 font-medium text-primary-foreground tabular-nums">
+              {runningPlan.done}/{runningPlan.total}
+            </span>
+          ) : null}
         </RailButton>
         {sections.map((section) => (
           <div key={section.key} className="flex flex-col items-center">
