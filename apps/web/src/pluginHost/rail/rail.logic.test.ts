@@ -131,13 +131,14 @@ describe("rail config edits", () => {
     ],
   };
 
-  it("starts with the four common panels pinned and the rail on", () => {
+  it("starts with the four common panels and the needs-you list pinned and the rail on", () => {
     expect(DEFAULT_RAIL_CONFIG.enabled).toBe(true);
     expect(DEFAULT_RAIL_CONFIG.items.map((item) => item._tag === "builtin" && item.id)).toEqual([
       "browser",
       "terminal",
       "files",
       "diff",
+      "needsYou",
     ]);
     expect(railOf(null)).toBe(DEFAULT_RAIL_CONFIG);
   });

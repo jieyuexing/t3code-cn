@@ -14,6 +14,7 @@ import {
   railItemKey,
   type PluginHostView,
   type RailBuiltinId,
+  type EnvironmentId,
   type RailItem,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -27,7 +28,7 @@ import {
 import { useState, type ReactNode } from "react";
 
 import type { PanelLayoutControlsProps } from "~/components/chat/PanelLayoutControls";
-import { PopoverTrigger } from "~/components/ui/popover";
+import { PopoverCreateHandle, PopoverTrigger } from "~/components/ui/popover";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { shortcutLabelForCommand } from "~/keybindings";
@@ -43,6 +44,8 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { openPluginView } from "../launcherViews";
+import { NeedsYouPopup } from "../needsYou/NeedsYouPopup";
+import { useNeedsYou } from "../needsYou/useNeedsYou";
 import { useThreadPlanProgress } from "../threadPlan/useThreadPlan";
 import { RAIL_BUILTIN_LABELS } from "./railBuiltins";
 import { RailPinPopover } from "./RailPinPopover";
@@ -206,6 +209,43 @@ function PluginAppIcon(props: {
   return railIconOf(props.view.icon, "size-4") ?? <AppGlyph title={props.title} />;
 }
 
+/** The needs-you button: its badge counts the threads waiting on the user, and it is the trigger of the list it opens. */
+function NeedsYouRailButton(props: {
+  readonly environmentId: EnvironmentId;
+  readonly onContextMenu: (event: React.MouseEvent) => void;
+}) {
+  const [handle] = useState(() => PopoverCreateHandle());
+  const [open, setOpen] = useState(false);
+  const entries = useNeedsYou(props.environmentId);
+  const { label, icon: Icon } = RAIL_BUILTIN_LABELS.needsYou;
+  return (
+    <>
+      <RailButton
+        label={label}
+        note={entries.length > 0 ? `${entries.length} waiting` : undefined}
+        pressed={open}
+        showing={open}
+        popoverHandle={handle}
+        onClick={() => {}}
+        onContextMenu={props.onContextMenu}
+      >
+        <Icon className="size-4" />
+        {entries.length > 0 ? (
+          <span className="absolute -top-0.5 -right-0.5 rounded-full bg-primary px-1 text-3xs leading-3.5 font-medium text-primary-foreground tabular-nums">
+            {entries.length > 99 ? "99+" : entries.length}
+          </span>
+        ) : null}
+      </RailButton>
+      <NeedsYouPopup
+        handle={handle}
+        environmentId={props.environmentId}
+        entries={entries}
+        onOpenChange={setOpen}
+      />
+    </>
+  );
+}
+
 type RailDialog = { readonly app: WebAppItem | null };
 
 /**
@@ -278,6 +318,16 @@ export function AppRail(props: AppRailProps) {
   const move = (fromKey: string, toKey: string) => void save(moveItem(config, fromKey, toKey));
 
   const builtinItems = groups.builtin.map((item) => {
+    if (item.id === "needsYou") {
+      return (
+        <SortableRailItem key={railItemKey(item)} id={railItemKey(item)}>
+          <NeedsYouRailButton
+            environmentId={threadRef.environmentId}
+            onContextMenu={(event) => void showMenu(event, item)}
+          />
+        </SortableRailItem>
+      );
+    }
     const entry = RAIL_BUILTIN_LABELS[item.id];
     const action = builtins[item.id];
     const command =

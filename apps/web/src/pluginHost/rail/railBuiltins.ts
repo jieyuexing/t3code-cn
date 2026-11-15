@@ -3,6 +3,7 @@ import {
   FileDiff,
   Files,
   Globe2,
+  MessageCircleQuestionMark,
   MessagesSquare,
   Smartphone,
   TerminalSquare,
@@ -26,4 +27,5 @@ export const RAIL_BUILTIN_LABELS: Readonly<
   pullRequests: { label: "Linked pull requests", icon: PullRequestGlyph.link },
   device: { label: "Device", icon: Smartphone },
   sideChat: { label: "Side chat", icon: MessagesSquare },
+  needsYou: { label: "Needs you", icon: MessageCircleQuestionMark },
 };

@@ -4,7 +4,7 @@ import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "../baseSchemas.ts";
 import { PluginId } from "./manifest.ts";
 
-/** The right panel's own surfaces a rail can pin; each opens the matching tab. */
+/** What a rail can pin of T3's own: the right panel's surfaces, each opening the matching tab, and `needsYou`, the list of threads waiting on the user. */
 export const RAIL_BUILTIN_IDS = [
   "browser",
   "terminal",
@@ -14,6 +14,7 @@ export const RAIL_BUILTIN_IDS = [
   "pullRequests",
   "device",
   "sideChat",
+  "needsYou",
 ] as const;
 export const RailBuiltinId = Schema.Literals(RAIL_BUILTIN_IDS);
 export type RailBuiltinId = typeof RailBuiltinId.Type;
@@ -74,5 +75,6 @@ export const DEFAULT_RAIL_CONFIG: RailConfig = {
     { _tag: "builtin", id: "terminal" },
     { _tag: "builtin", id: "files" },
     { _tag: "builtin", id: "diff" },
+    { _tag: "builtin", id: "needsYou" },
   ],
 };
