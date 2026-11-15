@@ -6,7 +6,6 @@ import { useEffect } from "react";
 import { create } from "zustand";
 
 import { useStableCallback } from "~/hooks/useStableCallback";
-import { orchestrationEnvironment } from "~/state/orchestration";
 import { environmentThreadShells } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 
@@ -20,6 +19,7 @@ import {
   type TextJob,
 } from "./needsYou.logic";
 import { pendingItems } from "./replyPending";
+import { threadTail } from "./threadTail";
 
 const READ_CONCURRENCY = 4;
 
@@ -86,13 +86,15 @@ async function readTexts(
 export function useNeedsYou(environmentId: EnvironmentId): ReadonlyArray<NeedsYouEntry> {
   const threads = useAtomValue(needsYouThreadsAtom(environmentId));
   const texts = useTexts((state) => state.texts);
-  const loadTranscript = useAtomCommand(orchestrationEnvironment.threadTranscript, {
-    reportFailure: false,
-  });
+  const loadTail = useAtomCommand(threadTail, { reportFailure: false });
   const read = useStableCallback((jobs: ReadonlyArray<TextJob>) =>
     readTexts(jobs, async (threadId) => {
-      const result = await loadTranscript({ environmentId, input: { threadId } });
-      return result._tag === "Success" ? result.value.items.map(({ item }) => item) : null;
+      const result = await loadTail({ environmentId, input: { threadId } });
+      if (result._tag !== "Success" || result.value._tag === "unavailable") return null;
+      if (result.value._tag === "missing") return [];
+      return result.value.snapshot.projection.visibleTurnItems
+        .filter((row) => row.visibility === "local")
+        .map((row) => row.item);
     }),
   );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads transcripts from the server for threads that changed
