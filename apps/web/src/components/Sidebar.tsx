@@ -679,7 +679,9 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     }
   }
   // Availability gates dragging only; sorting must stay consistent across clients.
-  const sortedPinned = sortPinnedThreadsForSidebar(pinned);
+  const sortedPinned = sortActiveBySend
+    ? sortFolderThreadsByStatus(sortPinnedThreadsForSidebar(pinned))
+    : sortPinnedThreadsForSidebar(pinned);
   const sortedActive = sortActiveBySend
     ? sortFolderThreadsByStatus(sortWorkingThreadsBySend(active))
     : workingShelfEnabled
