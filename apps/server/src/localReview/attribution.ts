@@ -152,7 +152,7 @@ export async function attributeRequest(
   snapshot: Snapshot,
   request: Request,
   gitFacts: GitFacts,
-  options: { readonly gitBudget?: number } = {},
+  options: { readonly gitBudget?: number; readonly maxFiles?: number } = {},
 ): Promise<RequestFiles> {
   const git = guarded(gitFacts, options.gitBudget ?? GIT_BUDGET);
   const scopes = foldChildren(snapshot, request.threadId, new Set(request.runIds));
@@ -519,10 +519,11 @@ export async function attributeRequest(
     }
   }
 
+  const maxFiles = options.maxFiles ?? MAX_FILES;
   const sorted = [...entries.values()].toSorted(
     (a, b) => a.repo.localeCompare(b.repo) || a.path.localeCompare(b.path),
   );
-  const files: RequestFile[] = sorted.slice(0, MAX_FILES).map((entry) => ({
+  const files: RequestFile[] = sorted.slice(0, maxFiles).map((entry) => ({
     repo: entry.repo,
     path: entry.path,
     sources: [...entry.sources],
@@ -539,7 +540,7 @@ export async function attributeRequest(
     deliverables: [...deliverables].toSorted(),
     mentionedCommits: mentioned,
     clearedWorktrees,
-    omittedFiles: Math.max(0, sorted.length - MAX_FILES),
+    omittedFiles: Math.max(0, sorted.length - maxFiles),
     blindSpots,
     gitCalls: git.spent(),
   };
