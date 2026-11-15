@@ -9,7 +9,7 @@ import {
 
 import type { RightPanelSurface, ThreadRightPanelState } from "../../rightPanelStore";
 import { openableUrl } from "../openUrl";
-import { pluginStatus } from "../pluginStatus";
+import { PLUGIN_STATUS_VARIANT_BY_KIND, pluginStatus } from "../pluginStatus";
 
 export type WebAppItem = Extract<RailItem, { _tag: "web" }>;
 export type PluginAppItem = Extract<RailItem, { _tag: "plugin" }>;
@@ -167,7 +167,12 @@ export function groupRailItems(config: RailConfig) {
 
 export type RailPluginState =
   | { readonly ready: true }
-  | { readonly ready: false; readonly reason: string };
+  | {
+      readonly ready: false;
+      readonly reason: string;
+      /** Set when the plugin needs attention, as opposed to being switched off or gone. */
+      readonly tone?: "warning" | "error";
+    };
 
 /** A plugin app is usable while its plugin is enabled, consented, not stopped and still offers the view. */
 export function railPluginState(
@@ -179,7 +184,10 @@ export function railPluginState(
   if (!plugin.enabled) return { ready: false, reason: "The plugin is not enabled" };
   const status = pluginStatus(plugin);
   if (status.kind !== "standby" && status.kind !== "running") {
-    return { ready: false, reason: status.label };
+    const tone = PLUGIN_STATUS_VARIANT_BY_KIND[status.kind];
+    return tone === "warning" || tone === "error"
+      ? { ready: false, reason: status.label, tone }
+      : { ready: false, reason: status.label };
   }
   const offered = snapshot?.views.some(
     (view) => view.pluginId === item.pluginId && view.viewId === item.viewId,

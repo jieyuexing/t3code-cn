@@ -220,8 +220,12 @@ describe("railPluginState", () => {
     expect(railPluginState(item, snapshotWith("waiting"))).toEqual({
       ready: false,
       reason: "Waiting for services",
+      tone: "warning",
     });
-    expect(railPluginState(item, snapshotWith("quarantined")).ready).toBe(false);
+    expect(railPluginState(item, snapshotWith("quarantined"))).toMatchObject({
+      ready: false,
+      tone: "error",
+    });
     expect(railPluginState(item, snapshotWith("standby", { viewId: "other" })).ready).toBe(false);
     expect(
       railPluginState({ ...item, pluginId: "gone" as never }, snapshotWith("standby")).ready,

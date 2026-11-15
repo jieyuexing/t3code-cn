@@ -78,8 +78,8 @@ const BUILTIN_SHORTCUT_COMMAND = { browser: "preview.toggle", diff: "diff.toggle
 
 const itemClassName = (showing: boolean, dimmed: boolean) =>
   cn(
-    "relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-(--control-radius) text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-    showing && "bg-accent text-foreground",
+    "relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-(--control-radius) text-muted-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+    showing ? "bg-input/64 text-foreground" : "hover:bg-accent hover:text-foreground",
     dimmed && "opacity-40",
   );
 
@@ -89,6 +89,8 @@ function RailButton(props: {
   readonly note?: string | undefined;
   readonly showing?: boolean;
   readonly dimmed?: boolean;
+  /** A 6px dot on the corner: a plugin that waits or is awaiting consent warns, a quarantined one errs. */
+  readonly tone?: "warning" | "error" | undefined;
   readonly pressed?: boolean;
   /** Makes the button the trigger of this popover, which then opens and closes it itself. */
   readonly popoverHandle?: PanelLayoutControlsProps["threadPanelPopoverHandle"];
@@ -121,6 +123,14 @@ function RailButton(props: {
         }
       >
         {props.children}
+        {props.tone ? (
+          <span
+            className={cn(
+              "absolute top-0.75 right-0.75 size-1.5 rounded-full",
+              props.tone === "error" ? "bg-error" : "bg-warning",
+            )}
+          />
+        ) : null}
       </TooltipTrigger>
       <TooltipPopup side="left">
         {label}
@@ -284,6 +294,7 @@ export function AppRail(props: AppRailProps) {
               note={state.ready ? undefined : state.reason}
               showing={isRailItemShowing(panel, item, webContext)}
               dimmed={!state.ready}
+              tone={state.ready ? undefined : state.tone}
               onClick={() => click(item, () => openPlugin(item))}
               onContextMenu={(event) => void showMenu(event, item)}
             >
