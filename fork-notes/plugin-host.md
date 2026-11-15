@@ -10,6 +10,11 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 - **视图**：整页 HTML，放在沙箱 iframe 里；可从命令面板、右侧面板空状态的「打开视图」列表和标签栏 “+” 菜单打开（后两处在内置项之后一行一个，没有快捷键，宿主关闭或没有视图时不出现，逻辑在 `launcherViews.ts`、`PluginLauncher.tsx`，用路由里的当前线程，草稿线程和拉取请求页没有），经 MessagePort 桥调用插件处理器，或调用插件注入的服务。消息见下文「视图桥」。
 - **开关**：设置页「插件」按环境管理，环境级总开关默认关。
 - **设置项**：清单 `settings` 声明字段（`text`、`boolean`、`number`，暂无 `select`、`secret`）。设置页插件行声明了设置项就显示「设置」按钮和“N 项设置”，点开在行下方展开表单（`PluginSettingsForm.tsx`），经已有的 `setSetting` 保存：文本、数字回车或离开输入框时保存，开关切换即保存，数字不是有限数字时就地提示、不保存；值不等于默认值时显示“恢复默认（默认值）”，保存成功短暂显示“已保存”，宿主拒绝时错误显示在字段下方、输入保留；没有管理权限时只读；停用、出错或被隔离的插件照样可以改。设置按环境保存，不分项目；写入后插件下一次读取即生效，不用重载。
+- **应用栏**：对话视图最右侧约 40px 的窄栏（`apps/web/src/pluginHost/rail/`，`ChatView.tsx` 在右侧面板之后插入一个元素，嵌入的侧聊天窗格不显示）。自上而下：详情开关（与 `threadPanel.toggle` 同一动作，显示开合）、固定的 T3 自带面板（默认浏览器、终端、Files、差异；可另加 PR、Linked PR、Device、Side chat）、插件应用（标题首字字标）、网页应用，类与类之间一条细线，底部「＋」。顶部让出 `--workspace-topbar-height`，窗口右上角的标题栏控件落在这段空白上。点击：本线程已有该类标签就切过去，没有就新开，点正在显示的那一项收起面板；网页应用与浏览器图标按各自的标签区分（`webAppTabs.ts` 记本次会话打开的标签，重载后按页面地址认）。图标右键：取消固定、编辑与删除（网页应用）；同类内可拖动排序。「＋」弹层勾选要固定的自带面板与插件应用，网页应用（标题、`http(s)` 地址、浏览器配置档）在这里添加、编辑、删除。网页应用经 `browserTab.ts` 的 `openBrowserTab` 打开，与插件视图的 `browser.open` 是同一条路径。
+  - **存放**：服务端按环境存 `<stateDir>/plugins/rail.json`（与 `registry.json` 同目录），契约在 `packages/contracts/src/pluginHost/rail.ts`。读走快照的 `rail` 字段（可缺省，旧服务端回落默认），写走 `pluginHost.call` 的 `setRail`（整份替换）；没有新增 RPC 方法。总开关关着也能读写：`setRail` 不受 `host-disabled` 限制，启动时读完 `rail.json` 一定发一帧。文件不存在用默认（应用栏开，固定浏览器、终端、Files、差异）；读不出或不合模式时显示默认并拒绝覆盖，与 `registry.json` 一样。条数、重复、`http(s)` 由契约校验，服务端同样受约束。
+  - **开关**：设置页「插件」顶上的「Right app rail」，默认开，关掉整条栏消失、固定项保留。总开关关闭时不列插件应用，栏本身照常；没有 `pluginHost.call` 权限时栏只读。
+  - **插件应用的灰态**：固定项自带标题，所以插件被撤下视图时仍显示；插件未启用、待同意、等待依赖、退避、隔离、或不再提供该视图时变灰且点不动，只有 `standby`（用到才启动）和运行中算可用。
+  - **只有 `preview.toggle`、`diff.toggle`、`threadPanel.toggle` 在提示里带快捷键**；终端的 `terminal.toggle` 开关的是底部抽屉，不是右侧面板的终端标签，所以不带。
 - **Cordis 写法**：可选的适配包在 `plugin-host-cordis/`，不进 pnpm workspace，自带 npm 锁文件，`cordis` 版本固定在这里，宿主代码不依赖它。
 
 ## 视图桥
@@ -61,55 +66,72 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 
 | 目录                                               | 内容                                                                                  |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `packages/contracts/src/pluginHost/`               | 清单、RPC 载荷与快照 schema                                                           |
+| `packages/contracts/src/pluginHost/`               | 清单、RPC 载荷与快照 schema、应用栏配置（`rail.ts`）                                  |
 | `apps/server/src/pluginHost/`                      | 加载、对账、子进程、服务转发、Agent 工具、视图交付                                    |
 | `apps/web/src/pluginHost/`                         | 视图框与桥、命令面板项、右侧面板「打开视图」与 “+” 菜单里的视图入口、服务面板、设置页 |
+| `apps/web/src/pluginHost/rail/`                    | 应用栏：组件、固定与点击的纯逻辑、「＋」弹层、网页应用表单与标签记录、配置读写        |
 | `packages/client-runtime/src/state/pluginHost*.ts` | 网页端按环境的快照状态                                                                |
 | `plugin-host-examples/`                            | 示例 `echo-clock`、`greeter`、`git-status`                                            |
 | `plugin-host-cordis/`                              | 可选的 Cordis 适配包与示例 `example.counter`                                          |
 
 ## 上游挂载点
 
-规则：上游文件只做插入，合计不超过 80 行。目前用了 75 行插入、3 行改动，另有预算快照的 1 行数字和生成的路由表。
+规则：上游文件只做插入、逻辑放 fork 自有目录；行数不设硬上限，只作冲突面参考（用户 11-15：“可以很大程度的放宽改上游文件的上限 我并没有严格要求过”）。
 
-| 文件                                                           | 插入              | 挂的是什么                                    |
-| -------------------------------------------------------------- | ----------------- | --------------------------------------------- |
-| `packages/contracts/src/rpc.ts`                                | 3                 | `pluginHost` 的 WS 方法、RPC 定义、RPC 组     |
-| `packages/contracts/src/clientRpcPermissions.ts`               | 1                 | 受保护方法登记                                |
-| `packages/contracts/src/index.ts`                              | 1                 | 导出 `pluginHost`                             |
-| `packages/client-runtime/package.json`                         | 4                 | `pluginHost` 状态的导出                       |
-| `packages/client-runtime/src/rpc/client.ts`                    | 1                 | 客户端 RPC 方法                               |
-| `packages/client-runtime/src/state/commandPermissions.test.ts` | 1                 | 权限表测试                                    |
-| `apps/server/src/ws.ts`                                        | 4                 | RPC 处理器                                    |
-| `apps/server/src/ws.test.ts`                                   | 2                 | 测试替身                                      |
-| `apps/server/src/server.ts`                                    | 2                 | 运行时层组装                                  |
-| `apps/server/src/binMain.ts`                                   | 3                 | 隐藏命令 `__plugin-host`（子进程入口）        |
-| `apps/server/src/auth/RpcAuthorization.ts`                     | 3                 | 方法鉴权                                      |
-| `apps/server/src/observability/RpcInstrumentation.ts`          | 2                 | 观测表                                        |
-| `apps/server/src/mcp/McpHttpServer.ts`                         | 2                 | Agent 工具集                                  |
-| `apps/server/src/provider/AgentContextBudget.test.ts`          | 2                 | 预算测试                                      |
-| `apps/server/src/provider/agentContextBudget.json`             | 改 1              | 工具描述字节数，按实测写                      |
-| `apps/web/src/rightPanelStore.ts`                              | 11（含 2 处改行） | 面板种类 `plugin` 与打开动作                  |
-| `apps/web/src/components/chat/RightPanelSurfaceContent.tsx`    | 3                 | 面板内容分支                                  |
-| `apps/web/src/components/RightPanelTabs.tsx`                   | 8                 | 标签标题与图标；空状态与 “+” 菜单里的插件视图 |
-| `apps/web/src/closedViewStore.ts`                              | 2                 | 关闭后可重开                                  |
-| `apps/web/src/reopenClosedView.ts`                             | 3                 | 关闭后可重开                                  |
-| `apps/web/src/components/CommandPalette.tsx`                   | 4（含 1 处改行）  | 命令面板「插件」组                            |
-| `apps/web/src/components/DiffPanel.tsx`                        | 5（含 2 处改行）  | 差异面板读插件要求定位的文件                  |
-| `apps/web/src/appInit.tsx`                                     | 2                 | 启动时订阅快照                                |
-| `apps/web/src/components/settings/SettingsSidebarNav.tsx`      | 2                 | 设置页导航项                                  |
-| `apps/web/src/components/settings/settingsSearch.ts`           | 4                 | 设置搜索                                      |
-| `apps/web/src/routes/_chat.settings.plugins.tsx`               | 新文件 5          | 设置页路由                                    |
-| `apps/web/src/routeTree.gen.ts`                                | 生成              | 路由表                                        |
+基线是最近一次同步的上游 nightly `v0.1.10-nightly.20261114.4709`（`dfd2187ccb`）。下表只计插件宿主与应用栏的行，同一文件里的其他 fork 定制另列在表后。重算方法：
+
+```sh
+git diff --numstat v0.1.10-nightly.20261114.4709 HEAD -- <表内文件>   # 整个文件的增删
+git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行挑出插件宿主的部分
+```
+
+插入行数里含改行（一行删一行加）的，在“挂的是什么”里写明。合计 **112 行插入（其中 6 行是改行）**：插件宿主 77 行加本次应用栏的 35 行；另有预算快照的 1 行数字、设置页路由新文件 5 行和生成的路由表 21 行。此前写的“75＋3”对不上，是漏计了 `McpHttpServer.ts` 把工具集 `export` 出来的改行、`DiffPanel.tsx` 少算 1 行。
+
+| 文件                                                           | 插入              | 挂的是什么                                                  |
+| -------------------------------------------------------------- | ----------------- | ----------------------------------------------------------- |
+| `packages/contracts/src/rpc.ts`                                | 3                 | `pluginHost` 的 WS 方法、RPC 定义、RPC 组                   |
+| `packages/contracts/src/clientRpcPermissions.ts`               | 1                 | 受保护方法登记                                              |
+| `packages/contracts/src/index.ts`                              | 1                 | 导出 `pluginHost`                                           |
+| `packages/client-runtime/package.json`                         | 4                 | `pluginHost` 状态的导出                                     |
+| `packages/client-runtime/src/rpc/client.ts`                    | 1                 | 客户端 RPC 方法                                             |
+| `packages/client-runtime/src/state/commandPermissions.test.ts` | 1                 | 权限表测试                                                  |
+| `apps/server/src/ws.ts`                                        | 4                 | RPC 处理器                                                  |
+| `apps/server/src/ws.test.ts`                                   | 2                 | 测试替身                                                    |
+| `apps/server/src/server.ts`                                    | 2                 | 运行时层组装                                                |
+| `apps/server/src/binMain.ts`                                   | 3                 | 隐藏命令 `__plugin-host`（子进程入口）                      |
+| `apps/server/src/auth/RpcAuthorization.ts`                     | 3                 | 方法鉴权                                                    |
+| `apps/server/src/observability/RpcInstrumentation.ts`          | 2                 | 观测表                                                      |
+| `apps/server/src/mcp/McpHttpServer.ts`                         | 3（含 1 处改行）  | Agent 工具集（改行是把工具集 `export` 出来）                |
+| `apps/server/src/provider/AgentContextBudget.test.ts`          | 2                 | 预算测试                                                    |
+| `apps/server/src/provider/agentContextBudget.json`             | 改 1              | 工具描述字节数，按实测写                                    |
+| `apps/web/src/rightPanelStore.ts`                              | 11（含 2 处改行） | 面板种类 `plugin` 与打开动作                                |
+| `apps/web/src/components/chat/RightPanelSurfaceContent.tsx`    | 3                 | 面板内容分支                                                |
+| `apps/web/src/components/RightPanelTabs.tsx`                   | 8                 | 标签标题与图标；空状态与 “+” 菜单里的插件视图               |
+| `apps/web/src/closedViewStore.ts`                              | 2                 | 关闭后可重开                                                |
+| `apps/web/src/reopenClosedView.ts`                             | 3                 | 关闭后可重开                                                |
+| `apps/web/src/components/CommandPalette.tsx`                   | 4（含 1 处改行）  | 命令面板「插件」组                                          |
+| `apps/web/src/components/DiffPanel.tsx`                        | 6（含 2 处改行）  | 差异面板读插件要求定位的文件                                |
+| `apps/web/src/components/ChatView.tsx`                         | 35                | 应用栏：1 行导入，34 行元素与各自带面板的打开方式、可用条件 |
+| `apps/web/src/appInit.tsx`                                     | 2                 | 启动时订阅快照                                              |
+| `apps/web/src/components/settings/SettingsSidebarNav.tsx`      | 2                 | 设置页导航项                                                |
+| `apps/web/src/components/settings/settingsSearch.ts`           | 4                 | 设置搜索                                                    |
+| `apps/web/src/routes/_chat.settings.plugins.tsx`               | 新文件 5          | 设置页路由                                                  |
+| `apps/web/src/routeTree.gen.ts`                                | 生成 21           | 路由表                                                      |
+
+整个文件的增删比上表大的几处，多出来的不是插件宿主：`packages/client-runtime/package.json`（+4 `composer-thread-query-cn` 导出，另有删除 4 行 `load-balancing`）、`apps/server/src/server.ts`（+10 −1，`ProjectCheckout`）、`apps/server/src/provider/AgentContextBudget.test.ts`（+4，`HostResources`、`ProjectCheckout` 的测试替身）。
+
+`ChatView.tsx` 这 35 行里 34 行是把 8 个自带面板的“可用吗、怎么打开”从 `useRightPanelActions` 的返回值接到应用栏上，因为这些条件（终端能不能开、PR 页有没有目标、旁路对话是否提供）只在 `ChatView` 里能算。这是目前最大的单文件冲突面；同步时它冲突了，取上游版本再按此表插回，不要手合。要压到几行，办法是让 `useRightPanelActions` 返回一份现成的 `railBuiltins`，那是改上游 hook，不在这一步做。
 
 ## 同步上游时
 
-1. 冲突落在上表的文件里时，先取上游版本，再按上表把插件那几行插回去，不手工合并上游的改动。`rightPanelStore.ts` 最容易冲突。
+1. 冲突落在上表的文件里时，先取上游版本，再按上表把插件那几行插回去，不手工合并上游的改动。`rightPanelStore.ts` 与 `ChatView.tsx` 最容易冲突。
 2. `routeTree.gen.ts` 不要手合，重新生成。
 3. `agentContextBudget.json` 先取上游的三个数，再跑 `apps/server` 的 `vp test run src/provider/AgentContextBudget.test.ts`，把 `mcpToolListJsonBytes` 改成实测值（插件工具比上游多约 479 字节）。
 4. 合并后用 `rg -l pluginHost apps packages` 对照上表，缺一处就补一处。然后在 `apps/server` 跑 `vp test run src/pluginHost src/ws.test.ts src/auth/RpcAuthorization.test.ts src/mcp`，在 `apps/web` 跑 `vp test run src/pluginHost`。
-5. 插入行数要超过 80 行时，先停下来，写明原因再议，不悄悄放宽。
+5. 合并后用上面“重算方法”的两条命令重算上表，把基线换成新同步的上游 nightly，行数变了就改表。
 
 ## 未验证
+
+应用栏只在网页端（Chrome＋开发服务器）走查过：宽窗口、右侧面板打开、面板最大化、切换线程、「＋」添加网页应用并点开、插件应用的固定与变灰、拖动排序、右键菜单、亮暗两种外观。没有验证的有：Electron 桌面端（标题栏控件与原生右键菜单）、141 Windows 的标题栏、远端客户端、触屏。窗口 ≤980px 时右侧面板是模态 Sheet，覆盖在应用栏上，应用栏在 Sheet 打开期间点不到，收起靠 Sheet 自己的关闭；这是 T3 原有的 Sheet 行为，没有为此改上游的 `RightPanelSheet`。应用栏的图标没有键盘重排（只有拖动），键盘用户可以用右键菜单之外的「＋」弹层增删，但不能调顺序。
 
 `host.clipboard-write` 与 `t3.openFile` 只在网页端（headless Chrome＋服务端）走查过，Electron 桌面端的剪贴板权限与文件面板行为没跑；`browser.open` 只在网页端加服务端浏览器（headless Chromium）下走查过，Electron 桌面端自带 webview 的路径没跑；Electron 桌面端、Windows（141）上的子进程通信、官方手机版（看不到插件）、Agent 工具的 evals（没有 API key）、真实界面里的 “Modifies” 标记。

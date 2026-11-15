@@ -7,10 +7,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ThreadId } from "@t3tools/contracts";
 import type { EnvironmentId, PluginId, ScopedThreadRef } from "@t3tools/contracts";
 
-import { canOpenLinksInApp } from "../browser/browserLinkTarget";
 import { getBrowserDefaults } from "../browser/browserDefaults";
-import { isBrowserSettingsReadError, openUrlInPreview } from "../browser/openFileInPreview";
-import { recordVisitForThread } from "../browserHistoryStore";
 import { readLocalApi } from "../localApi";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { orchestrationEnvironment } from "../state/orchestration";
@@ -22,6 +19,7 @@ import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { rightPanelHostRef, useRightPanelStore } from "../rightPanelStore";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { BridgeCallError } from "./bridge";
+import { openBrowserTab } from "./browserTab";
 import { openThreadDiff } from "./diffNavigation";
 import { createHostApi } from "./hostApi";
 import { pendingThreads } from "./pendingThreads";
@@ -128,31 +126,13 @@ export function useHostApi(options: {
       await api.shell.openExternal(url);
     },
     openBrowser: async ({ url, profileId, background }) => {
-      if (threadRef === null || !canOpenLinksInApp(threadRef)) {
-        throw new BridgeCallError({
-          code: "call-failed",
-          message: "The browser is unavailable in this thread.",
-        });
-      }
-      const result = await openUrlInPreview({
+      await openBrowserTab({
         threadRef,
         url,
-        openPreview,
         background,
+        openPreview,
         ...(profileId === undefined ? {} : { profileId }),
       });
-      if (result._tag !== "Success") {
-        const error = squashAtomCommandFailure(result);
-        throw new BridgeCallError({
-          code: isAtomCommandInterrupted(result) ? "cancelled" : "call-failed",
-          message: isBrowserSettingsReadError(error)
-            ? "The saved browser settings could not be loaded."
-            : error instanceof Error
-              ? error.message
-              : "The browser could not open the page.",
-        });
-      }
-      recordVisitForThread(threadRef, url);
     },
     browserProfiles: () => getBrowserDefaults().profiles,
     workspaceRoot: threadRef === null ? null : cwd,

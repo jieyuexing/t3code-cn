@@ -4,6 +4,7 @@ import * as Rpc from "effect/rpc/Rpc";
 import { EnvironmentAuthorizationError } from "../auth.ts";
 import { NonNegativeInt, TrimmedNonEmptyString } from "../baseSchemas.ts";
 import { PluginId, PluginSettingValue } from "./manifest.ts";
+import { RailConfig } from "./rail.ts";
 import { PluginHostSnapshot } from "./snapshot.ts";
 
 export const PLUGIN_HOST_WS_METHODS = {
@@ -17,6 +18,8 @@ const Target = { pluginId: PluginId };
 export const PluginHostCallInput = Schema.Union([
   /** The environment-wide switch, off by default; while off, every other operation is refused. */
   Schema.TaggedStruct("setHostEnabled", { enabled: Schema.Boolean }),
+  /** Replaces the right app rail's pins; allowed while the host switch is off, because the rail is not a plugin. */
+  Schema.TaggedStruct("setRail", { rail: RailConfig }),
   Schema.TaggedStruct("invoke", {
     ...Target,
     handler: Schema.String.check(Schema.isMaxLength(128)),

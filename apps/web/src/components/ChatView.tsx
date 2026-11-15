@@ -376,6 +376,7 @@ import { observeResize } from "~/lib/observeResize";
 import { ThreadVisitWatermark } from "./chat/ThreadVisitWatermark";
 import { ChatTerminalDrawers } from "./chat/ChatTerminalDrawers";
 import { ChatRightPanel } from "./chat/ChatRightPanel";
+import { AppRail } from "../pluginHost/rail/AppRail";
 import { useDraftEnvironmentRouting } from "./chat/useDraftEnvironmentRouting";
 import { branchMismatchBannerItem, extensionStatusBannerItem } from "./chat/ThreadActivityBanners";
 import { ThreadNow } from "./chat/ThreadNow";
@@ -4049,6 +4050,40 @@ export default function ChatView(props: ChatViewProps) {
         >
           {rightPanelContent}
         </ChatRightPanel>
+      ) : null}
+      {activeThreadRef && !embedded ? (
+        <AppRail
+          threadRef={activeThreadRef}
+          detailsOpen={threadPanelOpen}
+          onToggleDetails={toggleThreadPanelStable}
+          onActivate={activateRightPanelSurfaceStable}
+          onCollapse={closePreviewPanelStable}
+          builtins={{
+            browser: {
+              available: canOperatePreview && browserAvailable,
+              open: createBrowserSurface,
+            },
+            terminal: {
+              available: activeProject !== null && canOperateTerminal,
+              open: addTerminalSurfaceStable,
+            },
+            files: { available: activeProject !== null, open: addFilesSurfaceStable },
+            diff: { available: isServerThread && isGitRepo, open: addDiffSurfaceStable },
+            pullRequest: {
+              available: pullRequestSurfaceAvailable,
+              open: addPullRequestSurfaceStable,
+            },
+            pullRequests: {
+              available: pullRequestsSurfaceAvailable,
+              open: addPullRequestsSurfaceStable,
+            },
+            device: { available: true, open: addDeviceSurfaceStable },
+            sideChat:
+              sideChatsOffered && !sideChatDisabledReason
+                ? { available: sideChat.available, open: openSideChatStable }
+                : undefined,
+          }}
+        />
       ) : null}
 
       <RevertConfirmHost
