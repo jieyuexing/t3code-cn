@@ -109,6 +109,7 @@ const run = (ordinal: number, extra: Partial<RunCause> = {}, thread = "T"): Snap
   ordinal,
   requestedAt: (T0 + ordinal * 100) * 1000,
   completedAt: (T0 + ordinal * 100 + 50) * 1000,
+  messageText: `message ${ordinal}\nsecond line`,
   cause: cause(extra),
 });
 
@@ -142,6 +143,7 @@ const request: Request = {
   threadId: "T",
   runIds: ["T:1"],
   origin: "user",
+  title: "",
   startedAt: T0 * 1000,
   endedAt: (T0 + 60) * 1000,
   running: false,
@@ -188,10 +190,10 @@ describe("groupRequests", () => {
       run(4, { createdBy: "agent", backgroundNotification: true }),
       run(5, { createdBy: "agent" }),
     ]);
-    expect(requests.map((r) => [r.runIds, r.origin])).toEqual([
-      [["T:1", "T:3"], "user"],
-      [["T:2", "T:4"], "user"],
-      [["T:5"], "agent"],
+    expect(requests.map((r) => [r.runIds, r.origin, r.title])).toEqual([
+      [["T:1", "T:3"], "user", "message 1"],
+      [["T:2", "T:4"], "user", "message 2"],
+      [["T:5"], "agent", "message 5"],
     ]);
   });
 

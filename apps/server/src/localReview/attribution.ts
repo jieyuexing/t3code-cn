@@ -24,6 +24,13 @@ const MIN_TITLE_OVERLAP = 0.5;
 const CHECKPOINT_SUBJECT = "t3 checkpoint";
 const TEMP_WORKTREE = /^(.*\/\.local\/tmp\/[^/]+\/wt-[^/]+)\/(.+)$/;
 
+const TITLE_LENGTH = 120;
+
+function firstLine(value: string): string {
+  const line = value.split("\n").find((part) => part.trim().length > 0) ?? "";
+  return line.trim().slice(0, TITLE_LENGTH);
+}
+
 export function groupRequests(runs: ReadonlyArray<SnapshotRun>): ReadonlyArray<Request> {
   const sorted = runs.toSorted((a, b) => a.ordinal - b.ordinal);
   const requests: Array<{
@@ -31,6 +38,7 @@ export function groupRequests(runs: ReadonlyArray<SnapshotRun>): ReadonlyArray<R
     threadId: string;
     runIds: string[];
     origin: "user" | "agent";
+    title: string;
     startedAt: number;
     endedAt: number;
     running: boolean;
@@ -53,6 +61,7 @@ export function groupRequests(runs: ReadonlyArray<SnapshotRun>): ReadonlyArray<R
           threadId: run.threadId,
           runIds: [] as string[],
           origin: createdBy === "user" ? ("user" as const) : ("agent" as const),
+          title: firstLine(run.messageText),
           startedAt: run.requestedAt,
           endedAt: run.requestedAt,
           running: false,

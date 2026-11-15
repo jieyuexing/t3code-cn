@@ -20,10 +20,17 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { createGitFacts } from "./gitFacts.ts";
-import { headOf, listRequests, readRequest, type RequestHead } from "./requests.ts";
+import {
+  headOf,
+  listRequests,
+  readRequest,
+  type RequestHead,
+  type SignalCache,
+} from "./requests.ts";
 import type { Query } from "./snapshot.ts";
 
 const CACHE_SIZE = 128;
+const SIGNAL_CACHE_SIZE = 20_000;
 
 export class LocalReviewService extends Context.Service<
   LocalReviewService,
@@ -59,6 +66,7 @@ export const layer = Layer.effect(
     const query: Query = (text, params) =>
       runPromise(sql.unsafe<Record<string, unknown>>(text, params).pipe(NodeSqliteClient.readOnly));
     const cache = new Map<string, CacheEntry>();
+    const signalCache: SignalCache = new Map();
     const home = NodeOS.homedir();
 
     const attempt = <A>(operation: string, run: () => Promise<A>) =>
@@ -73,8 +81,9 @@ export const layer = Layer.effect(
       });
 
     const list = Effect.fn("LocalReviewService.list")(function* (input: LocalReviewListInput) {
+      if (signalCache.size > SIGNAL_CACHE_SIZE) signalCache.clear();
       const now = yield* Clock.currentTimeMillis;
-      const result = yield* attempt("list", () => listRequests(query, input, now));
+      const result = yield* attempt("list", () => listRequests(query, input, now, signalCache));
       return { requests: result.requests.map(wireHead), nextCursor: result.nextCursor };
     });
 

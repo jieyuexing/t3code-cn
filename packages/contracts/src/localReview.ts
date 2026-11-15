@@ -21,6 +21,7 @@ export const LocalReviewRequestHead = Schema.Struct({
   requestId: TrimmedNonEmptyString,
   threadId: ThreadId,
   threadTitle: Schema.String,
+  requestTitle: Schema.String,
   startedAt: IsoDateTime,
   endedAt: IsoDateTime,
   runCount: NonNegativeInt,

@@ -58,11 +58,17 @@ const PATCH = [
 const environmentId = EnvironmentId.make("environment");
 const threadId = ThreadId.make("thread-a");
 
-const head = (requestId: string, threadTitle: string): LocalReviewRequestHead => ({
+const head = (
+  requestId: string,
+  threadTitle: string,
+  requestTitle = "",
+  startedAt = "2027-01-15T08:00:00.000Z",
+): LocalReviewRequestHead => ({
   requestId,
   threadId,
   threadTitle,
-  startedAt: "2027-01-15T08:00:00.000Z",
+  requestTitle,
+  startedAt,
   endedAt: "2027-01-15T08:05:00.000Z",
   runCount: 2,
   origin: "user",
@@ -77,7 +83,7 @@ const detail = (): LocalReviewGetResult => ({
     {
       repo: "/u/t3code-cn",
       path: "src/a.ts",
-      sources: ["output", "child"],
+      sources: ["checkpoint", "output", "child"],
       commits: ["c".repeat(40)],
       state: { kind: "committed", hash: "c".repeat(40) },
     },
@@ -113,15 +119,25 @@ const detail = (): LocalReviewGetResult => ({
 });
 
 it("lists requests, shows the files of the selected one and a file's diff", async () => {
-  mocks.heads = [head("request-1", "插件线程"), head("request-2", "另一条线程")];
+  mocks.heads = [
+    head("request-1", "插件线程", "应用栏改成直白的来源标签", "2027-01-15T08:07:00.000Z"),
+    head("request-2", "插件线程", "先看一下列表怎么分", "2027-01-15T06:30:00.000Z"),
+  ];
   mocks.detail = detail();
   await using screen = await render(
     <LocalReviewPage environmentId={environmentId} threadId={undefined} />,
     { router: "/" },
   );
-  await expect.element(page.getByText("插件线程")).toBeVisible();
+  await expect.element(page.getByText("插件线程", { exact: true }).first()).toBeVisible();
+  await expect.element(page.getByText("应用栏改成直白的来源标签")).toBeVisible();
+  await expect.element(page.getByText("先看一下列表怎么分")).toBeVisible();
+  await expect.element(page.getByText(/^01-15 \d\d:07$/)).toBeVisible();
   await expect.element(page.getByText(/已识别 2 个文件/)).toBeVisible();
   await expect.element(page.getByText("现仍未提交")).toBeVisible();
+  await expect.element(page.getByText("本次提交").first()).toBeVisible();
+  await expect.element(page.getByText("总仓快照").first()).toBeVisible();
+  await userEvent.hover(page.getByText("总仓快照").first());
+  await expect.element(page.getByText(/每轮结束时对总仓工作区拍的快照/).last()).toBeVisible();
   await expect.element(page.getByText("/u/.local/tmp/plan.html")).toBeVisible();
 
   await userEvent.click(page.getByText("src/a.ts"));

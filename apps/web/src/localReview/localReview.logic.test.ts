@@ -1,12 +1,19 @@
-import type { LocalReviewCommit, LocalReviewFile } from "@t3tools/contracts";
+import type {
+  LocalReviewCommit,
+  LocalReviewFile,
+  LocalReviewRequestHead,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   commitsOfRepo,
   describeFileState,
-  describeSources,
   fileDiffTargets,
+  formatRequestTime,
   groupFilesByRepo,
+  groupRequestsByThread,
+  requestHeadline,
+  sourceLabel,
 } from "./localReview.logic";
 
 const file = (overrides: Partial<LocalReviewFile>): LocalReviewFile => ({
@@ -64,11 +71,52 @@ describe("localReview.logic", () => {
       "现已提交到 1234567",
     );
     expect(describeFileState(file({}))).toBeNull();
-    expect(describeSources(file({ sources: ["checkpoint", "child"] }))).toBe("检查点、子会话");
+    expect(sourceLabel("checkpoint")).toBe("总仓快照");
+    expect(sourceLabel("fileChange")).toBe("编辑记录");
+    expect(sourceLabel("output")).toBe("本次提交");
     expect(
       commitsOfRepo([commit("b", 2), commit("a", 1), commit("z", 0, "/u/other")], "/u/a").map(
         (c) => c.hash,
       ),
     ).toEqual(["a", "b"]);
+  });
+
+  it("groups requests by thread, newest first, and writes headlines", () => {
+    const head = (
+      requestId: string,
+      threadId: string,
+      startedAt: string,
+      requestTitle: string,
+      origin: "user" | "agent" = "user",
+    ): LocalReviewRequestHead =>
+      ({
+        requestId,
+        threadId,
+        threadTitle: `线程 ${threadId}`,
+        requestTitle,
+        startedAt,
+        endedAt: startedAt,
+        runCount: 1,
+        origin,
+        childCount: 0,
+        fileChangeCount: 1,
+        commitCommandCount: 0,
+      }) as LocalReviewRequestHead;
+    const groups = groupRequestsByThread([
+      head("a1", "A", "2027-01-15T01:00:00.000Z", "早"),
+      head("b1", "B", "2027-01-15T05:00:00.000Z", "乙"),
+      head("a2", "A", "2027-01-15T07:00:00.000Z", "晚"),
+    ]);
+    expect(groups.map((g) => [g.threadId, g.requests.map((r) => r.requestId)])).toEqual([
+      ["A", ["a2", "a1"]],
+      ["B", ["b1"]],
+    ]);
+    expect(requestHeadline(head("x", "A", "2027-01-15T01:00:00.000Z", "做点事", "agent"))).toBe(
+      "Agent 发起 · 做点事",
+    );
+    expect(requestHeadline(head("x", "A", "2027-01-15T01:00:00.000Z", ""))).toBe(
+      "（没有文字的请求）",
+    );
+    expect(formatRequestTime("2027-01-15T01:07:00.000Z")).toMatch(/^\d\d-\d\d \d\d:07$/);
   });
 });

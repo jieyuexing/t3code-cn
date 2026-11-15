@@ -8,10 +8,10 @@ import type {
 import { ArrowLeftIcon } from "lucide-react";
 import { useState } from "react";
 
-import { RelativeTime } from "../components/RelativeTime";
 import { Button } from "../components/ui/button";
 import { MiddleTruncate } from "../components/ui/middle-truncate";
 import { SidebarInset } from "../components/ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -29,11 +29,17 @@ import {
   EMPTY_REQUEST_TEXT,
   LOCAL_REVIEW_DAYS,
   SCOPE_NOTES,
-  describeFileState,
-  describeSources,
-  groupFilesByRepo,
+  SOURCE_HINTS,
+  SOURCE_LAYERS,
+  SOURCE_LEGEND_TITLE,
   commitsOfRepo,
+  describeFileState,
+  formatRequestTime,
+  groupFilesByRepo,
+  groupRequestsByThread,
+  requestHeadline,
   shortHash,
+  sourceLabel,
 } from "./localReview.logic";
 import { localReviewEnvironment } from "./localReviewState";
 
@@ -56,10 +62,9 @@ function RequestRow({
         selected ? "bg-accent" : "hover:bg-accent/50",
       )}
     >
-      <span className="truncate text-sm font-medium">{head.threadTitle || "未命名线程"}</span>
+      <span className="truncate text-sm font-medium">{requestHeadline(head)}</span>
       <span className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-        <RelativeTime timestamp={head.startedAt} />
-        {head.origin === "agent" ? <span>Agent 发起</span> : null}
+        <span className="tabular-nums">{formatRequestTime(head.startedAt)}</span>
         {head.runCount > 1 ? <span>{head.runCount} 轮</span> : null}
         {head.childCount > 0 ? <span>子会话 {head.childCount}</span> : null}
         <span>
@@ -74,7 +79,16 @@ function ScopeNotes({ detail }: { detail: LocalReviewGetResult }) {
   return (
     <details className="text-xs text-muted-foreground">
       <summary className="cursor-pointer select-none">统计范围</summary>
-      <ul className="mt-1 flex list-disc flex-col gap-0.5 pl-4">
+      <p className="mt-1">{SOURCE_LEGEND_TITLE}：</p>
+      <ul className="mt-0.5 flex list-disc flex-col gap-0.5 pl-4">
+        {SOURCE_LAYERS.map((source) => (
+          <li key={source}>
+            {sourceLabel(source)}：{SOURCE_HINTS[source]}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1">可能看不到或看错的情形：</p>
+      <ul className="mt-0.5 flex list-disc flex-col gap-0.5 pl-4">
         {SCOPE_NOTES.map((note) => (
           <li key={note}>{note}</li>
         ))}
@@ -104,7 +118,22 @@ function FileRow({ file, onSelect }: { file: LocalReviewFile; onSelect: () => vo
         <span className="min-w-0 flex-1 font-mono">
           <MiddleTruncate value={file.path} />
         </span>
-        <span className="shrink-0 text-muted-foreground">{describeSources(file)}</span>
+        <span className="flex shrink-0 items-center gap-1">
+          {file.sources.map((source) => (
+            <Tooltip key={source}>
+              <TooltipTrigger
+                render={
+                  <span className="rounded-sm bg-muted px-1.5 py-px text-2xs text-muted-foreground" />
+                }
+              >
+                {sourceLabel(source)}
+              </TooltipTrigger>
+              <TooltipPopup side="top" className="max-w-72">
+                {SOURCE_HINTS[source]}
+              </TooltipPopup>
+            </Tooltip>
+          ))}
+        </span>
         {state === null ? null : <span className="shrink-0 text-muted-foreground">{state}</span>}
       </button>
     </li>
@@ -244,7 +273,8 @@ export function LocalReviewPage({
         }),
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const requests = list.data?.requests ?? [];
+  const groups = groupRequestsByThread(list.data?.requests ?? []);
+  const requests = groups.flatMap((group) => group.requests);
   const selected = requests.find((r) => r.requestId === selectedId) ?? requests[0];
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -275,13 +305,20 @@ export function LocalReviewPage({
             ) : requests.length === 0 ? (
               <p className="px-2.5 text-sm text-muted-foreground">{EMPTY_LIST_TEXT}</p>
             ) : (
-              requests.map((head) => (
-                <RequestRow
-                  key={head.requestId}
-                  head={head}
-                  selected={head.requestId === selected?.requestId}
-                  onSelect={() => setSelectedId(head.requestId)}
-                />
+              groups.map((group) => (
+                <section key={group.threadId} className="flex flex-col gap-0.5 pt-1">
+                  <p className="truncate px-2.5 text-xs font-medium text-muted-foreground">
+                    {group.threadTitle || "未命名线程"}
+                  </p>
+                  {group.requests.map((head) => (
+                    <RequestRow
+                      key={head.requestId}
+                      head={head}
+                      selected={head.requestId === selected?.requestId}
+                      onSelect={() => setSelectedId(head.requestId)}
+                    />
+                  ))}
+                </section>
               ))
             )}
           </nav>

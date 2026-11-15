@@ -23,6 +23,7 @@ export interface RequestHead {
   readonly requestId: string;
   readonly threadId: string;
   readonly threadTitle: string;
+  readonly requestTitle: string;
   readonly startedAt: number;
   readonly endedAt: number;
   readonly runCount: number;
@@ -59,13 +60,25 @@ interface Signal {
   commits: number;
 }
 
+/** Signals of finished runs and of child threads that have not changed never change again. */
+export type SignalCache = Map<string, Signal>;
+
 async function readSignals(
   query: Query,
   column: "run_id" | "thread_id",
   keys: ReadonlyArray<string>,
+  cache: SignalCache,
+  stampOf: (key: string) => string | null,
 ) {
   const signals = new Map<string, Signal>();
-  for (const part of chunks(keys)) {
+  const missing: string[] = [];
+  for (const key of keys) {
+    const stamp = stampOf(key);
+    const hit = stamp === null ? undefined : cache.get(`${column}|${key}|${stamp}`);
+    if (hit === undefined) missing.push(key);
+    else signals.set(key, hit);
+  }
+  for (const part of chunks(missing)) {
     const rows = await query(
       `SELECT ${column} AS k,
           SUM(type = 'file_change') AS file_changes,
@@ -81,11 +94,22 @@ async function readSignals(
         commits: Number(row.commits ?? 0),
       });
     }
+    for (const key of part) {
+      const signal = signals.get(key) ?? { fileChanges: 0, commits: 0 };
+      signals.set(key, signal);
+      const stamp = stampOf(key);
+      if (stamp !== null) cache.set(`${column}|${key}|${stamp}`, signal);
+    }
   }
   return signals;
 }
 
-export async function listRequests(query: Query, input: ListInput, nowMs: number) {
+export async function listRequests(
+  query: Query,
+  input: ListInput,
+  nowMs: number,
+  cache: SignalCache = new Map(),
+) {
   const days = input.days ?? DEFAULT_DAYS;
   const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
   const since = DateTime.formatIso(DateTime.makeUnsafe(nowMs - days * DAY_MS));
@@ -105,7 +129,12 @@ export async function listRequests(query: Query, input: ListInput, nowMs: number
   const requests = [...byThread].flatMap(([, runs]) => groupRequests(runs));
 
   const allRunIds = requests.flatMap((r) => r.runIds);
-  const runSignals = await readSignals(query, "run_id", allRunIds);
+  const finished = new Set(
+    rows.filter((row) => row.completed_at !== null).map((row) => String(row.run_id)),
+  );
+  const runSignals = await readSignals(query, "run_id", allRunIds, cache, (id) =>
+    finished.has(id) ? "done" : null,
+  );
   const subagentRows = [];
   for (const part of chunks([...byThread.keys()])) {
     subagentRows.push(
@@ -158,9 +187,23 @@ export async function listRequests(query: Query, input: ListInput, nowMs: number
       }
     }
   }
-  const childSignals = await readSignals(query, "thread_id", [
-    ...new Set([...requestChildren.values()].flatMap((s) => [...s])),
-  ]);
+  const childIds = [...new Set([...requestChildren.values()].flatMap((s) => [...s]))];
+  const updated = new Map<string, string>();
+  for (const part of chunks(childIds)) {
+    for (const row of await query(
+      `SELECT thread_id, updated_at FROM orchestration_v2_projection_threads WHERE thread_id IN (${marks(part)})`,
+      part,
+    )) {
+      updated.set(String(row.thread_id), String(row.updated_at));
+    }
+  }
+  const childSignals = await readSignals(
+    query,
+    "thread_id",
+    childIds,
+    cache,
+    (id) => updated.get(id) ?? null,
+  );
 
   const heads: RequestHead[] = requests.map((request) => {
     let fileChanges = 0;
@@ -178,6 +221,7 @@ export async function listRequests(query: Query, input: ListInput, nowMs: number
       requestId: request.id,
       threadId: request.threadId,
       threadTitle: titles.get(request.threadId) ?? "",
+      requestTitle: request.title,
       startedAt: request.startedAt,
       endedAt: request.endedAt,
       runCount: request.runIds.length,
@@ -223,6 +267,7 @@ export function headOf(snapshot: Snapshot, request: Request, threadTitle: string
     requestId: request.id,
     threadId: request.threadId,
     threadTitle,
+    requestTitle: request.title,
     startedAt: request.startedAt,
     endedAt: request.endedAt,
     runCount: request.runIds.length,

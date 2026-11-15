@@ -10,6 +10,7 @@ export interface SnapshotRun {
   readonly ordinal: number;
   readonly requestedAt: number;
   readonly completedAt: number | null;
+  readonly messageText: string;
   readonly cause: RunCause;
 }
 
@@ -59,6 +60,7 @@ export interface Request {
   readonly threadId: string;
   readonly runIds: ReadonlyArray<string>;
   readonly origin: "user" | "agent";
+  readonly title: string;
   readonly startedAt: number;
   readonly endedAt: number;
   readonly running: boolean;

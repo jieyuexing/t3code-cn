@@ -54,6 +54,7 @@ const request: Request = {
   threadId: "T",
   runIds: ["T:1"],
   origin: "user",
+  title: "",
   startedAt: T0 * 1000,
   endedAt: (T0 + 60) * 1000,
   running: false,

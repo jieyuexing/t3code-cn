@@ -25,6 +25,7 @@ const marks = (values: ReadonlyArray<unknown>) => values.map(() => "?").join(","
 
 export const RUN_COLUMNS = `r.run_id, r.thread_id, r.ordinal, r.requested_at, r.completed_at,
         json_extract(m.payload_json, '$.createdBy') AS created_by,
+        substr(json_extract(m.payload_json, '$.text'), 1, 400) AS message_text,
         json_extract(m.payload_json, '$.delegatedCompletion.parentRunId') AS parent_run_id,
         json_type(m.payload_json, '$.notification') AS notification`;
 
@@ -38,6 +39,7 @@ export function toRun(row: Row): SnapshotRun {
     ordinal: Number(row.ordinal),
     requestedAt: millis(row.requested_at) ?? 0,
     completedAt: millis(row.completed_at),
+    messageText: text(row.message_text) ?? "",
     cause: {
       createdBy: text(row.created_by) ?? "user",
       delegatedParentRunId: text(row.parent_run_id),
