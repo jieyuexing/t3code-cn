@@ -39,6 +39,7 @@ import { ThreadDetailsThreadPrRows } from "./ThreadDetailsPrRows";
 import { cn } from "../../lib/utils";
 import { SlidersHorizontalIcon } from "lucide-react";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
+import { ThreadLocalReviewRow } from "../../localReview/ThreadLocalReviewRow";
 import { ThreadPlanSection } from "../../pluginHost/threadPlan/ThreadPlanSection";
 import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
@@ -183,6 +184,9 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             <div className="group/details-items">
               {!props.draftId && visible.plan ? (
                 <ThreadPlanSection threadRef={activeThreadRef} density={density} />
+              ) : null}
+              {!props.draftId && visible.changes ? (
+                <ThreadLocalReviewRow threadRef={activeThreadRef} />
               ) : null}
               {show.environment || show.openIn || show.scripts ? (
                 <ThreadDetailsSection
