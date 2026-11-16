@@ -36,6 +36,7 @@ import {
   ALL_REPOS,
   PAGE_SIZE,
   commitBody,
+  filesFromPatch,
   fileStatusLabel,
   isMerge,
   listSelections,
@@ -189,7 +190,10 @@ function Detail({
       },
     }),
   );
-  const files = query.data?.sources[0]?.files;
+  const source = query.data?.sources[0];
+  const partial = query.data !== null && source?.files === undefined;
+  const files =
+    query.data === null ? undefined : (source?.files ?? filesFromPatch(source?.diff ?? ""));
   const body = commit === undefined ? "" : commitBody(commit);
   return (
     <div className="flex flex-col gap-3">
@@ -229,6 +233,11 @@ function Detail({
             <span className="font-normal text-muted-foreground"> · 与第一父提交比较</span>
           ) : null}
         </h3>
+        {partial && source !== undefined ? (
+          <p className="px-2 text-xs text-muted-foreground">
+            未跟踪文件太多或太大，清单只含已跟踪文件的改动。
+          </p>
+        ) : null}
         {files === undefined ? (
           <p
             className={cn(
@@ -262,6 +271,7 @@ export function LocalReviewPage({ environmentId }: { environmentId: EnvironmentI
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [kept, setKept] = useState<LocalReviewLogResult | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [dirtyOpen, setDirtyOpen] = useState(false);
   const scope = repo === ALL_REPOS ? {} : { repo };
   const query = useEnvironmentQuery(
     environmentId === null
@@ -271,12 +281,13 @@ export function LocalReviewPage({ environmentId }: { environmentId: EnvironmentI
           input: { part: "commits", limit, ...scope },
         }),
   );
+  const log = query.data ?? kept;
+  // Untracked scans are slow; start them once the first commits are on screen.
   const dirtyQuery = useEnvironmentQuery(
-    environmentId === null
+    environmentId === null || log === null
       ? null
       : localReviewEnvironment.log({ environmentId, input: { part: "dirty", ...scope } }),
   );
-  const log = query.data ?? kept;
   const dirty = dirtyQuery.data?.dirty ?? [];
   const repos: Repos = log?.repos ?? [];
   const selections = log === null ? [] : listSelections(dirty, log.commits);
@@ -350,19 +361,38 @@ export function LocalReviewPage({ environmentId }: { environmentId: EnvironmentI
               </p>
             ) : (
               <>
-                {dirty.map((entry) => (
-                  <RowButton
-                    key={entry.repo}
-                    selected={selection?.kind === "dirty" && selection.repo === entry.repo}
-                    onSelect={() =>
-                      setSelectedKey(selectionKey({ kind: "dirty", repo: entry.repo }))
-                    }
+                {dirty.length > 1 ? (
+                  <button
+                    type="button"
+                    aria-expanded={dirtyOpen}
+                    onClick={() => setDirtyOpen(!dirtyOpen)}
+                    className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-sm font-medium outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                   >
-                    <span className="truncate text-sm font-medium">
-                      未提交改动 · {repoLabel(repos, entry.repo)} · {entry.changeCount} 项
-                    </span>
-                  </RowButton>
-                ))}
+                    <ChevronRightIcon
+                      aria-hidden
+                      className={cn(
+                        "size-3 shrink-0 transition-transform",
+                        dirtyOpen && "rotate-90",
+                      )}
+                    />
+                    未提交改动 · {dirty.length} 个仓
+                  </button>
+                ) : null}
+                {dirty.length > 1 && !dirtyOpen
+                  ? null
+                  : dirty.map((entry) => (
+                      <RowButton
+                        key={entry.repo}
+                        selected={selection?.kind === "dirty" && selection.repo === entry.repo}
+                        onSelect={() =>
+                          setSelectedKey(selectionKey({ kind: "dirty", repo: entry.repo }))
+                        }
+                      >
+                        <span className="truncate text-sm font-medium">
+                          未提交改动 · {repoLabel(repos, entry.repo)} · {entry.changeCount} 项
+                        </span>
+                      </RowButton>
+                    ))}
                 {log.commits.map((entry) => (
                   <CommitRow
                     key={`${entry.repo}|${entry.hash}`}

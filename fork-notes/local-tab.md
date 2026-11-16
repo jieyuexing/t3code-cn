@@ -7,10 +7,10 @@ PR 页页头的来源切换（路由搜索参数 `source=local`）里的「本�
 - 合同：`packages/contracts/src/localReview.ts`，一个只读调用 `localReview.log`。入参 `part`（`commits` 或 `dirty`）、可选 `repo`（仓绝对路径，必须是发现到的仓）、可选 `limit`（默认 50，上限 1000）；结果带全部发现仓 `repos`、`commits`、`dirty`、`hasMore`。提交和未提交改动分两次取，是因为大仓里扫未跟踪文件要 1–5 秒，不能拖住提交首屏。
 - 服务端 `apps/server/src/localReview/`：
   - `gitFacts.ts`：仓库发现（从各项目的 `workspace_root` 起，跳过 `node_modules`、`.local`、`.state`、`dist`、`target`，深度 ≤7，至多 100 个仓）、各仓 `git log HEAD`、`git status`；git 并发上限 4。直接用 `node:child_process`，没走 Effect 进程层（文件头 `@effect-diagnostics nodeBuiltinImport:off`），原因是它是纯异步函数，测试不需要 Effect 运行时；上游若要求统一，改在 `LocalReviewService.ts` 里注入。
-  - `LocalReviewService.ts`：Effect 包装，读 `projection_projects` 取项目根，仓发现结果缓存 30 秒。
+  - `LocalReviewService.ts`：Effect 包装，读 `projection_projects` 取项目根，仓发现结果缓存 30 秒（并发请求共用一次发现）；提交与未提交改动各用一个 git 队列，慢的未跟踪扫描不排在提交前面。
 - 提交列表：每个仓取 `limit+1` 条，按提交时间合并倒序后截 `limit` 条，多出来的说明还有下一页；「加载更多」把 `limit` 加 50 重取，页面在加载期间保留上一页。每行带标题、仓名（全部仓时）、短号、相对时间、作者、合并标记、指向该提交的分支／标签名。
-- 未提交改动：`git status --untracked-files=normal` 的条目数（未跟踪目录算一项，列全部文件在大仓里要 5 秒以上），有改动的仓各一行置顶。
-- 提交详情：说明正文、全号、作者、时间、父提交；文件清单与增删行数来自 `review.getDiffPreview`（`metadataOnly`，合并提交按第一父提交比较，未提交改动是工作区相对 `HEAD`，含未跟踪文件）；点文件展开 `review.diffFilePatch` 的差异，渲染用自带的 `FileDiff`。
+- 未提交改动：`git status --untracked-files=normal` 的条目数（未跟踪目录算一项，列全部文件在大仓里要 5 秒以上）。页面等第一批提交出来后才请求它；有改动的仓不止一个时，列表最上方只有一行「未提交改动 · N 个仓」，点开才列各仓；默认选中第一条提交，不被它抢走。
+- 提交详情：说明正文、全号、作者、时间、父提交；文件清单与增删行数来自 `review.getDiffPreview`（`metadataOnly`，合并提交按第一父提交比较，未提交改动是工作区相对 `HEAD`，含未跟踪文件）；点文件展开 `review.diffFilePatch` 的差异，渲染用自带的 `FileDiff`。未跟踪文件超过 5000 个或太大时 `review.getDiffPreview` 不返回清单，页面改从已跟踪文件的差异文本里取文件名并注明。该接口读未提交改动时用临时 index 加 `--intent-to-add`，不写仓里的对象与 index。
 - 网页 `apps/web/src/localReview/`：`LocalReviewPage.tsx`（页面）、`LocalReviewDiff.tsx`（单文件差异）、`LocalReviewSourceSwitch.tsx`（来源切换）、`LocalReviewRoute.tsx`（`source !== "local"` 时回到原 `PullRequestsPage`）、`localReview.logic.ts`、`localReviewState.ts`。公司仓（`projects/etech` 下）照常列出。
 - 差异读取受 `ReviewService` 的目录白名单限制：只有项目根之内的仓能看差异，仓发现正是从项目根起，所以一致。
 

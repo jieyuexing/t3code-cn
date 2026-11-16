@@ -35,12 +35,12 @@ export function listSelections(
   commits: ReadonlyArray<LocalReviewCommit>,
 ): ReadonlyArray<Selection> {
   return [
-    ...dirty.map((entry) => ({ kind: "dirty" as const, repo: entry.repo })),
     ...commits.map((commit) => ({
       kind: "commit" as const,
       repo: commit.repo,
       hash: commit.hash,
     })),
+    ...dirty.map((entry) => ({ kind: "dirty" as const, repo: entry.repo })),
   ];
 }
 
@@ -62,3 +62,25 @@ const STATUS_LABELS: Readonly<Record<NonNullable<ReviewDiffFileStat["changeType"
 
 export const fileStatusLabel = (file: ReviewDiffFileStat) =>
   STATUS_LABELS[file.changeType ?? "change"];
+
+/** The diff's own file list, for a working tree whose untracked files were too many to list. */
+export function filesFromPatch(diff: string): ReadonlyArray<ReviewDiffFileStat> {
+  return diff
+    .split(/^diff --git /m)
+    .slice(1)
+    .flatMap((section) => {
+      const [header = "", ...lines] = section.split("\n");
+      const names = /^a\/(.+) b\/(.+)$/.exec(header);
+      if (names === null) return [];
+      const count = (sign: string) =>
+        lines.filter((line) => line.startsWith(sign) && !line.startsWith(sign.repeat(3))).length;
+      return [
+        {
+          path: names[2]!,
+          previousPath: names[1] === names[2] ? null : names[1]!,
+          additions: count("+"),
+          deletions: count("-"),
+        },
+      ];
+    });
+}

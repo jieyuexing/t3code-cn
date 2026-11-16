@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   log: null as null | ((input: LocalReviewLogInput) => LocalReviewLogResult),
   logInputs: [] as Array<LocalReviewLogInput>,
   previewInputs: [] as Array<unknown>,
-  files: [] as ReadonlyArray<ReviewDiffFileStat>,
+  files: [] as ReadonlyArray<ReviewDiffFileStat> | undefined,
 }));
 
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
@@ -44,7 +44,7 @@ vi.mock("../state/query", () => ({
       data = mocks.log?.(atom.args.input) ?? null;
     } else if (atom.kind === "preview") {
       mocks.previewInputs.push(atom.args.input);
-      data = { sources: [{ files: mocks.files }] };
+      data = { sources: [{ files: mocks.files, diff: PATCH }] };
     } else {
       data = { diff: PATCH };
     }
@@ -97,7 +97,10 @@ const file = (
   deletions: 1,
 });
 
-const dirtyList = [{ repo: "/u/projects/t3code-cn", changeCount: 4 }];
+const dirtyList = [
+  { repo: "/u/projects/t3code-cn", changeCount: 4 },
+  { repo: "/u", changeCount: 1 },
+];
 
 function serve(commits: ReadonlyArray<LocalReviewCommit>) {
   mocks.logInputs = [];
@@ -127,7 +130,9 @@ it("lists commits of all repos, narrows to one repo, shows a commit's files and 
   await using screen = await render(<LocalReviewPage environmentId={environmentId} />, {
     router: "/",
   });
-  await expect.element(page.getByText("未提交改动 · t3code-cn · 4 项")).toBeVisible();
+  await expect.element(page.getByText("未提交改动 · 2 个仓")).toBeVisible();
+  await expect.element(page.getByText("未提交改动 · t3code-cn · 4 项")).not.toBeInTheDocument();
+  await expect.element(page.getByRole("heading", { name: "feat: 履历页" })).toBeVisible();
   await expect.element(page.getByText("合并", { exact: true })).toBeVisible();
   await expect.element(page.getByText("main", { exact: true })).toBeVisible();
 
@@ -144,13 +149,19 @@ it("lists commits of all repos, narrows to one repo, shows a commit's files and 
   await userEvent.click(page.getByText("src/a.ts"));
   await expect.element(page.getByText("const changed = 1;")).toBeVisible();
 
+  await userEvent.click(page.getByText("未提交改动 · 2 个仓"));
+  mocks.files = undefined;
   await userEvent.click(page.getByText("未提交改动 · t3code-cn · 4 项"));
   await expect.element(page.getByText("工作区相对 HEAD，含未跟踪文件。")).toBeVisible();
+  await expect
+    .element(page.getByText("未跟踪文件太多或太大，清单只含已跟踪文件的改动。"))
+    .toBeVisible();
+  await expect.element(page.getByText("src/a.ts")).toBeVisible();
   expect(mocks.previewInputs.at(-1)).toMatchObject({ sourceKind: "working-tree" });
 
   await userEvent.click(page.getByRole("combobox", { name: "选择仓" }));
   await userEvent.click(page.getByRole("option", { name: "universe" }));
-  await expect.element(page.getByText("merge: 合并分支")).toBeVisible();
+  await expect.element(page.getByRole("heading", { name: "merge: 合并分支" })).toBeVisible();
   expect(mocks.logInputs).toContainEqual({ part: "commits", limit: 50, repo: "/u" });
   void screen;
 });
