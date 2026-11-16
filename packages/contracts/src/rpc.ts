@@ -162,7 +162,7 @@ import {
   ReviewDiffPreviewInput,
   ReviewDiffPreviewResult,
 } from "./review.ts";
-import { LocalReviewError, LocalReviewLogInput, LocalReviewLogResult } from "./localReview.ts";
+import { GitLogError, GitLogListInput, GitLogListResult } from "./gitLog.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import { OrchestrationSearchThreadsError } from "./threadSearch.ts";
 import {
@@ -478,7 +478,7 @@ export const WS_METHODS = {
   reviewGetBranchCommits: "review.getBranchCommits",
   reviewGetDiffPreview: "review.getDiffPreview",
   reviewGetDiffFileContents: "review.getDiffFileContents",
-  localReviewLog: "localReview.log",
+  gitLogList: "gitLog.list",
 
   terminalOpen: "terminal.open",
   terminalAttach: "terminal.attach",
@@ -1642,10 +1642,10 @@ const WsReviewGetDiffFileContentsRpc = Rpc.make(WS_METHODS.reviewGetDiffFileCont
   error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
 });
 
-const WsLocalReviewLogRpc = Rpc.make(WS_METHODS.localReviewLog, {
-  payload: LocalReviewLogInput,
-  success: LocalReviewLogResult,
-  error: Schema.Union([LocalReviewError, EnvironmentAuthorizationError]),
+const WsGitLogListRpc = Rpc.make(WS_METHODS.gitLogList, {
+  payload: GitLogListInput,
+  success: GitLogListResult,
+  error: Schema.Union([GitLogError, EnvironmentAuthorizationError]),
 });
 
 const WsTerminalOpenRpc = Rpc.make(WS_METHODS.terminalOpen, {
@@ -2286,7 +2286,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsReviewGetBranchCommitsRpc,
   WsReviewGetDiffPreviewRpc,
   WsReviewGetDiffFileContentsRpc,
-  WsLocalReviewLogRpc,
+  WsGitLogListRpc,
   WsTerminalOpenRpc,
   WsTerminalAttachRpc,
   WsTerminalObserveRpc,

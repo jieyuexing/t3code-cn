@@ -3,10 +3,10 @@ import { WS_METHODS } from "@t3tools/contracts";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 
-export const localReviewEnvironment = {
-  log: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "environment-data:local-review:log",
-    tag: WS_METHODS.localReviewLog,
+export const gitLogEnvironment = {
+  list: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "environment-data:git-log:list",
+    tag: WS_METHODS.gitLogList,
     staleTimeMs: 5_000,
   }),
 };

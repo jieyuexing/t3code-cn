@@ -2,15 +2,16 @@ import { FileDiff } from "@pierre/diffs/react";
 import type { EnvironmentId } from "@t3tools/contracts";
 
 import { DIFF_VIEW_UNSAFE_CSS } from "../components/diffs/StyledDiffCodeView";
+import { useClientSettings } from "../hooks/useSettings";
 import { useRenderedAppearance } from "../hooks/useTheme";
 import { getRenderablePatch, resolveDiffThemeName } from "../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting";
 import { useEnvironmentQuery } from "../state/query";
 import { reviewEnvironment } from "../state/review";
-import type { Selection } from "./localReview.logic";
 
 function PatchView({ patch }: { patch: string }) {
   const appearance = useRenderedAppearance();
+  const diffLayout = useClientSettings((settings) => settings.diffLayout);
   const renderable = getRenderablePatch(patch, "local-review");
   if (renderable === null)
     return <p className="px-3 py-2 text-xs text-muted-foreground">没有差异。</p>;
@@ -22,7 +23,7 @@ function PatchView({ patch }: { patch: string }) {
     );
   }
   const options = {
-    diffStyle: "unified" as const,
+    diffStyle: diffLayout === "split" ? ("split" as const) : ("unified" as const),
     lineDiffType: "none" as const,
     overflow: "scroll" as const,
     disableFileHeader: true,
@@ -40,30 +41,29 @@ function PatchView({ patch }: { patch: string }) {
   );
 }
 
-export function LocalReviewFileDiff({
+export function GitLogFileDiff({
   environmentId,
-  selection,
+  repo,
+  hash,
   path,
   previousPath,
 }: {
   environmentId: EnvironmentId;
-  selection: Selection;
+  repo: string;
+  hash: string;
   path: string;
   previousPath: string | null;
 }) {
-  const sourceKind = selection.kind === "commit" ? ("commit" as const) : ("working-tree" as const);
   const query = useEnvironmentQuery(
     reviewEnvironment.diffFilePatch({
       environmentId,
       input: {
         request: {
-          cwd: selection.repo,
-          ...(selection.kind === "commit"
-            ? { commitSha: selection.hash }
-            : { sourceKind: "working-tree" as const }),
-          file: { path, previousPath, sourceKind },
+          cwd: repo,
+          commitSha: hash,
+          file: { path, previousPath, sourceKind: "commit" },
         },
-        cacheKey: `local-review:${selection.repo}:${path}:${selection.kind === "commit" ? selection.hash : "working-tree"}`,
+        cacheKey: `git-log:${repo}:${path}:${hash}`,
       },
     }),
   );
