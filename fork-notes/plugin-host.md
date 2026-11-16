@@ -91,7 +91,7 @@ git diff --numstat v0.1.10-nightly.20261114.4709 HEAD -- <表内文件>   # 整�
 git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行挑出插件宿主的部分
 ```
 
-待你定格没有新增上游文件行。插入行数里含改行（一行删一行加）的，在“挂的是什么”里写明。合计 **143 行插入（其中 11 行是改行）**：插件宿主 77 行、应用栏 38 行（含 2 行改行）、详情卡计划区 6 行（其中 1 行改行）、网页引文 22 行（含 2 行改行，另 `PluginServiceCall.ts` 等宿主自有文件不计）；另有预算快照的 1 行数字、设置页路由新文件 5 行和生成的路由表 21 行。此前写的“75＋3”对不上，是漏计了 `McpHttpServer.ts` 把工具集 `export` 出来的改行、`DiffPanel.tsx` 少算 1 行。
+待你定格没有新增上游文件行。插入行数里含改行（一行删一行加）的，在“挂的是什么”里写明。合计 **150 行插入（其中 15 行是改行）**：插件宿主 77 行、应用栏 38 行（含 2 行改行）、详情卡计划区 6 行（其中 1 行改行）、网页引文 29 行（含 6 行改行，另 `PluginServiceCall.ts` 等宿主自有文件不计）；另有预算快照的 1 行数字、设置页路由新文件 5 行和生成的路由表 21 行。此前写的“75＋3”对不上，是漏计了 `McpHttpServer.ts` 把工具集 `export` 出来的改行、`DiffPanel.tsx` 少算 1 行。
 
 | 文件                                                           | 插入              | 挂的是什么                                                                                           |
 | -------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
@@ -125,7 +125,7 @@ git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行�
 | `apps/web/src/components/composerContextPresentation.tsx`      | 8（含 1 处改行）  | 网页引文：输入框里的类型标签 “Quote”                                                                 |
 | `apps/web/src/components/chat/UserMessageContextChips.tsx`     | 6（含 1 处改行）  | 网页引文：消息里的类型标签 “Quote”                                                                   |
 | `packages/shared/package.json`                                 | 4                 | 导出 `composerQuote`                                                                                 |
-| `packages/shared/src/composerContextReferences.ts`             | 2                 | 网页引文：发给 Agent 的投影                                                                          |
+| `packages/shared/src/composerContextReferences.ts`             | 9（含 4 行改行）  | 网页引文：发给 Agent 的投影，引文对 Agent 显示为 `web-quote` 而不是评审评论                          |
 | `apps/web/src/appInit.tsx`                                     | 2                 | 启动时订阅快照                                                                                       |
 | `apps/web/src/components/settings/SettingsSidebarNav.tsx`      | 2                 | 设置页导航项                                                                                         |
 | `apps/web/src/components/settings/settingsSearch.ts`           | 4                 | 设置搜索                                                                                             |

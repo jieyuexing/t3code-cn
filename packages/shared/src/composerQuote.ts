@@ -19,6 +19,17 @@ export const quoteSectionId = (id: string) => `${QUOTE_SECTION_PREFIX}${id}`;
 export const isQuoteComment = (comment: { readonly sectionId: string }) =>
   comment.sectionId.startsWith(QUOTE_SECTION_PREFIX);
 
+/** The kind the agent sees, so a quote is not presented to it as a code review comment. */
+export const providerContextKind = (
+  kind: string,
+  record: { readonly kind: string; readonly sectionId?: string } | undefined,
+): string =>
+  record?.kind === "review-comment" &&
+  record.sectionId !== undefined &&
+  isQuoteComment({ sectionId: record.sectionId })
+    ? "web-quote"
+    : kind;
+
 /** What the agent reads in place of a review comment's file and range lines. */
 export function formatQuoteForProvider(
   record: Pick<ReviewCommentContextRecord, "sectionTitle" | "filePath" | "rangeLabel" | "diff">,

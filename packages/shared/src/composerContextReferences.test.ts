@@ -304,9 +304,10 @@ describe("provider projection", () => {
       ],
     });
     expect(projected).toContain(
-      '<context kind="review-comment" id="ctx_q">\ntitle: Post\nurl: https://example.com/post\nsource: 订阅 · Example\nquote:\n  first line\n  second line\n</context>',
+      '<context kind="web-quote" id="ctx_q">\ntitle: Post\nurl: https://example.com/post\nsource: 订阅 · Example\nquote:\n  first line\n  second line\n</context>',
     );
     expect(projected).not.toContain("file:");
+    expect(projected).toContain("[Web quote: Post; ref=ctx_q]");
   });
 
   it("emits no terminal lines when the captured range is inverted", () => {
