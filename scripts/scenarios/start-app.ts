@@ -133,6 +133,9 @@ const startApp = Effect.fn("startApp")(function* (input: {
   const checkout = yield* HostProcess.WorkingDirectory;
   const hostEnvironment = yield* HostProcess.Environment;
   yield* prepareHome(input.home);
+  // fork: showcase-cn 录制在服务端启动前往 home 里放插件登记与演示数据
+  const seed = hostEnvironment.T3_SCENARIO_HOME_SEED;
+  if (seed) yield* fs.copy(seed, input.home, { overwrite: true });
   const env = {
     ...hostEnvironment,
     PATH: `${path.join(input.home, "bin")}:${hostEnvironment.PATH ?? ""}`,
