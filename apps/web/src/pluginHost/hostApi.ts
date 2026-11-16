@@ -5,11 +5,13 @@ import type {
   ReviewDiffPreviewResult,
 } from "@t3tools/contracts";
 
+import { QUOTE_TEXT_MAX_CHARS, QUOTE_TITLE_MAX_CHARS } from "@t3tools/shared/composerQuote";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 import { joinPath } from "@t3tools/shared/fileLinks";
 import { isAbsolutePath } from "@t3tools/shared/path";
 
 import { BridgeCallError } from "./bridge";
+import type { PluginQuote } from "./composerQuote";
 import { openableUrl } from "./openUrl";
 import { clipReply, type PendingThread } from "./pendingThreads";
 
@@ -20,6 +22,7 @@ const THREADS_ORGANIZE_CAPABILITY = "host.threads-organize";
 const OPEN_URL_CAPABILITY = "host.open-url";
 const BROWSER_CAPABILITY = "host.browser";
 const OPEN_FILE_CAPABILITY = "host.open-file";
+const COMPOSER_CAPABILITY = "host.composer";
 
 export interface DiffTarget {
   readonly kind: "working-tree" | "commit";
@@ -60,6 +63,8 @@ export interface HostApiDeps {
   readonly workspaceRoot: string | null;
   /** Opens a workspace file, by its `/` path relative to the root, as a tab of the thread's file panel. */
   readonly openFile: (relativePath: string, line?: number) => void;
+  /** Puts a quote in the current thread's composer draft; never sends. */
+  readonly addToComposer: (quote: PluginQuote) => void;
 }
 
 export interface BrowserProfileSummary {
@@ -246,6 +251,32 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
     deps.openFile(relativePath, line);
     return null;
   },
+  // Only inserts into the draft; nothing here sends, and over-long text is refused rather than clipped.
+  "t3.addToComposer": async (deps, input) => {
+    const title = readText(input, "title");
+    const text = readText(input, "text");
+    const source = readOptionalText(input, "source");
+    if (title.length > QUOTE_TITLE_MAX_CHARS || (source?.length ?? 0) > QUOTE_TITLE_MAX_CHARS) {
+      throw invalid(`"title" and "source" can be at most ${QUOTE_TITLE_MAX_CHARS} characters.`);
+    }
+    if (text.length > QUOTE_TEXT_MAX_CHARS) {
+      throw invalid(`"text" can be at most ${QUOTE_TEXT_MAX_CHARS} characters.`);
+    }
+    let url: string | undefined;
+    try {
+      const raw = readOptionalText(input, "url");
+      url = raw === undefined ? undefined : openableUrl(raw);
+    } catch (error) {
+      throw invalid(error instanceof Error ? error.message : "The URL is not valid.");
+    }
+    deps.addToComposer({
+      title,
+      text,
+      ...(url === undefined ? {} : { url }),
+      ...(source === undefined ? {} : { source }),
+    });
+    return null;
+  },
   "browser.profiles": async (deps) =>
     deps.browserProfiles().map(({ id, name, kind }) => ({ id, name, kind })),
 };
@@ -262,11 +293,12 @@ const CAPABILITY_OF: Readonly<Record<string, string>> = {
   "browser.open": BROWSER_CAPABILITY,
   "browser.profiles": BROWSER_CAPABILITY,
   "t3.openFile": OPEN_FILE_CAPABILITY,
+  "t3.addToComposer": COMPOSER_CAPABILITY,
 };
 
 /**
  * What a view's `callHost` reaches: a read-only slice of T3's Git, the diff panel, the thread
- * list and replies, snoozing, opening a web page in the system browser or the thread's T3 browser, opening a workspace file in the thread's file panel, and the caller's own settings
+ * list and replies, snoozing, opening a web page in the system browser or the thread's T3 browser, opening a workspace file in the thread's file panel, adding a quote to the thread's composer, and the caller's own settings
  * page. A plugin that did not declare the capability a method needs is denied it, as is any
  * method not listed here.
  */

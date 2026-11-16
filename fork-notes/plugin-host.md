@@ -21,19 +21,20 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 
 页面发 `ready` 后收到一个 MessagePort，之后在端口上收发 JSON 字符串。
 
-| 方向        | `_tag`                                               | 说明                                                                           |
-| ----------- | ---------------------------------------------------- | ------------------------------------------------------------------------------ |
-| 页面 → 宿主 | `call` `callService` `callHost` `cancel` `pong`      | 带 `id`（`cancel` 指向要取消的 `id`）；单条消息上限 64K 字符，嵌套不超过 32 层 |
-| 宿主 → 页面 | `init` `context` `result` `error` `ping` `violation` | `init` 是 `{pluginId, viewId, title, context}`；`context` 是 `{context}`       |
+| 方向        | `_tag`                                                         | 说明                                                                                                |
+| ----------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 页面 → 宿主 | `call` `callService` `callHost` `cancel` `pong`                | 带 `id`（`cancel` 指向要取消的 `id`）；单条消息上限 64K 字符，嵌套不超过 32 层                      |
+| 宿主 → 页面 | `init` `context` `changed` `result` `error` `ping` `violation` | `init` 是 `{pluginId, viewId, title, context}`；`context` 是 `{context}`；`changed` 是 `{revision}` |
 
 - **`context`**：`{ cwd, focus, theme: { scheme, vars } }`。`cwd` 是当前线程的工作目录（有 worktree 取 worktree，否则取项目根，来自右面板收到的 `files.workspaceRoot`），没有线程时为 `null`。`scheme` 是 `light` 或 `dark`；`vars` 是 T3 页面根元素上各变量的计算值，缺的不发。`init` 带一份，之后 `cwd`、`focus` 或主题变了宿主再发一条 `{_tag:"context", context}`（内容没变不发）。主题靠监听根元素的 `class` 和 `style` 变化发现，主题编辑器的实时改色也会带来更新。宿主不用 `ui/notifications/host-context-changed`，那是页面服务路由给 `html_render` 页用的。
+- **`changed`**：插件数据变了，宿主推给该插件已挂载的视图，页面收到后重读，不轮询。触发点是“该插件提供的服务方法里没标 `readOnly` 的那些成功返回”（`PluginServiceCall.ts` 的 `forward`，不论调用方是 Agent 的 `plugin_call`、命令面板、别的插件还是视图自己的 `callService`），每次让快照里该插件条目的 `dataRevision` 加一；`PluginViewFrame` 记下挂载时的值，之后变了就发一条 `{_tag:"changed", revision}`，挂载时的那个值不发（页面自己会读最新的）。选这一点而不是“存储写入”：存储写入包括视图自己的抓取缓存分片、`reading` 之类的记录，一次刷新要连发几十条，视图每条都重读还会和自己的写入成环；写方法成功才算“用户或 Agent 改了数据”，条数少、含义清楚。代价是两处：插件的写方法必须如实不标 `readOnly`（漏标写方法就不会推，多标则只多推几次）；视图自己经处理器 `call` 做的写不推（它自己知道）。没有新增 RPC 与客户端权限项，搭在已有的快照订阅上，条目只在大于 0 时带这个字段。
 - **`focus`**：`{ path: "<绝对路径>", kind: "folder" | "file" } | null`，是本线程右侧面板里“最近一次激活的文件或目录标签”所指的位置，供版本控制类插件跟着文件面板走。取值在 `apps/web/src/pluginHost/focusSurface.ts` 与 `usePluginFocus.ts`，不动上游文件：
   - 只看 `files`（文件浏览器，指工作区根，`kind` 为 `folder`）和 `file` 标签（聊天附件不算）。`file` 标签的 `relativePath` 可以是目录（面板靠读文件失败才知道），所以 `kind` 由宿主用面板同一个读文件查询判定，`path_not_file` 为 `folder`，其余为 `file`；`relativePath` 是 `.` 时视为工作区根。路径与面板一致，用 `resolvePathLinkTarget(relativePath, cwd)`，所以可以是工作区之外的绝对路径。
   - “最近一次激活”：模块加载时订阅右面板 store，每次状态变化，若当前激活的是上述标签就记下它；激活的是别的标签（含插件自己的标签）时沿用记下的那个；记下的标签被关掉、或页面重载后没有记录时，取仍开着的最后一个上述标签（按标签顺序，近似“最近打开”）；一个都没有则为 `null`。`navigateFolder` 原地换标签时新标签 id 被激活，随之更新。记录在内存里，按线程分开。
   - `kind` 还没读出来时不发猜测：已发过则维持上一个答案，从没发过则视图暂不挂载（`init` 之前等它）。读失败（缺文件、无读权限）按 `file`。
   - 插件视图只在自己的标签可见时挂载，用户到文件标签再回来是新的 `init`；在线收到 `context` 变化的场景主要是被记住的标签在插件可见时被关掉。
 - **主题变量**：`--background` `--foreground` `--muted` `--card` `--popover` `--secondary` `--primary` `--accent` `--destructive` `--success` `--warning` `--info` `--code-background`，其中除 `--foreground` 外各项另有 `-foreground`；另有 `--border` `--input` `--ring` `--warning-surface` `--radius` `--font-sans` `--font-mono`。清单在 `apps/web/src/pluginHost/viewContext.ts`。
-- **`callHost`**：`{_tag:"callHost", id, method, input}`，宿主回 `result` 或 `error`。每个方法要求清单 `capabilities` 含对应能力（随同意摘要，改了要重新同意）：`t3.openPluginSettings` 要 `"settings"`；`threads.pending`、`threads.lastReply`、`threads.question`、`t3.openThread` 要 `"host.threads-read"`；`threads.snooze` 要 `"host.threads-organize"`（写，单独声明、单独同意）；`t3.openUrl` 要 `"host.open-url"`（只放行 `http:`／`https:`，走系统浏览器）；`browser.open`、`browser.profiles` 要 `"host.browser"`（把页面开成当前线程 T3 浏览器的一个标签，带登录态的配置档由 T3 浏览器管，见下表）；`t3.openFile` 要 `"host.open-file"`（在当前线程右侧文件面板开一个工作区内的文件）；其余都要 `"host.vcs-read"`。没声明、或 `method` 不在下表，一律回 `error`，`code` 为 `denied`。Git、差异与线程类调用用当前用户自己的连接代为发出，页面碰不到 T3 的 API（视图 CSP 不变）。结果超过 64K 回 `too-large`。
+- **`callHost`**：`{_tag:"callHost", id, method, input}`，宿主回 `result` 或 `error`。每个方法要求清单 `capabilities` 含对应能力（随同意摘要，改了要重新同意）：`t3.openPluginSettings` 要 `"settings"`；`threads.pending`、`threads.lastReply`、`threads.question`、`t3.openThread` 要 `"host.threads-read"`；`threads.snooze` 要 `"host.threads-organize"`（写，单独声明、单独同意）；`t3.openUrl` 要 `"host.open-url"`（只放行 `http:`／`https:`，走系统浏览器）；`browser.open`、`browser.profiles` 要 `"host.browser"`（把页面开成当前线程 T3 浏览器的一个标签，带登录态的配置档由 T3 浏览器管，见下表）；`t3.openFile` 要 `"host.open-file"`（在当前线程右侧文件面板开一个工作区内的文件）；`t3.addToComposer` 要 `"host.composer"`（把一段网页引文放进当前线程输入框草稿）；其余都要 `"host.vcs-read"`。没声明、或 `method` 不在下表，一律回 `error`，`code` 为 `denied`。Git、差异与线程类调用用当前用户自己的连接代为发出，页面碰不到 T3 的 API（视图 CSP 不变）。结果超过 64K 回 `too-large`。
 
 | `method`                  | `input`                                                          | 结果                                                                                                                                                                                                                                                                                                                |
 | ------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -51,6 +52,7 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 | `browser.open`            | `{url, profileId?, background?}`                                 | 在当前线程右侧面板的 T3 浏览器里开一个标签（与点聊天里的链接同一条路径 `openUrlInPreview`），返回 `null`；`url` 只放行 `http:`／`https:`，`profileId` 须在 `browser.profiles` 里，`background: true` 不切走当前标签；没有线程、没有预览权限或预览不可用回 `call-failed`                                             |
 | `browser.profiles`        | `{}`                                                             | `[{id, name, kind: "persistent"\|"incognito"}]`：T3 设置「浏览器」里的配置档，内置 `default`（持久）与 `incognito`                                                                                                                                                                                                  |
 | `t3.openFile`             | `{path, line?}`                                                  | 在当前线程右侧文件面板开一个文件标签（`useRightPanelStore.openFile`，与文件树点开同一条路径），返回 `null`；`path` 是绝对路径或相对工作区根的路径，规整（`.`、`..`）后必须在线程工作区之内，否则回 `invalid`（含工作区根本身与同前缀的兄弟目录）；`line` 是正整数，定位到该行；没有线程或没有工作区回 `call-failed` |
+| `t3.addToComposer`        | `{title, text, url?, source?}`                                   | 把一段引文放进**视图所在线程**的输入框草稿，只插入、绝不发送，返回 `null`；`title`、`source` 至多 200 字，`text` 至多 32000 字（超了回 `invalid`，不截断），`url` 只放行 `http:`／`https:`；没有线程（草稿线程、PR 页）或输入框没收下回 `call-failed`；见下「网页引文」                                             |
 
 只读依据：`vcs.refreshStatus` 的 `localOnly` 走 `VcsStatusBroadcaster.refreshStatus` 的本地分支（`VcsStatusBroadcaster.ts:536-545`），只重算本地状态、用缓存的远端部分，不 fetch、不读远端状态；Git 命令带 `GIT_OPTIONAL_LOCKS=0`（`GitVcsDriverCore.ts:983`）。一个例外：远端地址是 T3 认不出的主机时，读本地状态要识别托管平台，会按 `discovery.ts:378-405` 跑各平台 CLI 的认证探测（结果有缓存），T3 自己的界面读状态走的也是这条。差异预览的未跟踪文件用临时索引（复制真索引到临时文件，在副本里 `add --intent-to-add`，`GitVcsDriverCore.ts:3058-3189`），不写仓库。差异类调用的 `cwd` 由服务端 `assertWorkspaceBoundCwd` 限在已登记的工作区内。第一版不开放任何写接口（`git.runStackedAction`、`vcs.pull`、`switchRef` 等）。
 
@@ -61,6 +63,8 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 **剪贴板（`host.clipboard-write`）**：视图 iframe 保持 `sandbox="allow-scripts allow-forms"`（不加 `allow-same-origin`），清单声明 `host.clipboard-write` 的插件才在 iframe 上多一个 `allow="clipboard-write"`，让页面里的 `navigator.clipboard.writeText` 能写系统剪贴板；没声明的视图没有这个委派（权限策略拒绝，与之前相同），读剪贴板（`clipboard-read`）永远不委派。安全面：页面无同源身份，只能在用户手势下写文本，不能读，最坏是把一段文本放进剪贴板，所以按能力放行、进同意摘要，而不是对所有视图开放。浏览器自己的剪贴板权限仍然有效：Electron 桌面端与网页端对它的处理由各自的会话决定，没有在桌面端验证（见「未验证」）。逻辑在 `PluginViewFrame.tsx` 一处表达式，上游 0 行。
 
 `browser.open` 不改变 T3 的链接打开偏好：插件明确要求开在 T3 浏览器，所以不看 `browserLinkTarget` 设置；也不回退系统浏览器，插件要回退自己再调 `t3.openUrl`。逻辑在 `apps/web/src/pluginHost/hostApi.ts` 与 `useHostApi.ts`（复用 `~/browser/openFileInPreview.ts` 的 `openUrlInPreview` 与 `browserHistoryStore`），上游文件 0 行；没有新增 RPC，所以不涉及客户端权限表。
+
+**网页引文（`host.composer`）**：输入框里的一种“网页引文”项，插件视图（订阅、邮箱）经 `t3.addToComposer` 放进来，以后 T3 自带浏览器也用同一种，不做某个插件专用的类型。形态是复用输入框已有的评论项（`review-comment`）：草稿存放、持久化、发送与单条删除全走评论项原有的路，`sectionId` 以 `quote:` 起头标记它是引文（`packages/shared/src/composerQuote.ts`，`isQuoteComment`），字段对应 `sectionTitle`＝标题、`filePath`＝链接（没有链接时用标题）、`rangeLabel`＝来源、`diff`＝选段全文（`fenceLanguage` 为 `text`）。发给 Agent 时投影成 `title／url／source／quote` 四段而不是评论项的 `file／range／section`；输入框与消息里的标签显示 “Quote”，标题取 `sectionTitle`。不复用预览批注（`PreviewAnnotation*`）：它是点选页面元素的产物，没有来源字段，文字只能放 8000 字上限的 `comment`，预览里的标记与截图界面都不适用。草稿库对解析不出的线程会静默不收，所以宿主写入后回读确认。入口只有 `callHost`，未做插件自己的发送；逻辑在 `apps/web/src/pluginHost/composerQuote.ts`。
 
 ## 自有目录
 
@@ -87,7 +91,7 @@ git diff --numstat v0.1.10-nightly.20261114.4709 HEAD -- <表内文件>   # 整�
 git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行挑出插件宿主的部分
 ```
 
-待你定格没有新增上游文件行。插入行数里含改行（一行删一行加）的，在“挂的是什么”里写明。合计 **121 行插入（其中 9 行是改行）**：插件宿主 77 行、应用栏 38 行（含 2 行改行）、详情卡计划区 6 行（其中 1 行改行）；另有预算快照的 1 行数字、设置页路由新文件 5 行和生成的路由表 21 行。此前写的“75＋3”对不上，是漏计了 `McpHttpServer.ts` 把工具集 `export` 出来的改行、`DiffPanel.tsx` 少算 1 行。
+待你定格没有新增上游文件行。插入行数里含改行（一行删一行加）的，在“挂的是什么”里写明。合计 **150 行插入（其中 15 行是改行）**：插件宿主 77 行、应用栏 38 行（含 2 行改行）、详情卡计划区 6 行（其中 1 行改行）、网页引文 29 行（含 6 行改行，另 `PluginServiceCall.ts` 等宿主自有文件不计）；另有预算快照的 1 行数字、设置页路由新文件 5 行和生成的路由表 21 行。此前写的“75＋3”对不上，是漏计了 `McpHttpServer.ts` 把工具集 `export` 出来的改行、`DiffPanel.tsx` 少算 1 行。
 
 | 文件                                                           | 插入              | 挂的是什么                                                                                           |
 | -------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
@@ -117,6 +121,11 @@ git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行�
 | `apps/web/src/components/chat/threadDetailsItems.ts`           | 1                 | 详情卡条目 `plan`                                                                                    |
 | `apps/web/src/components/chat/ThreadDetailsPanel.tsx`          | 4                 | 详情卡顶部挂载 `ThreadPlanSection`                                                                   |
 | `apps/web/src/components/chat/ThreadDetailsCard.tsx`           | 改 1              | 计划步骤列表不计入档位高度                                                                           |
+| `apps/web/src/lib/composerContextRecords.ts`                   | 2                 | 网页引文：评论项标签取标题                                                                           |
+| `apps/web/src/components/composerContextPresentation.tsx`      | 8（含 1 处改行）  | 网页引文：输入框里的类型标签 “Quote”                                                                 |
+| `apps/web/src/components/chat/UserMessageContextChips.tsx`     | 6（含 1 处改行）  | 网页引文：消息里的类型标签 “Quote”                                                                   |
+| `packages/shared/package.json`                                 | 4                 | 导出 `composerQuote`                                                                                 |
+| `packages/shared/src/composerContextReferences.ts`             | 9（含 4 行改行）  | 网页引文：发给 Agent 的投影，引文对 Agent 显示为 `web-quote` 而不是评审评论                          |
 | `apps/web/src/appInit.tsx`                                     | 2                 | 启动时订阅快照                                                                                       |
 | `apps/web/src/components/settings/SettingsSidebarNav.tsx`      | 2                 | 设置页导航项                                                                                         |
 | `apps/web/src/components/settings/settingsSearch.ts`           | 4                 | 设置搜索                                                                                             |

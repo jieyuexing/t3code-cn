@@ -22,6 +22,8 @@ export interface Slot {
   problem: string | undefined;
   consent: "granted" | "required";
   generation: number;
+  /** Counts the successful write calls into this plugin's services; views reread when it moves. */
+  dataRevision: number;
   state: PluginHostState;
   /** Consecutive process failures since the plugin was activated or last ran stably. */
   failures: number;
@@ -52,6 +54,7 @@ export const makeSlot = (record: RegistryRecord): Slot => ({
   problem: undefined,
   consent: "required",
   generation: 0,
+  dataRevision: 0,
   state: { _tag: "idle" },
   failures: 0,
   running: undefined,

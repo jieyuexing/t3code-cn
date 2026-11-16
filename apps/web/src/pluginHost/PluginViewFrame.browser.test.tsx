@@ -254,6 +254,7 @@ const HOST_PAGE = `<!doctype html><title>host</title><script>
         send(3, "review.diffFileContents", { cwd: "/repo", sourceKind: "working-tree", file: { path: "big.txt" } });
       }
       if (body._tag === "context") report("context", JSON.stringify(body.context));
+      if (body._tag === "changed") report("changed", String(body.revision));
       if (body._tag === "result") report("result", body.id + ":" + JSON.stringify(body.value));
       if (body._tag === "error") report("error", body.id + ":" + body.code);
     };
@@ -281,6 +282,30 @@ it("gives the page the thread's cwd and the theme at init, and again when the cw
     expect(updates).toHaveLength(1);
     expect(JSON.parse(updates[0]!.slice(8)).cwd).toBe("/work/b");
   });
+});
+
+it("tells the page its plugin's data changed, once per new revision and not for the one it mounted with", async () => {
+  using observed = setup(HOST_PAGE);
+  const at = (dataRevision: number | undefined) => (
+    <PluginViewFrame {...frameProps} dataRevision={dataRevision} />
+  );
+  await using screen = await render(at(3), { router: false });
+  await vi.waitFor(() =>
+    expect(observed.seen.some((entry) => entry.startsWith("init:"))).toBe(true),
+  );
+  await screen.rerender(at(3));
+  await screen.rerender(at(4));
+  await vi.waitFor(() =>
+    expect(observed.seen.filter((e) => e.startsWith("changed:"))).toEqual(["changed:4"]),
+  );
+  await screen.rerender(at(4));
+  await screen.rerender(at(5));
+  await vi.waitFor(() =>
+    expect(observed.seen.filter((e) => e.startsWith("changed:"))).toEqual([
+      "changed:4",
+      "changed:5",
+    ]),
+  );
 });
 
 it("gives the page the file focus at init, and again only when the focus changes", async () => {

@@ -307,6 +307,10 @@
       "types": "./src/composerContextReferences.ts",
       "import": "./src/composerContextReferences.ts"
     },
+    "./composerQuote": {
+      "types": "./src/composerQuote.ts",
+      "import": "./src/composerQuote.ts"
+    },
     "./composerContextLegacy": {
       "types": "./src/composerContextLegacy.ts",
       "import": "./src/composerContextLegacy.ts"

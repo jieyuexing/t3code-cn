@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 
 import { expandAssistantCitationsForProvider } from "./assistantCitations.ts";
+import { formatQuoteForProvider, isQuoteComment, providerContextKind } from "./composerQuote.ts";
 import { replaceThreadLinks, threadLinkCandidates } from "./threadLinks.ts";
 
 const CONTEXT_PROTOCOL = "t3-context:";
@@ -226,13 +227,13 @@ export function replaceComposerContextReferences(
 const CONTEXT_ENVELOPE_TAG = "t3_context";
 const CONTEXT_ENTRY_TAG = "context";
 
-function kindDisplayName(kind: ComposerContextKind): string {
+function kindDisplayName(kind: string): string {
   const spaced = kind.replace(/-/g, " ");
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 function formatComposerContextProviderMarker(
-  kind: ComposerContextKind,
+  kind: string,
   label: string,
   contextId: ComposerContextId,
 ): string {
@@ -328,6 +329,7 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
       return lines.join("\n");
     }
     case "review-comment": {
+      if (isQuoteComment(record)) return formatQuoteForProvider(record);
       const lines = [
         `file: ${record.filePath}`,
         `range: ${record.rangeLabel} (${record.startIndex}-${record.endIndex})`,
@@ -382,7 +384,7 @@ function formatEnvelopeEntry(
   contextId: ComposerContextId,
   record: ComposerContextRecord | undefined,
 ): string {
-  const open = `<${CONTEXT_ENTRY_TAG} kind="${escapeAttribute(kind)}" id="${escapeAttribute(contextId)}"`;
+  const open = `<${CONTEXT_ENTRY_TAG} kind="${escapeAttribute(providerContextKind(kind, record))}" id="${escapeAttribute(contextId)}"`;
   if (!record) return `${open} unavailable="true"/>`;
   const body =
     "payload" in record
@@ -404,7 +406,10 @@ export function projectComposerContextForProvider(input: {
   const body = expandAssistantCitationsForProvider(
     replaceComposerContextReferences(input.text, (occurrence) =>
       formatComposerContextProviderMarker(
-        recordsById.get(occurrence.contextId)?.kind ?? occurrence.kind,
+        providerContextKind(
+          recordsById.get(occurrence.contextId)?.kind ?? occurrence.kind,
+          recordsById.get(occurrence.contextId),
+        ),
         occurrence.label,
         occurrence.contextId,
       ),

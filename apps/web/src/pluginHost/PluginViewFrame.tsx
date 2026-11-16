@@ -58,6 +58,8 @@ export function PluginViewFrame(props: {
   /** The file or folder the thread's file panel last stood on, shown to the page as its `context`. */
   readonly focus: PluginFocus | null;
   readonly threadRef: ScopedThreadRef | null;
+  /** The plugin's data revision from the snapshot; the page is told when it moves after mount. */
+  readonly dataRevision?: number | undefined;
   readonly onReload: () => void;
 }) {
   const {
@@ -70,6 +72,7 @@ export function PluginViewFrame(props: {
     cwd,
     focus,
     threadRef,
+    dataRevision,
     onReload,
   } = props;
   const call = useStableCallback(usePluginHostCall(environmentId));
@@ -78,12 +81,22 @@ export function PluginViewFrame(props: {
   );
   const context = usePluginViewContext(cwd, focus);
   const contextRef = useRef(context);
-  const bridgeRef = useRef<{ readonly pushContext: () => void } | null>(null);
+  const bridgeRef = useRef<{
+    readonly pushContext: () => void;
+    readonly pushChanged: (revision: number) => void;
+  } | null>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tells the page's open bridge that the thread's directory, its file focus or the theme changed
   useEffect(() => {
     contextRef.current = context;
     bridgeRef.current?.pushContext();
   }, [context]);
+  const seenRevision = useRef(dataRevision);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tells the page's open bridge that its plugin's data moved on, so it rereads instead of polling
+  useEffect(() => {
+    if (dataRevision === seenRevision.current) return;
+    seenRevision.current = dataRevision;
+    if (dataRevision !== undefined) bridgeRef.current?.pushChanged(dataRevision);
+  }, [dataRevision]);
   const connection = usePreparedConnection(environmentId);
   const httpBaseUrl = connection._tag === "Some" ? connection.value.httpBaseUrl : null;
   const [state, setState] = useState<FrameState>({ _tag: "loading" });
