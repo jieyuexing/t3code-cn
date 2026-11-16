@@ -8,7 +8,7 @@ export function LocalReviewSourceSwitch({ active }: { active: "pull-requests" | 
     void navigate({
       to: "/pull-requests",
       search: (previous) => {
-        const { source: _source, localThread: _localThread, ...rest } = previous;
+        const { source: _source, ...rest } = previous;
         const kept = {
           ...rest,
           involvement: rest.involvement ?? ("all" as const),

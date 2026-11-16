@@ -1,315 +1,143 @@
-// @effect-diagnostics nodeBuiltinImport:off
-// The attribution core runs without an Effect runtime so a replay script can drive it; the server wraps it.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off
+// Plain async code on node builtins: read-only git facts, no Effect runtime needed.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import type { CommitInfo, GitFacts, MainlineMatch, RepoRef } from "./types.ts";
+import type { LocalReviewCommit, LocalReviewRepo } from "@t3tools/contracts";
 
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".local", ".state", "dist", "target"]);
 const MAX_DISCOVERY_DEPTH = 7;
-const MAX_RANGE_COMMITS = 200;
-const MAX_MAINLINE_COMMITS = 300;
-const COMMIT_FORMAT = "%H%x09%ct%x09%P%x09%s";
-const WORKTREE_GITDIR = /^gitdir: (.+)\/\.git\/worktrees\/[^/]+\s*$/;
+const MAX_REPOS = 100;
+const FIELD = "\u001f";
+const RECORD = "\u001e";
+const LOG_FORMAT = ["%H", "%P", "%an", "%ct", "%D", "%s", "%B"].join("%x1f") + "%x1e";
 
-function parseCommits(output: string): ReadonlyArray<CommitInfo> {
-  return output
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const [hash = "", time = "0", parents = "", ...subject] = line.split("\t");
-      return {
-        hash,
-        time: Number(time),
-        parents: parents.split(" ").filter((p) => p.length > 0),
-        subject: subject.join("\t"),
-      };
+function parseRefs(decoration: string): ReadonlyArray<string> {
+  return decoration
+    .split(", ")
+    .map((ref) => ref.replace(/^HEAD -> /, "").replace(/^tag: /, ""))
+    .filter((ref) => ref.length > 0 && ref !== "HEAD");
+}
+
+function parseLog(repo: string, output: string): ReadonlyArray<LocalReviewCommit> {
+  const commits: LocalReviewCommit[] = [];
+  for (const record of output.split(RECORD)) {
+    const [hash = "", parents = "", author = "", time = "0", refs = "", subject = "", ...rest] =
+      record.replace(/^\n/, "").split(FIELD);
+    if (hash === "") continue;
+    commits.push({
+      repo,
+      hash,
+      parents: parents.split(" ").filter((parent) => parent.length > 0),
+      subject,
+      message: rest.join(FIELD).trim(),
+      author,
+      committedAt: new Date(Number(time) * 1000).toISOString(),
+      refs: parseRefs(refs),
     });
+  }
+  return commits;
 }
 
-export interface GitFactsWithHead extends GitFacts {
-  readonly headOf: (repo: string) => Promise<string>;
+function countChanges(output: string): number {
+  const entries = output.split("\0");
+  let count = 0;
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i]!;
+    if (entry.length < 4) continue;
+    count += 1;
+    if (entry[0] === "R" || entry[0] === "C") i += 1;
+  }
+  return count;
 }
 
-export function createGitFacts(options: {
-  readonly scanRoot: string;
-  readonly home: string;
-  readonly concurrency?: number;
-}): GitFactsWithHead {
-  let calls = 0;
+export function discoverRepos(roots: ReadonlyArray<string>): ReadonlyArray<LocalReviewRepo> {
+  const found = new Map<string, string>();
+  for (const root of roots) {
+    const walk = (dir: string, depth: number) => {
+      if (found.size >= MAX_REPOS) return;
+      let entries: NodeFS.Dirent[];
+      try {
+        entries = NodeFS.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      if (entries.some((entry) => entry.name === ".git") && !found.has(dir)) {
+        found.set(dir, dir === root ? NodePath.basename(root) : NodePath.relative(root, dir));
+      }
+      if (depth >= MAX_DISCOVERY_DEPTH) return;
+      for (const entry of entries) {
+        if (entry.isDirectory() && !SKIPPED_DIRECTORIES.has(entry.name) && entry.name !== ".git") {
+          walk(NodePath.join(dir, entry.name), depth + 1);
+        }
+      }
+    };
+    walk(root, 0);
+  }
+  return [...found]
+    .map(([path, name]) => ({ path, name }))
+    .toSorted((a, b) => a.name.localeCompare(b.name));
+}
+
+export function createGitHistory(options: { readonly concurrency?: number } = {}) {
   let running = 0;
   const waiting: Array<() => void> = [];
   const limit = options.concurrency ?? 4;
-  const acquire = async () => {
+  const git = async (cwd: string, args: ReadonlyArray<string>): Promise<string> => {
     if (running >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
     running += 1;
-  };
-  const release = () => {
-    running -= 1;
-    waiting.shift()?.();
-  };
-
-  const git = async (cwd: string, args: ReadonlyArray<string>, input?: string): Promise<string> => {
-    calls += 1;
-    await acquire();
     try {
       return await new Promise<string>((resolve) => {
-        const child = NodeChildProcess.execFile(
+        NodeChildProcess.execFile(
           "git",
           ["-C", cwd, ...args],
           {
-            maxBuffer: 256 * 1024 * 1024,
+            maxBuffer: 64 * 1024 * 1024,
             env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C" },
           },
           (_error, stdout) => resolve(stdout),
         );
-        child.stdin?.on("error", () => {});
-        child.stdin?.end(input ?? "");
       });
     } finally {
-      release();
+      running -= 1;
+      waiting.shift()?.();
     }
   };
 
-  const repoCache = new Map<string, RepoRef | null>();
-  const findRepo = (start: string): RepoRef | null => {
-    let dir = start;
-    const visited: string[] = [];
-    let result: RepoRef | null = null;
-    while (dir !== NodePath.dirname(dir)) {
-      const cached = repoCache.get(dir);
-      if (cached !== undefined) {
-        result = cached;
-        break;
-      }
-      visited.push(dir);
-      const dotGit = NodePath.join(dir, ".git");
-      let stat: NodeFS.Stats | null = null;
-      try {
-        stat = NodeFS.statSync(dotGit);
-      } catch {
-        stat = null;
-      }
-      if (stat !== null) {
-        let root = dir;
-        if (stat.isFile()) {
-          const match = WORKTREE_GITDIR.exec(NodeFS.readFileSync(dotGit, "utf8"));
-          if (match !== null) root = match[1]!;
-        }
-        result = { workDir: dir, root };
-        break;
-      }
-      dir = NodePath.dirname(dir);
-    }
-    for (const entry of visited) repoCache.set(entry, result);
-    return result;
-  };
-
-  const mainlineCache = new Map<
-    string,
-    { since: number; commits: ReadonlyArray<CommitInfo>; patchIds: ReadonlyMap<string, string> }
-  >();
-  const patchIdOf = async (repo: string, hash: string) => {
-    const diff = await git(repo, ["diff-tree", "-p", "--root", hash]);
-    const out = await git(repo, ["patch-id", "--stable"], diff);
-    return out.split(" ")[0] ?? "";
-  };
-  const mainline = async (repo: string, since: number) => {
-    const cached = mainlineCache.get(repo);
-    if (cached !== undefined && cached.since <= since) return cached;
-    const commits = parseCommits(
-      await git(repo, [
-        "log",
-        "--branches",
-        `--since=@${since}`,
-        `--max-count=${MAX_MAINLINE_COMMITS}`,
-        `--format=${COMMIT_FORMAT}`,
-      ]),
-    );
-    const patches = await git(repo, [
-      "log",
-      "--branches",
-      `--since=@${since}`,
-      `--max-count=${MAX_MAINLINE_COMMITS}`,
-      "-p",
-      "--format=commit %H",
-    ]);
-    const ids = await git(repo, ["patch-id", "--stable"], patches);
-    const patchIds = new Map<string, string>();
-    for (const line of ids.split("\n")) {
-      const [patchId, commit] = line.split(" ");
-      if (patchId !== undefined && commit !== undefined) patchIds.set(patchId, commit);
-    }
-    const entry = { since, commits, patchIds };
-    mainlineCache.set(repo, entry);
-    return entry;
-  };
-
-  return {
-    callCount: () => calls,
-
-    headOf: async (repo) => (await git(repo, ["rev-parse", "HEAD"])).trim(),
-
-    discoverRepos: async () => {
-      const found: string[] = [];
-      const walk = (dir: string, depth: number) => {
-        let entries: NodeFS.Dirent[];
-        try {
-          entries = NodeFS.readdirSync(dir, { withFileTypes: true });
-        } catch {
-          return;
-        }
-        if (entries.some((e) => e.name === ".git")) found.push(dir);
-        if (depth >= MAX_DISCOVERY_DEPTH) return;
-        for (const entry of entries) {
-          if (
-            entry.isDirectory() &&
-            !SKIPPED_DIRECTORIES.has(entry.name) &&
-            entry.name !== ".git"
-          ) {
-            walk(NodePath.join(dir, entry.name), depth + 1);
-          }
-        }
-      };
-      walk(options.scanRoot, 0);
-      return found;
-    },
-
-    repoOf: async (path) => {
-      const absolute = path.startsWith("~/") ? NodePath.join(options.home, path.slice(2)) : path;
-      let isDirectory = false;
-      try {
-        isDirectory = NodeFS.statSync(absolute).isDirectory();
-      } catch {
-        isDirectory = false;
-      }
-      return findRepo(isDirectory ? absolute : NodePath.dirname(absolute));
-    },
-
-    commitsInSpan: async (repo, sinceSec, untilSec) =>
-      parseCommits(
-        await git(repo, [
-          "log",
-          "--all",
-          `--since=@${Math.floor(sinceSec)}`,
-          `--until=@${Math.ceil(untilSec)}`,
-          `--format=${COMMIT_FORMAT}`,
-        ]),
-      ),
-
-    resolveCommits: async (repo, tokens) => {
-      const checked = await git(
-        repo,
-        ["cat-file", "--batch-check=%(objectname) %(objecttype)"],
-        `${tokens.join("\n")}\n`,
-      );
-      const hashes = checked
-        .split("\n")
-        .map((line) => line.split(" "))
-        .filter((parts) => parts.length === 2 && parts[1] === "commit")
-        .map((parts) => parts[0]!);
-      if (hashes.length === 0) return [];
-      return parseCommits(
-        await git(
-          repo,
-          ["log", "--no-walk=unsorted", "--stdin", `--format=${COMMIT_FORMAT}`],
-          `${hashes.join("\n")}\n`,
+  /** Newest `count` commits of the current HEAD per repo, merged by commit time. */
+  const commits = async (repos: ReadonlyArray<LocalReviewRepo>, count: number) => {
+    const perRepo = await Promise.all(
+      repos.map(async (repo) =>
+        parseLog(
+          repo.path,
+          await git(repo.path, [
+            "log",
+            "HEAD",
+            `--max-count=${count + 1}`,
+            `--format=${LOG_FORMAT}`,
+          ]),
         ),
-      );
-    },
-
-    commitsInRange: async (repo, from, to) =>
-      parseCommits(
-        await git(repo, [
-          "log",
-          `--max-count=${MAX_RANGE_COMMITS}`,
-          `--format=${COMMIT_FORMAT}`,
-          `${from}..${to}`,
-        ]),
       ),
-
-    changedFiles: async (repo, hash) =>
-      (
-        await git(repo, [
-          "log",
-          "-1",
-          "-m",
-          "--first-parent",
-          "--root",
-          "--name-only",
-          "-z",
-          "--format=",
-          hash,
-        ])
-      )
-        .split("\0")
-        .map((name) => name.replace(/^\n+/, ""))
-        .filter((name) => name.length > 0),
-
-    isReachable: async (repo, hash) =>
-      (
-        await git(repo, [
-          "for-each-ref",
-          "--count=1",
-          `--contains=${hash}`,
-          "refs/heads",
-          "refs/remotes",
-          "refs/tags",
-        ])
-      ).trim().length > 0,
-
-    mainlineMatch: async (repo, commit): Promise<MainlineMatch> => {
-      const since = commit.time - 60;
-      const { commits, patchIds } = await mainline(repo, since);
-      const own = await patchIdOf(repo, commit.hash);
-      const byPatchIdHash = own === "" ? undefined : patchIds.get(own);
-      return {
-        byPatchId:
-          byPatchIdHash === undefined || byPatchIdHash === commit.hash
-            ? null
-            : (commits.find((c) => c.hash === byPatchIdHash) ?? null),
-        sameTitle: commits.filter((c) => c.subject === commit.subject && c.hash !== commit.hash),
-      };
-    },
-
-    dirtyFiles: async (workDir) => {
-      const out = await git(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
-      const entries = out.split("\0");
-      const dirty = new Set<string>();
-      for (let i = 0; i < entries.length; i += 1) {
-        const entry = entries[i]!;
-        if (entry.length < 4) continue;
-        dirty.add(entry.slice(3));
-        if (entry[0] === "R" || entry[0] === "C") i += 1;
-      }
-      return dirty;
-    },
-
-    ignoredFiles: async (workDir, paths) => {
-      if (paths.length === 0) return new Set();
-      const out = await git(workDir, ["check-ignore", "--stdin", "-z"], `${paths.join("\0")}\0`);
-      return new Set(out.split("\0").filter((p) => p.length > 0));
-    },
-
-    lastCommitTouching: async (repo, sinceSec, paths) => {
-      if (paths.length === 0) return new Map();
-      const out = await git(repo, [
-        "log",
-        "--all",
-        `--since=@${Math.floor(sinceSec)}`,
-        "--name-only",
-        "--format=%x01%H",
-        "--",
-        ...paths,
-      ]);
-      const latest = new Map<string, string>();
-      for (const block of out.split("\u0001")) {
-        const [hash, ...names] = block.split("\n").filter((line) => line.length > 0);
-        if (hash === undefined) continue;
-        for (const name of names) if (!latest.has(name)) latest.set(name, hash);
-      }
-      return latest;
-    },
+    );
+    const merged = perRepo
+      .flat()
+      .toSorted((a, b) => Date.parse(b.committedAt) - Date.parse(a.committedAt));
+    return { commits: merged.slice(0, count), hasMore: merged.length > count };
   };
+
+  // Untracked directories count once: listing every untracked file takes seconds in a big repo.
+  const dirty = async (repos: ReadonlyArray<LocalReviewRepo>) => {
+    const counts = await Promise.all(
+      repos.map(async (repo) => ({
+        repo: repo.path,
+        changeCount: countChanges(
+          await git(repo.path, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]),
+        ),
+      })),
+    );
+    return counts.filter((entry) => entry.changeCount > 0);
+  };
+
+  return { commits, dirty };
 }

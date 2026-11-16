@@ -1,8 +1,9 @@
 import {
   EnvironmentId,
-  ThreadId,
-  type LocalReviewGetResult,
-  type LocalReviewRequestHead,
+  type LocalReviewCommit,
+  type LocalReviewLogInput,
+  type LocalReviewLogResult,
+  type ReviewDiffFileStat,
 } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
@@ -13,8 +14,10 @@ import { LocalReviewSourceSwitch } from "./LocalReviewSourceSwitch";
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
-  heads: [] as ReadonlyArray<unknown>,
-  detail: null as unknown,
+  log: null as null | ((input: LocalReviewLogInput) => LocalReviewLogResult),
+  logInputs: [] as Array<LocalReviewLogInput>,
+  previewInputs: [] as Array<unknown>,
+  files: [] as ReadonlyArray<ReviewDiffFileStat>,
 }));
 
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
@@ -23,25 +26,30 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 }));
 vi.mock("./localReviewState", () => ({
   localReviewEnvironment: {
-    list: (args: unknown) => ({ kind: "list", args }),
-    get: (args: unknown) => ({ kind: "get", args }),
+    log: (args: { input: LocalReviewLogInput }) => ({ kind: "log", args }),
   },
 }));
 vi.mock("../state/review", () => ({
-  reviewEnvironment: { diffFilePatch: (args: unknown) => ({ kind: "patch", args }) },
+  reviewEnvironment: {
+    diffPreview: (args: { input: unknown }) => ({ kind: "preview", args }),
+    diffFilePatch: (args: unknown) => ({ kind: "patch", args }),
+  },
 }));
 vi.mock("../state/query", () => ({
-  useEnvironmentQuery: (atom: { kind: string } | null) => ({
-    data:
-      atom === null
-        ? null
-        : atom.kind === "list"
-          ? { requests: mocks.heads, nextCursor: null }
-          : atom.kind === "get"
-            ? mocks.detail
-            : { diff: PATCH },
-    error: null,
-  }),
+  useEnvironmentQuery: (atom: { kind: string; args: { input: never } } | null) => {
+    if (atom === null) return { data: null, error: null, isPending: false, refresh: () => {} };
+    let data: unknown = null;
+    if (atom.kind === "log") {
+      mocks.logInputs.push(atom.args.input);
+      data = mocks.log?.(atom.args.input) ?? null;
+    } else if (atom.kind === "preview") {
+      mocks.previewInputs.push(atom.args.input);
+      data = { sources: [{ files: mocks.files }] };
+    } else {
+      data = { diff: PATCH };
+    }
+    return { data, error: null, isPending: false, refresh: () => {} };
+  },
 }));
 
 const PATCH = [
@@ -56,109 +64,122 @@ const PATCH = [
 ].join("\n");
 
 const environmentId = EnvironmentId.make("environment");
-const threadId = ThreadId.make("thread-a");
+const REPOS = [
+  { path: "/u", name: "universe" },
+  { path: "/u/projects/t3code-cn", name: "projects/t3code-cn" },
+];
 
-const head = (
-  requestId: string,
-  threadTitle: string,
-  requestTitle = "",
-  startedAt = "2027-01-15T08:00:00.000Z",
-): LocalReviewRequestHead => ({
-  requestId,
-  threadId,
-  threadTitle,
-  requestTitle,
-  startedAt,
-  endedAt: "2027-01-15T08:05:00.000Z",
-  runCount: 2,
-  origin: "user",
-  childCount: 1,
-  fileChangeCount: 1,
-  commitCommandCount: 2,
+const commit = (
+  repo: string,
+  hash: string,
+  subject: string,
+  extra: Partial<LocalReviewCommit> = {},
+): LocalReviewCommit => ({
+  repo,
+  hash: hash.repeat(40).slice(0, 40),
+  parents: ["p".repeat(40)],
+  subject,
+  message: subject,
+  author: "作者",
+  committedAt: "2027-01-15T08:00:00.000Z",
+  refs: [],
+  ...extra,
 });
 
-const detail = (): LocalReviewGetResult => ({
-  head: head("request-1", "插件线程"),
-  files: [
-    {
-      repo: "/u/t3code-cn",
-      path: "src/a.ts",
-      sources: ["checkpoint", "output", "child"],
-      commits: ["c".repeat(40)],
-      state: { kind: "committed", hash: "c".repeat(40) },
-    },
-    {
-      repo: "/u/t3-rss-plugin",
-      path: "plugin.json",
-      sources: ["output"],
-      commits: [],
-      state: { kind: "uncommitted" },
-    },
-  ],
-  commits: [
-    {
-      repo: "/u/t3code-cn",
-      hash: "c".repeat(40),
-      subject: "feat: 应用栏",
-      time: 1,
-      role: "output",
-      orphan: false,
-      mergedAs: null,
-      mergedVia: null,
-      alsoIn: [],
-      fromChild: true,
-    },
-  ],
-  deliverables: ["/u/.local/tmp/plan.html"],
-  mentionedCommits: 0,
-  clearedWorktrees: 0,
-  omittedFiles: 0,
-  blindSpots: [],
-  gitCalls: 3,
-  complete: true,
+const file = (
+  path: string,
+  changeType: NonNullable<ReviewDiffFileStat["changeType"]>,
+): ReviewDiffFileStat => ({
+  path,
+  previousPath: null,
+  changeType,
+  additions: 3,
+  deletions: 1,
 });
 
-it("lists requests, shows the files of the selected one and a file's diff", async () => {
-  mocks.heads = [
-    head("request-1", "插件线程", "应用栏改成直白的来源标签", "2027-01-15T08:07:00.000Z"),
-    head("request-2", "插件线程", "先看一下列表怎么分", "2027-01-15T06:30:00.000Z"),
-  ];
-  mocks.detail = detail();
-  await using screen = await render(
-    <LocalReviewPage environmentId={environmentId} threadId={undefined} />,
-    { router: "/" },
-  );
-  await expect.element(page.getByText("插件线程", { exact: true }).first()).toBeVisible();
-  await expect.element(page.getByText("应用栏改成直白的来源标签")).toBeVisible();
-  await expect.element(page.getByText("先看一下列表怎么分")).toBeVisible();
-  await expect.element(page.getByText(/^01-15 \d\d:07$/)).toBeVisible();
-  await expect.element(page.getByText(/已识别 2 个文件/)).toBeVisible();
-  await expect.element(page.getByText("现仍未提交")).toBeVisible();
-  await expect.element(page.getByText("本次提交").first()).toBeVisible();
-  await expect.element(page.getByText("总仓快照").first()).toBeVisible();
-  await userEvent.hover(page.getByText("总仓快照").first());
-  await expect.element(page.getByText(/每轮结束时对总仓工作区拍的快照/).last()).toBeVisible();
-  await expect.element(page.getByText("/u/.local/tmp/plan.html")).toBeVisible();
+const dirtyList = [{ repo: "/u/projects/t3code-cn", changeCount: 4 }];
 
+function serve(commits: ReadonlyArray<LocalReviewCommit>) {
+  mocks.logInputs = [];
+  mocks.previewInputs = [];
+  mocks.log = (input) => {
+    const own = commits.filter((c) => input.repo === undefined || c.repo === input.repo);
+    return input.part === "dirty"
+      ? { repos: REPOS, commits: [], dirty: dirtyList, hasMore: false }
+      : {
+          repos: REPOS,
+          commits: own.slice(0, input.limit),
+          dirty: [],
+          hasMore: own.length > (input.limit ?? 0),
+        };
+  };
+}
+
+it("lists commits of all repos, narrows to one repo, shows a commit's files and a file's diff", async () => {
+  serve([
+    commit("/u/projects/t3code-cn", "a", "feat: 履历页", {
+      message: "feat: 履历页\n\n正文第二段",
+      refs: ["main"],
+    }),
+    commit("/u", "b", "merge: 合并分支", { parents: ["1".repeat(40), "2".repeat(40)] }),
+  ]);
+  mocks.files = [file("src/a.ts", "change"), file("src/new.ts", "new")];
+  await using screen = await render(<LocalReviewPage environmentId={environmentId} />, {
+    router: "/",
+  });
+  await expect.element(page.getByText("未提交改动 · t3code-cn · 4 项")).toBeVisible();
+  await expect.element(page.getByText("合并", { exact: true })).toBeVisible();
+  await expect.element(page.getByText("main", { exact: true })).toBeVisible();
+
+  await userEvent.click(page.getByText("feat: 履历页").first());
+  await expect.element(page.getByText("正文第二段")).toBeVisible();
+  await expect.element(page.getByText("改动的文件 · 2")).toBeVisible();
+  await expect.element(page.getByText("新增")).toBeVisible();
+  expect(mocks.previewInputs.at(-1)).toMatchObject({
+    cwd: "/u/projects/t3code-cn",
+    commitSha: "a".repeat(40),
+    metadataOnly: true,
+  });
+  await expect.element(page.getByText("const changed = 1;")).not.toBeInTheDocument();
   await userEvent.click(page.getByText("src/a.ts"));
-  await expect.element(page.getByText("返回清单")).toBeVisible();
-  await expect.element(page.getByText("feat: 应用栏")).toBeVisible();
   await expect.element(page.getByText("const changed = 1;")).toBeVisible();
 
-  await userEvent.click(page.getByText("返回清单"));
-  await expect.element(page.getByText(/已识别 2 个文件/)).toBeVisible();
+  await userEvent.click(page.getByText("未提交改动 · t3code-cn · 4 项"));
+  await expect.element(page.getByText("工作区相对 HEAD，含未跟踪文件。")).toBeVisible();
+  expect(mocks.previewInputs.at(-1)).toMatchObject({ sourceKind: "working-tree" });
+
+  await userEvent.click(page.getByRole("combobox", { name: "选择仓" }));
+  await userEvent.click(page.getByRole("option", { name: "universe" }));
+  await expect.element(page.getByText("merge: 合并分支")).toBeVisible();
+  expect(mocks.logInputs).toContainEqual({ part: "commits", limit: 50, repo: "/u" });
   void screen;
 });
 
-it("explains an empty list and an empty request", async () => {
-  mocks.heads = [];
-  mocks.detail = null;
-  await using empty = await render(
-    <LocalReviewPage environmentId={environmentId} threadId={undefined} />,
-    { router: "/" },
+it("loads more commits", async () => {
+  serve(
+    Array.from({ length: 51 }, (_, i) =>
+      commit("/u", "c", `提交 ${i + 1}`, { hash: `${i}`.padStart(40, "0") }),
+    ),
   );
-  await expect.element(page.getByText(/没有识别到改动的请求/)).toBeVisible();
-  void empty;
+  await using screen = await render(<LocalReviewPage environmentId={environmentId} />, {
+    router: "/",
+  });
+  await expect.element(page.getByText("提交 50", { exact: true })).toBeVisible();
+  await expect.element(page.getByText("提交 51", { exact: true })).not.toBeInTheDocument();
+  await userEvent.click(page.getByRole("button", { name: "加载更多" }));
+  await expect.element(page.getByText("提交 51", { exact: true })).toBeVisible();
+  expect(mocks.logInputs).toContainEqual({ part: "commits", limit: 100 });
+  void screen;
+});
+
+it("explains a repo without commits", async () => {
+  serve([]);
+  mocks.log = () => ({ repos: REPOS, commits: [], dirty: [], hasMore: false });
+  await using screen = await render(<LocalReviewPage environmentId={environmentId} />, {
+    router: "/",
+  });
+  await expect.element(page.getByText("还没有提交。")).toBeVisible();
+  void screen;
 });
 
 it("switches between pull requests and local through the route search", async () => {

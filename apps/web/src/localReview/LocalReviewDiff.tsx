@@ -1,14 +1,13 @@
 import { FileDiff } from "@pierre/diffs/react";
-import type { EnvironmentId, LocalReviewCommit, LocalReviewFile } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 
-import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import { DIFF_VIEW_UNSAFE_CSS } from "../components/diffs/StyledDiffCodeView";
 import { useRenderedAppearance } from "../hooks/useTheme";
 import { getRenderablePatch, resolveDiffThemeName } from "../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting";
 import { useEnvironmentQuery } from "../state/query";
 import { reviewEnvironment } from "../state/review";
-import { fileDiffTargets, shortHash, type FileDiffTarget } from "./localReview.logic";
+import type { Selection } from "./localReview.logic";
 
 function PatchView({ patch }: { patch: string }) {
   const appearance = useRenderedAppearance();
@@ -41,43 +40,35 @@ function PatchView({ patch }: { patch: string }) {
   );
 }
 
-function TargetDiff({
+export function LocalReviewFileDiff({
   environmentId,
-  file,
-  target,
+  selection,
+  path,
+  previousPath,
 }: {
   environmentId: EnvironmentId;
-  file: LocalReviewFile;
-  target: FileDiffTarget;
+  selection: Selection;
+  path: string;
+  previousPath: string | null;
 }) {
-  const sourceKind = target.kind === "commit" ? ("commit" as const) : ("working-tree" as const);
+  const sourceKind = selection.kind === "commit" ? ("commit" as const) : ("working-tree" as const);
   const query = useEnvironmentQuery(
     reviewEnvironment.diffFilePatch({
       environmentId,
       input: {
         request: {
-          cwd: file.repo,
-          ...(target.kind === "commit"
-            ? { commitSha: target.hash }
+          cwd: selection.repo,
+          ...(selection.kind === "commit"
+            ? { commitSha: selection.hash }
             : { sourceKind: "working-tree" as const }),
-          file: { path: file.path, previousPath: null, sourceKind },
+          file: { path, previousPath, sourceKind },
         },
-        cacheKey: `local-review:${file.repo}:${file.path}:${target.kind === "commit" ? target.hash : "working-tree"}`,
+        cacheKey: `local-review:${selection.repo}:${path}:${selection.kind === "commit" ? selection.hash : "working-tree"}`,
       },
     }),
   );
   return (
-    <section className="overflow-hidden rounded-md border border-border/60">
-      <h3 className="flex items-baseline gap-2 border-b border-border/60 bg-muted/40 px-3 py-1.5 text-xs">
-        {target.kind === "commit" ? (
-          <>
-            <span className="font-mono text-muted-foreground">提交 {shortHash(target.hash)}</span>
-            <span className="min-w-0 truncate">{target.subject}</span>
-          </>
-        ) : (
-          <span className="font-medium">现仍未提交</span>
-        )}
-      </h3>
+    <div className="overflow-hidden rounded-md border border-border/60">
       {query.data !== null ? (
         <PatchView patch={query.data.diff} />
       ) : query.error !== null ? (
@@ -85,39 +76,6 @@ function TargetDiff({
       ) : (
         <p className="px-3 py-2 text-xs text-muted-foreground">正在读取差异…</p>
       )}
-    </section>
-  );
-}
-
-export function LocalReviewDiff({
-  environmentId,
-  file,
-  commits,
-}: {
-  environmentId: EnvironmentId;
-  file: LocalReviewFile;
-  commits: ReadonlyArray<LocalReviewCommit>;
-}) {
-  const targets = fileDiffTargets(file, commits);
-  if (targets.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        这个文件没有可显示的提交，也不在未提交改动里。
-      </p>
-    );
-  }
-  return (
-    <DiffWorkerPoolProvider>
-      <div className="flex flex-col gap-3">
-        {targets.map((target) => (
-          <TargetDiff
-            key={target.kind === "commit" ? target.hash : "working-tree"}
-            environmentId={environmentId}
-            file={file}
-            target={target}
-          />
-        ))}
-      </div>
-    </DiffWorkerPoolProvider>
+    </div>
   );
 }

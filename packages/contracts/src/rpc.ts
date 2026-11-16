@@ -162,13 +162,7 @@ import {
   ReviewDiffPreviewInput,
   ReviewDiffPreviewResult,
 } from "./review.ts";
-import {
-  LocalReviewError,
-  LocalReviewGetInput,
-  LocalReviewGetResult,
-  LocalReviewListInput,
-  LocalReviewListResult,
-} from "./localReview.ts";
+import { LocalReviewError, LocalReviewLogInput, LocalReviewLogResult } from "./localReview.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import { OrchestrationSearchThreadsError } from "./threadSearch.ts";
 import {
@@ -484,8 +478,7 @@ export const WS_METHODS = {
   reviewGetBranchCommits: "review.getBranchCommits",
   reviewGetDiffPreview: "review.getDiffPreview",
   reviewGetDiffFileContents: "review.getDiffFileContents",
-  localReviewList: "localReview.list",
-  localReviewGet: "localReview.get",
+  localReviewLog: "localReview.log",
 
   terminalOpen: "terminal.open",
   terminalAttach: "terminal.attach",
@@ -1649,15 +1642,9 @@ const WsReviewGetDiffFileContentsRpc = Rpc.make(WS_METHODS.reviewGetDiffFileCont
   error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
 });
 
-const WsLocalReviewListRpc = Rpc.make(WS_METHODS.localReviewList, {
-  payload: LocalReviewListInput,
-  success: LocalReviewListResult,
-  error: Schema.Union([LocalReviewError, EnvironmentAuthorizationError]),
-});
-
-const WsLocalReviewGetRpc = Rpc.make(WS_METHODS.localReviewGet, {
-  payload: LocalReviewGetInput,
-  success: LocalReviewGetResult,
+const WsLocalReviewLogRpc = Rpc.make(WS_METHODS.localReviewLog, {
+  payload: LocalReviewLogInput,
+  success: LocalReviewLogResult,
   error: Schema.Union([LocalReviewError, EnvironmentAuthorizationError]),
 });
 
@@ -2299,8 +2286,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsReviewGetBranchCommitsRpc,
   WsReviewGetDiffPreviewRpc,
   WsReviewGetDiffFileContentsRpc,
-  WsLocalReviewListRpc,
-  WsLocalReviewGetRpc,
+  WsLocalReviewLogRpc,
   WsTerminalOpenRpc,
   WsTerminalAttachRpc,
   WsTerminalObserveRpc,

@@ -3211,8 +3211,7 @@ export const layerWsRpc = (
         [WS_METHODS.reviewGetBranchCommits]: (input) => review.getBranchCommits(input),
         [WS_METHODS.reviewGetDiffPreview]: (input) => review.getDiffPreview(input),
         [WS_METHODS.reviewGetDiffFileContents]: (input) => review.getDiffFileContents(input),
-        [WS_METHODS.localReviewList]: (input) => localReview.list(input),
-        [WS_METHODS.localReviewGet]: (input) => localReview.get(input),
+        [WS_METHODS.localReviewLog]: (input) => localReview.log(input),
         [WS_METHODS.terminalOpen]: (input) =>
           prepareTerminalLaunch(input).pipe(
             Effect.flatMap((launch) =>

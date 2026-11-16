@@ -1,15 +1,22 @@
 import type {
   EnvironmentId,
-  LocalReviewFile,
-  LocalReviewGetResult,
-  LocalReviewRequestHead,
-  ThreadId,
+  LocalReviewCommit,
+  LocalReviewLogResult,
+  ReviewDiffFileStat,
 } from "@t3tools/contracts";
-import { ArrowLeftIcon } from "lucide-react";
+import { ChevronRightIcon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
+import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import { Button } from "../components/ui/button";
 import { MiddleTruncate } from "../components/ui/middle-truncate";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import {
@@ -19,38 +26,47 @@ import {
 } from "../components/WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
+import { useRelativeTimeState } from "../hooks/useRelativeTimeState";
 import { cn } from "../lib/utils";
 import { useEnvironmentQuery } from "../state/query";
-import { LocalReviewDiff } from "./LocalReviewDiff";
+import { reviewEnvironment } from "../state/review";
+import { LocalReviewFileDiff } from "./LocalReviewDiff";
 import { LocalReviewSourceSwitch } from "./LocalReviewSourceSwitch";
 import {
-  BLIND_SPOT_LABELS,
-  EMPTY_LIST_TEXT,
-  EMPTY_REQUEST_TEXT,
-  LOCAL_REVIEW_DAYS,
-  SCOPE_NOTES,
-  SOURCE_HINTS,
-  SOURCE_LAYERS,
-  SOURCE_LEGEND_TITLE,
-  commitsOfRepo,
-  describeFileState,
-  formatRequestTime,
-  groupFilesByRepo,
-  groupRequestsByThread,
-  requestHeadline,
+  ALL_REPOS,
+  PAGE_SIZE,
+  commitBody,
+  fileStatusLabel,
+  isMerge,
+  listSelections,
+  relativeLabel,
+  repoLabel,
+  selectionKey,
   shortHash,
-  sourceLabel,
+  type Selection,
 } from "./localReview.logic";
 import { localReviewEnvironment } from "./localReviewState";
 
-function RequestRow({
-  head,
+type Repos = LocalReviewLogResult["repos"];
+
+function RelativeTime({ iso }: { iso: string }) {
+  const label = relativeLabel(useRelativeTimeState(iso));
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span />}>{label}</TooltipTrigger>
+      <TooltipPopup side="top">{new Date(iso).toLocaleString()}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function RowButton({
   selected,
   onSelect,
+  children,
 }: {
-  head: LocalReviewRequestHead;
   selected: boolean;
   onSelect: () => void;
+  children: React.ReactNode;
 }) {
   return (
     <button
@@ -62,220 +78,229 @@ function RequestRow({
         selected ? "bg-accent" : "hover:bg-accent/50",
       )}
     >
-      <span className="truncate text-sm font-medium">{requestHeadline(head)}</span>
-      <span className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-        <span className="tabular-nums">{formatRequestTime(head.startedAt)}</span>
-        {head.runCount > 1 ? <span>{head.runCount} 轮</span> : null}
-        {head.childCount > 0 ? <span>子会话 {head.childCount}</span> : null}
-        <span>
-          文件改动 {head.fileChangeCount} · 提交命令 {head.commitCommandCount}
-        </span>
-      </span>
+      {children}
     </button>
   );
 }
 
-function ScopeNotes({ detail }: { detail: LocalReviewGetResult }) {
+function Tag({ children }: { children: React.ReactNode }) {
   return (
-    <details className="text-xs text-muted-foreground">
-      <summary className="cursor-pointer select-none">统计范围</summary>
-      <p className="mt-1">{SOURCE_LEGEND_TITLE}：</p>
-      <ul className="mt-0.5 flex list-disc flex-col gap-0.5 pl-4">
-        {SOURCE_LAYERS.map((source) => (
-          <li key={source}>
-            {sourceLabel(source)}：{SOURCE_HINTS[source]}
-          </li>
-        ))}
-      </ul>
-      <p className="mt-1">可能看不到或看错的情形：</p>
-      <ul className="mt-0.5 flex list-disc flex-col gap-0.5 pl-4">
-        {SCOPE_NOTES.map((note) => (
-          <li key={note}>{note}</li>
-        ))}
-        {detail.blindSpots.map((spot) => (
-          <li key={spot}>本请求：{BLIND_SPOT_LABELS[spot]}。</li>
-        ))}
-        {detail.clearedWorktrees > 0 ? (
-          <li>已清理的临时工作树里改的 {detail.clearedWorktrees} 个文件没能对上提交。</li>
-        ) : null}
-        {detail.mentionedCommits > 0 ? (
-          <li>另有 {detail.mentionedCommits} 个提交只是被命令输出提到，没有计入。</li>
-        ) : null}
-      </ul>
-    </details>
+    <span className="max-w-32 truncate rounded-sm bg-muted px-1.5 py-px text-2xs text-muted-foreground">
+      {children}
+    </span>
   );
 }
 
-function FileRow({ file, onSelect }: { file: LocalReviewFile; onSelect: () => void }) {
-  const state = describeFileState(file);
+function CommitRow({
+  commit,
+  repoName,
+  selected,
+  onSelect,
+}: {
+  commit: LocalReviewCommit;
+  repoName: string | null;
+  selected: boolean;
+  onSelect: () => void;
+}) {
   return (
-    <li>
+    <RowButton selected={selected} onSelect={onSelect}>
+      <span className="flex items-baseline gap-1.5">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{commit.subject}</span>
+        {isMerge(commit) ? <Tag>合并</Tag> : null}
+      </span>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+        {repoName === null ? null : <span className="font-medium">{repoName}</span>}
+        <span className="font-mono">{shortHash(commit.hash)}</span>
+        <RelativeTime iso={commit.committedAt} />
+        <span className="truncate">{commit.author}</span>
+        {commit.refs.slice(0, 3).map((ref) => (
+          <Tag key={ref}>{ref}</Tag>
+        ))}
+      </span>
+    </RowButton>
+  );
+}
+
+function FileRow({
+  environmentId,
+  selection,
+  file,
+}: {
+  environmentId: EnvironmentId;
+  selection: Selection;
+  file: ReviewDiffFileStat;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="flex flex-col gap-1">
       <button
         type="button"
-        onClick={onSelect}
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
         className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-xs outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
+        <ChevronRightIcon
+          aria-hidden
+          className={cn("size-3 shrink-0 self-center transition-transform", open && "rotate-90")}
+        />
+        <span className="shrink-0 text-muted-foreground">{fileStatusLabel(file)}</span>
         <span className="min-w-0 flex-1 font-mono">
-          <MiddleTruncate value={file.path} />
+          <MiddleTruncate
+            value={file.previousPath === null ? file.path : `${file.previousPath} → ${file.path}`}
+          />
         </span>
-        <span className="flex shrink-0 items-center gap-1">
-          {file.sources.map((source) => (
-            <Tooltip key={source}>
-              <TooltipTrigger
-                render={
-                  <span className="rounded-sm bg-muted px-1.5 py-px text-2xs text-muted-foreground" />
-                }
-              >
-                {sourceLabel(source)}
-              </TooltipTrigger>
-              <TooltipPopup side="top" className="max-w-72">
-                {SOURCE_HINTS[source]}
-              </TooltipPopup>
-            </Tooltip>
-          ))}
+        <span className="shrink-0 tabular-nums text-muted-foreground">
+          <span className="text-success-foreground">+{file.additions}</span>{" "}
+          <span className="text-destructive-foreground">−{file.deletions}</span>
         </span>
-        {state === null ? null : <span className="shrink-0 text-muted-foreground">{state}</span>}
       </button>
+      {open ? (
+        <LocalReviewFileDiff
+          environmentId={environmentId}
+          selection={selection}
+          path={file.path}
+          previousPath={file.previousPath}
+        />
+      ) : null}
     </li>
   );
 }
 
-function RequestDetail({
+function Detail({
   environmentId,
-  head,
+  selection,
+  commit,
+  repoName,
 }: {
   environmentId: EnvironmentId;
-  head: LocalReviewRequestHead;
+  selection: Selection;
+  commit: LocalReviewCommit | undefined;
+  repoName: string;
 }) {
   const query = useEnvironmentQuery(
-    localReviewEnvironment.get({
+    reviewEnvironment.diffPreview({
       environmentId,
-      input: { threadId: head.threadId, requestId: head.requestId },
+      input: {
+        cwd: selection.repo,
+        metadataOnly: true,
+        ...(selection.kind === "commit"
+          ? { commitSha: selection.hash }
+          : { sourceKind: "working-tree" as const }),
+      },
     }),
   );
-  const [selected, setSelected] = useState<{ repo: string; path: string } | null>(null);
-  const detail = query.data;
-  if (detail === null) {
-    return (
-      <p
-        className={cn(
-          "text-sm",
-          query.error === null ? "text-muted-foreground" : "text-destructive",
-        )}
-      >
-        {query.error ?? "正在识别这一请求改了哪些文件…"}
-      </p>
-    );
-  }
-  const file =
-    selected === null
-      ? undefined
-      : detail.files.find((f) => f.repo === selected.repo && f.path === selected.path);
-  if (file !== undefined) {
-    return (
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <Button size="xs" variant="ghost-muted" onClick={() => setSelected(null)}>
-            <ArrowLeftIcon aria-hidden />
-            返回清单
-          </Button>
-          <span className="min-w-0 truncate font-mono text-xs">{file.path}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">此文件本请求内的改动</span>
-        </div>
-        <LocalReviewDiff environmentId={environmentId} file={file} commits={detail.commits} />
-      </div>
-    );
-  }
-  const groups = groupFilesByRepo(detail.files);
-  const total = detail.files.length + detail.omittedFiles;
+  const files = query.data?.sources[0]?.files;
+  const body = commit === undefined ? "" : commitBody(commit);
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-sm font-medium">
-          已识别 {total} 个文件
-          <span className="font-normal text-muted-foreground">
-            {" "}
-            · 交付物 {detail.deliverables.length}
-            {detail.complete ? "" : " · 可能不全"}
-          </span>
-        </h2>
-        <ScopeNotes detail={detail} />
-      </div>
-      {detail.files.length === 0 && detail.deliverables.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{EMPTY_REQUEST_TEXT}</p>
-      ) : null}
-      {groups.map((group) => {
-        const commits = commitsOfRepo(detail.commits, group.repo);
-        return (
-          <section key={group.repo} className="flex flex-col gap-0.5">
-            <h3 className="flex items-baseline gap-2 px-2 text-xs font-medium">
-              <span>{group.name}</span>
-              <span className="min-w-0 truncate font-normal text-muted-foreground">
-                {commits
-                  .slice(0, 2)
-                  .map((c) => `${shortHash(c.hash)} ${c.subject}`)
-                  .join(" · ")}
-                {commits.length > 2 ? ` 等 ${commits.length} 个提交` : ""}
-              </span>
-            </h3>
-            <ul className="m-0 flex list-none flex-col p-0">
-              {group.files.map((f) => (
-                <FileRow
-                  key={f.path}
-                  file={f}
-                  onSelect={() => setSelected({ repo: f.repo, path: f.path })}
-                />
-              ))}
-            </ul>
-          </section>
-        );
-      })}
-      {detail.omittedFiles > 0 ? (
-        <p className="px-2 text-xs text-muted-foreground">
-          另 {detail.omittedFiles} 个文件未列出。
-        </p>
-      ) : null}
-      {detail.deliverables.length > 0 ? (
-        <section className="flex flex-col gap-0.5">
-          <h3 className="px-2 text-xs font-medium">交付物（不进代码清单）</h3>
+      {commit === undefined ? (
+        <div className="flex flex-col gap-0.5">
+          <h2 className="text-sm font-medium">未提交改动 · {repoName}</h2>
+          <p className="text-xs text-muted-foreground">工作区相对 HEAD，含未跟踪文件。</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <h2 className="text-sm font-medium">{commit.subject}</h2>
+          <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+            <dt>仓</dt>
+            <dd className="m-0">{repoName}</dd>
+            <dt>提交</dt>
+            <dd className="m-0 font-mono">{commit.hash}</dd>
+            <dt>作者</dt>
+            <dd className="m-0">{commit.author}</dd>
+            <dt>时间</dt>
+            <dd className="m-0">{new Date(commit.committedAt).toLocaleString()}</dd>
+            <dt>父提交</dt>
+            <dd className="m-0 font-mono">
+              {commit.parents.length === 0
+                ? "无（首个提交）"
+                : commit.parents.map((parent) => shortHash(parent)).join("  ")}
+            </dd>
+          </dl>
+          {body === "" ? null : (
+            <pre className="m-0 whitespace-pre-wrap break-words font-sans text-sm">{body}</pre>
+          )}
+        </div>
+      )}
+      <section className="flex flex-col gap-0.5">
+        <h3 className="px-2 text-xs font-medium">
+          {files === undefined ? "改动的文件" : `改动的文件 · ${files.length}`}
+          {commit !== undefined && isMerge(commit) ? (
+            <span className="font-normal text-muted-foreground"> · 与第一父提交比较</span>
+          ) : null}
+        </h3>
+        {files === undefined ? (
+          <p
+            className={cn(
+              "px-2 text-xs",
+              query.error === null ? "text-muted-foreground" : "text-destructive",
+            )}
+          >
+            {query.error ?? "正在读取文件清单…"}
+          </p>
+        ) : files.length === 0 ? (
+          <p className="px-2 text-xs text-muted-foreground">没有文件改动。</p>
+        ) : (
           <ul className="m-0 flex list-none flex-col p-0">
-            {detail.deliverables.map((path) => (
-              <li key={path} className="px-2 py-0.5">
-                <span className="block font-mono text-xs text-muted-foreground">
-                  <MiddleTruncate value={path} />
-                </span>
-              </li>
+            {files.map((file) => (
+              <FileRow
+                key={`${file.previousPath ?? ""}>${file.path}`}
+                environmentId={environmentId}
+                selection={selection}
+                file={file}
+              />
             ))}
           </ul>
-        </section>
-      ) : null}
+        )}
+      </section>
     </div>
   );
 }
 
-export function LocalReviewPage({
-  environmentId,
-  threadId,
-}: {
-  environmentId: EnvironmentId | null;
-  threadId: ThreadId | undefined;
-}) {
-  const list = useEnvironmentQuery(
+export function LocalReviewPage({ environmentId }: { environmentId: EnvironmentId | null }) {
+  const [repo, setRepo] = useState(ALL_REPOS);
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [kept, setKept] = useState<LocalReviewLogResult | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const scope = repo === ALL_REPOS ? {} : { repo };
+  const query = useEnvironmentQuery(
     environmentId === null
       ? null
-      : localReviewEnvironment.list({
+      : localReviewEnvironment.log({
           environmentId,
-          input: {
-            days: LOCAL_REVIEW_DAYS,
-            limit: 100,
-            ...(threadId === undefined ? {} : { threadId }),
-          },
+          input: { part: "commits", limit, ...scope },
         }),
   );
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const groups = groupRequestsByThread(list.data?.requests ?? []);
-  const requests = groups.flatMap((group) => group.requests);
-  const selected = requests.find((r) => r.requestId === selectedId) ?? requests[0];
+  const dirtyQuery = useEnvironmentQuery(
+    environmentId === null
+      ? null
+      : localReviewEnvironment.log({ environmentId, input: { part: "dirty", ...scope } }),
+  );
+  const log = query.data ?? kept;
+  const dirty = dirtyQuery.data?.dirty ?? [];
+  const repos: Repos = log?.repos ?? [];
+  const selections = log === null ? [] : listSelections(dirty, log.commits);
+  const selection = selections.find((s) => selectionKey(s) === selectedKey) ?? selections[0];
+  const commit =
+    selection?.kind === "commit"
+      ? log?.commits.find((c) => c.repo === selection.repo && c.hash === selection.hash)
+      : undefined;
+  const showRepoName = repo === ALL_REPOS;
+  const changeRepo = (next: string) => {
+    setRepo(next);
+    setLimit(PAGE_SIZE);
+    setKept(null);
+    setSelectedKey(null);
+  };
+  const refresh = () => {
+    query.refresh();
+    dirtyQuery.refresh();
+  };
+  const loadMore = () => {
+    setKept(log);
+    setLimit(limit + PAGE_SIZE);
+  };
+
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <div className="@container/local-review flex min-h-0 flex-1 flex-col bg-background">
@@ -292,43 +317,93 @@ export function LocalReviewPage({
         </WorkspacePageHeader>
         <div className="flex min-h-0 flex-1 flex-col @2xl/local-review:flex-row">
           <nav
-            aria-label="请求"
-            className="flex max-h-72 shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-border/60 p-2 @2xl/local-review:max-h-none @2xl/local-review:w-80 @2xl/local-review:border-r @2xl/local-review:border-b-0"
+            aria-label="提交"
+            className="flex max-h-80 shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-border/60 p-2 @2xl/local-review:max-h-none @2xl/local-review:w-96 @2xl/local-review:border-r @2xl/local-review:border-b-0"
           >
-            <p className="px-2.5 pb-1 text-xs text-muted-foreground">
-              近 {LOCAL_REVIEW_DAYS} 天 · 仅有改动{threadId === undefined ? "" : " · 当前线程"}
-            </p>
-            {list.error !== null ? (
-              <p className="px-2.5 text-sm text-destructive">{list.error}</p>
-            ) : list.data === null ? (
-              <p className="px-2.5 text-sm text-muted-foreground">正在读取请求…</p>
-            ) : requests.length === 0 ? (
-              <p className="px-2.5 text-sm text-muted-foreground">{EMPTY_LIST_TEXT}</p>
-            ) : (
-              groups.map((group) => (
-                <section key={group.threadId} className="flex flex-col gap-0.5 pt-1">
-                  <p className="truncate px-2.5 text-xs font-medium text-muted-foreground">
-                    {group.threadTitle || "未命名线程"}
-                  </p>
-                  {group.requests.map((head) => (
-                    <RequestRow
-                      key={head.requestId}
-                      head={head}
-                      selected={head.requestId === selected?.requestId}
-                      onSelect={() => setSelectedId(head.requestId)}
-                    />
+            <div className="flex items-center gap-1.5 pb-1">
+              <Select value={repo} onValueChange={(next) => changeRepo(next ?? ALL_REPOS)}>
+                <SelectTrigger size="sm" aria-label="选择仓">
+                  <SelectValue>
+                    {repo === ALL_REPOS ? "全部仓" : repoLabel(repos, repo)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value={ALL_REPOS}>全部仓</SelectItem>
+                  {repos.map((entry) => (
+                    <SelectItem key={entry.path} value={entry.path}>
+                      {entry.name}
+                    </SelectItem>
                   ))}
-                </section>
-              ))
+                </SelectPopup>
+              </Select>
+              <Button size="icon-xs" variant="ghost-muted" aria-label="刷新" onClick={refresh}>
+                <RefreshCwIcon aria-hidden />
+              </Button>
+            </div>
+            {query.error !== null && log === null ? (
+              <p className="px-2.5 text-sm text-destructive">{query.error}</p>
+            ) : log === null ? (
+              <p className="px-2.5 text-sm text-muted-foreground">正在读取提交…</p>
+            ) : selections.length === 0 ? (
+              <p className="px-2.5 text-sm text-muted-foreground">
+                {repos.length === 0 ? "没有发现 git 仓。" : "还没有提交。"}
+              </p>
+            ) : (
+              <>
+                {dirty.map((entry) => (
+                  <RowButton
+                    key={entry.repo}
+                    selected={selection?.kind === "dirty" && selection.repo === entry.repo}
+                    onSelect={() =>
+                      setSelectedKey(selectionKey({ kind: "dirty", repo: entry.repo }))
+                    }
+                  >
+                    <span className="truncate text-sm font-medium">
+                      未提交改动 · {repoLabel(repos, entry.repo)} · {entry.changeCount} 项
+                    </span>
+                  </RowButton>
+                ))}
+                {log.commits.map((entry) => (
+                  <CommitRow
+                    key={`${entry.repo}|${entry.hash}`}
+                    commit={entry}
+                    repoName={showRepoName ? repoLabel(repos, entry.repo) : null}
+                    selected={
+                      selection?.kind === "commit" &&
+                      selection.repo === entry.repo &&
+                      selection.hash === entry.hash
+                    }
+                    onSelect={() =>
+                      setSelectedKey(
+                        selectionKey({ kind: "commit", repo: entry.repo, hash: entry.hash }),
+                      )
+                    }
+                  />
+                ))}
+                {log.hasMore ? (
+                  <Button
+                    size="xs"
+                    variant="ghost-muted"
+                    disabled={query.isPending}
+                    onClick={loadMore}
+                  >
+                    {query.isPending ? "正在加载…" : "加载更多"}
+                  </Button>
+                ) : null}
+              </>
             )}
           </nav>
           <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
-            {selected !== undefined && environmentId !== null ? (
-              <RequestDetail
-                key={selected.requestId}
-                environmentId={environmentId}
-                head={selected}
-              />
+            {selection !== undefined && environmentId !== null ? (
+              <DiffWorkerPoolProvider>
+                <Detail
+                  key={selectionKey(selection)}
+                  environmentId={environmentId}
+                  selection={selection}
+                  commit={commit}
+                  repoName={repoLabel(repos, selection.repo)}
+                />
+              </DiffWorkerPoolProvider>
             ) : null}
           </div>
         </div>

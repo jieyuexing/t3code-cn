@@ -8,7 +8,6 @@ import {
   type PullRequestListFilters,
   type PullRequestListResult,
   type PullRequestListState,
-  type ThreadId,
 } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
@@ -46,7 +45,6 @@ import { pullRequestListEntryId } from "./pullRequestListGroups.logic";
 
 export interface PullRequestsSearch extends PullRequestListPreferences {
   readonly source?: "local";
-  readonly localThread?: ThreadId;
   readonly selectedUrl?: string;
   readonly environmentId?: EnvironmentId;
   readonly projectId?: ProjectId;

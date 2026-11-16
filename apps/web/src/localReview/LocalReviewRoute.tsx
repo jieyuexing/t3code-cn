@@ -8,10 +8,5 @@ export function PullRequestsRoute() {
   const search = useSearch({ from: "/_chat/pull-requests" });
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   if (search.source !== "local") return <PullRequestsPage />;
-  return (
-    <LocalReviewPage
-      environmentId={search.environmentId ?? primaryEnvironmentId}
-      threadId={search.localThread}
-    />
-  );
+  return <LocalReviewPage environmentId={search.environmentId ?? primaryEnvironmentId} />;
 }
