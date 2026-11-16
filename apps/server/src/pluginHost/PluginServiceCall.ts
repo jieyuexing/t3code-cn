@@ -84,6 +84,8 @@ export interface ServiceCallDependencies {
   readonly hostEnabled: () => boolean;
   /** Plugins that want to run; only these provide services. */
   readonly claims: (slot: Slot) => boolean;
+  /** Runs after a call to a method not declared `readOnly` succeeds. */
+  readonly onWrite: (provider: Slot) => Effect.Effect<void>;
   readonly ensureRunning: (
     slot: Slot,
   ) => Effect.Effect<
@@ -101,7 +103,7 @@ interface ServiceRequest {
 const failureText = (error: PluginHostError) => error.detail ?? error.reason;
 
 export const makeServiceCalls = (dependencies: ServiceCallDependencies) => {
-  const { slots, hostEnabled, claims, ensureRunning } = dependencies;
+  const { slots, hostEnabled, claims, ensureRunning, onWrite } = dependencies;
   const owners = () => serviceOwners(slots(), claims);
 
   /** Why a service has no available provider, with what its provider waits for. */
@@ -139,7 +141,7 @@ export const makeServiceCalls = (dependencies: ServiceCallDependencies) => {
     caller: string,
   ) {
     const { process } = yield* ensureRunning(provider);
-    return yield* process
+    const result = yield* process
       .invoke(serviceHandler(request.service, request.method), { input: request.input, caller })
       .pipe(
         Effect.mapError((error) =>
@@ -149,6 +151,11 @@ export const makeServiceCalls = (dependencies: ServiceCallDependencies) => {
           ),
         ),
       );
+    const declared = provider.registration?.manifest.provides
+      .find((candidate) => candidate.name === request.service)
+      ?.methods.find((candidate) => candidate.name === request.method);
+    if (declared?.readOnly !== true) yield* onWrite(provider);
+    return result;
   });
 
   /** Names the service and its provider, so the caller can tell whose error it is. */

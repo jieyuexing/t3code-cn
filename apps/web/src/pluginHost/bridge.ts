@@ -57,7 +57,7 @@ function exceedsDepth(value: unknown, depth: number): boolean {
 /**
  * Answers `ready` messages from the frame's own window with one port, then serves page calls on it.
  * `dispose` closes the port and stops listening; `pushContext` sends the page the context again
- * when it has changed since the page last got it.
+ * when it has changed since the page last got it; `pushChanged` tells it the plugin's data moved to a new revision.
  */
 export function attachPluginViewBridge(options: {
   readonly frame: HTMLIFrameElement;
@@ -70,7 +70,11 @@ export function attachPluginViewBridge(options: {
   readonly context: () => PluginViewContext;
   readonly onTeardown: (reason: BridgeTeardownReason) => void;
   readonly pingIntervalMs?: number;
-}): { readonly dispose: () => void; readonly pushContext: () => void } {
+}): {
+  readonly dispose: () => void;
+  readonly pushContext: () => void;
+  readonly pushChanged: (revision: number) => void;
+} {
   let port: MessagePort | null = null;
   let sentContext = "";
   let pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -252,6 +256,9 @@ export function attachPluginViewBridge(options: {
       if (port === null || encoded === sentContext) return;
       sentContext = encoded;
       send(port, { _tag: "context", context });
+    },
+    pushChanged: (revision) => {
+      if (port !== null) send(port, { _tag: "changed", revision });
     },
   };
 }

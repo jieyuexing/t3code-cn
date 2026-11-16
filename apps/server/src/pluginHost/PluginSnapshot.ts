@@ -20,6 +20,7 @@ const entryOf = (slot: Slot): PluginHostEntry => {
     digest: registration?.digest ?? "",
     capabilities: registration?.manifest.capabilities ?? [],
     generation: slot.generation,
+    ...(slot.dataRevision === 0 ? {} : { dataRevision: slot.dataRevision }),
     state: slot.state,
     ...(slot.running?.pid === undefined ? {} : { pid: slot.running.pid }),
     ...(problem === undefined ? {} : { problem }),

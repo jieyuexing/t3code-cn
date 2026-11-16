@@ -59,6 +59,7 @@ function PluginViewTab(props: {
       (candidate) => candidate.pluginId === surface.pluginId && candidate.viewId === surface.viewId,
     ) ?? null;
 
+  const plugin = snapshot?.plugins.find((candidate) => candidate.id === surface.pluginId);
   const settled = snapshot !== null || failed;
   if (!settled) return null;
   if (view === null) {
@@ -98,9 +99,8 @@ function PluginViewTab(props: {
       viewId={view.viewId}
       title={view.title}
       generation={view.generation}
-      capabilities={
-        snapshot?.plugins.find((plugin) => plugin.id === view.pluginId)?.capabilities ?? []
-      }
+      capabilities={plugin?.capabilities ?? []}
+      dataRevision={plugin?.dataRevision}
       cwd={files?.workspaceRoot ?? null}
       focus={focus}
       threadRef={threadRef ?? null}

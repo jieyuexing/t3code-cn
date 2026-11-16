@@ -177,6 +177,11 @@ export const make = Effect.fn("PluginHost.make")(function* (
       .pipe(Effect.orElseSucceed((): PluginDataFile => ({ settings: {}, storage: {} })));
 
   const serviceCalls = makeServiceCalls({
+    onWrite: (provider) =>
+      Effect.suspend(() => {
+        provider.dataRevision += 1;
+        return emit;
+      }),
     slots: () => slots.values(),
     hostEnabled: () => hostEnabled,
     claims,

@@ -551,6 +551,37 @@ describe("service calls from the interface and from views", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.live(
+    "a successful write counts toward the plugin's data revision, a read or failure does not",
+    () =>
+      Effect.gen(function* () {
+        const { host, call, enable, addGenerated } = yield* setup();
+        yield* addGenerated(UI_PROVIDER, {
+          ...uiProvider,
+          methods: [
+            { name: "shown", ui: true },
+            { name: "peek", ui: true, readOnly: true },
+            { name: "hidden" },
+            { name: "boom", ui: true },
+          ],
+          source: uiProvider.source.replace("hidden:", "peek: () => 1, hidden:"),
+        });
+        yield* enable(UI_PROVIDER);
+        const revision = Effect.map(
+          latest(host),
+          (snapshot) => entryOf(snapshot, UI_PROVIDER)?.dataRevision ?? 0,
+        );
+        expect(yield* revision).toBe(0);
+        yield* call(callService(UI_SERVICE, "peek"));
+        yield* call(callService(UI_SERVICE, "boom")).pipe(Effect.flip);
+        expect(yield* revision).toBe(0);
+        yield* call(callService(UI_SERVICE, "shown", { a: 1 }));
+        expect(yield* revision).toBe(1);
+        yield* call(callService(UI_SERVICE, "shown", { a: 2 }));
+        expect(yield* revision).toBe(2);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.live("a failing method comes back marked with its service and provider", () =>
     Effect.gen(function* () {
       const { call, enable, addGenerated } = yield* setup();

@@ -40,6 +40,8 @@ export const PluginHostEntry = Schema.Struct({
   capabilities: Schema.Array(Schema.String),
   /** Counts activations (enable, reload, resume); a mounted view of an older generation is stale. */
   generation: NonNegativeInt,
+  /** Moves each time a write method of this plugin's services succeeds, for any caller; absent until the first. */
+  dataRevision: Schema.optionalKey(NonNegativeInt),
   state: PluginHostState,
   /** Operating-system process id while the plugin runs. */
   pid: Schema.optionalKey(NonNegativeInt),
