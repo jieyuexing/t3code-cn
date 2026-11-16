@@ -16,7 +16,7 @@ import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { workspaceAreaProps } from "../../lib/workspaceFocus";
 import { PullRequestCompactFilterMenu } from "./PullRequestCompactFilterMenu";
 import type { PullRequestFilterOption } from "./PullRequestListFilters";
-import { LocalReviewSourceSwitch } from "../../localReview/LocalReviewSourceSwitch";
+import { GitLogSourceSwitch } from "../../gitLog/GitLogSourceSwitch";
 import { INVOLVEMENT_TABS, STATE_TABS } from "./pullRequestListOptions";
 
 function ExpandableSearch({
@@ -212,7 +212,7 @@ export function PullRequestsColumn({
           </WorkspaceBreadcrumb>
         )}
         <div className="min-w-0 flex-1" />
-        <LocalReviewSourceSwitch active="pull-requests" />
+        <GitLogSourceSwitch active="pull-requests" />
         {condensed ? (
           <div ref={topbarSearchRef} className="flex shrink items-center gap-1.5">
             <ExpandableSearch
