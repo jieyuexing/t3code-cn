@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 
 import { expandAssistantCitationsForProvider } from "./assistantCitations.ts";
+import { formatQuoteForProvider, isQuoteComment } from "./composerQuote.ts";
 import { replaceThreadLinks, threadLinkCandidates } from "./threadLinks.ts";
 
 const CONTEXT_PROTOCOL = "t3-context:";
@@ -328,6 +329,7 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
       return lines.join("\n");
     }
     case "review-comment": {
+      if (isQuoteComment(record)) return formatQuoteForProvider(record);
       const lines = [
         `file: ${record.filePath}`,
         `range: ${record.rangeLabel} (${record.startIndex}-${record.endIndex})`,

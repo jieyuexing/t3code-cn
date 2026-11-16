@@ -20,6 +20,7 @@ import { rightPanelHostRef, useRightPanelStore } from "../rightPanelStore";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { BridgeCallError } from "./bridge";
 import { openBrowserTab } from "./browserTab";
+import { addQuoteToComposer } from "./composerQuote";
 import { openThreadDiff } from "./diffNavigation";
 import { createHostApi } from "./hostApi";
 import { pendingThreads } from "./pendingThreads";
@@ -142,5 +143,6 @@ export function useHostApi(options: {
       }
       useRightPanelStore.getState().openFile(rightPanelHostRef(threadRef), relativePath, line);
     },
+    addToComposer: (quote) => addQuoteToComposer(threadRef, quote),
   });
 }

@@ -23,6 +23,7 @@ function setup(
     openUrl: vi.fn(async () => undefined),
     openBrowser: vi.fn(async () => undefined),
     openFile: vi.fn(),
+    addToComposer: vi.fn(),
     browserProfiles: vi.fn(() => [
       { id: "default", name: "Default", kind: "persistent" as const },
       { id: "incognito", name: "Incognito", kind: "incognito" as const },
@@ -55,6 +56,7 @@ const THREADS_ORGANIZE = "host.threads-organize";
 const OPEN_URL = "host.open-url";
 const BROWSER = "host.browser";
 const OPEN_FILE = "host.open-file";
+const COMPOSER = "host.composer";
 
 describe("host api", () => {
   it("keeps each thread method behind its own capability", async () => {
@@ -334,6 +336,51 @@ describe("host api", () => {
     expect(deps.openFile).toHaveBeenLastCalledWith("docs/b.md", 12);
     await expect(call("t3.openFile", { path: "./src/../src/c.ts" })).resolves.toBeNull();
     expect(deps.openFile).toHaveBeenLastCalledWith("src/c.ts", undefined);
+  });
+
+  it("adds a quote to the thread's composer only with host.composer", async () => {
+    for (const capabilities of [["views"], [OPEN_FILE], ["host.vcs-read"]]) {
+      const { deps, call } = setup(capabilities);
+      await expect(call("t3.addToComposer", { title: "T", text: "x" })).rejects.toMatchObject(
+        DENIED,
+      );
+      expect(deps.addToComposer).not.toHaveBeenCalled();
+    }
+    const { deps, call } = setup([COMPOSER]);
+    await expect(
+      call("t3.addToComposer", {
+        title: "Post",
+        text: "chosen text",
+        url: "https://example.com/p",
+        source: "订阅 · Example",
+      }),
+    ).resolves.toBeNull();
+    expect(deps.addToComposer).toHaveBeenLastCalledWith({
+      title: "Post",
+      text: "chosen text",
+      url: "https://example.com/p",
+      source: "订阅 · Example",
+    });
+    await expect(call("t3.addToComposer", { title: "Post", text: "x" })).resolves.toBeNull();
+    expect(deps.addToComposer).toHaveBeenLastCalledWith({ title: "Post", text: "x" });
+  });
+
+  it("refuses an empty, oversized or non-web quote instead of clipping it", async () => {
+    const { deps, call } = setup([COMPOSER]);
+    for (const input of [
+      { title: "", text: "x" },
+      { title: "T", text: "  " },
+      { title: "T", text: "x".repeat(32_001) },
+      { title: "T".repeat(201), text: "x" },
+      { title: "T", text: "x", url: "javascript:alert(1)" },
+      { title: "T", text: "x", source: 3 },
+    ]) {
+      await expect(
+        call("t3.addToComposer", input),
+        JSON.stringify(input).slice(0, 40),
+      ).rejects.toMatchObject({ code: "invalid" });
+    }
+    expect(deps.addToComposer).not.toHaveBeenCalled();
   });
 
   it("refuses files outside the thread's workspace, and bad lines", async () => {

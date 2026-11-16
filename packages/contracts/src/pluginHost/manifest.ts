@@ -21,6 +21,7 @@ export const PLUGIN_HOST_CAPABILITIES = [
   "host.open-url",
   "host.browser",
   "host.open-file",
+  "host.composer",
   "host.clipboard-write",
 ] as const;
 
