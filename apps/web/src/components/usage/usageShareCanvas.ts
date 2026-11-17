@@ -4,7 +4,7 @@ const WIDTH = 1200;
 const SCALE = 2;
 const PAD_X = 60;
 const FONT =
-  '-apple-system, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", sans-serif';
+  '-apple-system, system-ui, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", sans-serif';
 const ROW_HEIGHT = 58;
 const RANK_RIGHT = PAD_X + 30;
 const NAME_RIGHT = RANK_RIGHT + 16 + 290;
