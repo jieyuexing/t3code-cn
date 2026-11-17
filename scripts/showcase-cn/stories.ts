@@ -287,6 +287,12 @@ const plugins: Story = {
           messages: ["Which branch should the billing page refactor start from?"],
         },
         {
+          key: "reply",
+          title: "Split the invoice migration",
+          model: "showcase-reply",
+          messages: ["Split the invoice migration into safe steps"],
+        },
+        {
           key: "plan",
           title: "Plan the billing page refactor",
           model: "todo-list",
@@ -298,7 +304,13 @@ const plugins: Story = {
   open: "plan",
   steps: [
     { label: "overview", hold: 1.6 },
-    { label: "needs-you", target: rail("Needs you"), zoom: { x: 760, y: 0, w: 680 }, hold: 1.2 },
+    { label: "needs-you", target: rail("Needs you"), hold: 1.0 },
+    {
+      label: "follow",
+      target: `${needsYouRow("Split the invoice migration")} >> button:has-text("按推荐")`,
+      settle: 800,
+      hold: 1.0,
+    },
     {
       label: "open-question",
       target: `${needsYouRow("Pick a base branch")} >> text=打开线程`,
@@ -309,14 +321,22 @@ const plugins: Story = {
       label: "answer",
       target: 'button:has-text("main (Recommended)")',
       settle: 1800,
-      zoom: { x: 200, y: 60, w: 1240 },
-      hold: 1.2,
+      hold: 1.0,
+    },
+    {
+      label: "proceed",
+      target: '[data-thread-item]:has-text("Split the invoice migration")',
+      settle: 2500,
+      hold: 1.4,
+      // 侧栏重排后鼠标会落在别的线程行上，悬停按钮留在画面里。
+      after: async ({ page }) => {
+        await page.mouse.move(648, 30);
+      },
     },
     {
       label: "rss",
       target: rail("订阅"),
       settle: 1500,
-      zoom: { x: 760, y: 0, w: 680 },
       hold: 0.8,
     },
     { label: "all", target: 'button:has-text("全部")', frame: RSS_FRAME, hold: 0.8 },
@@ -335,12 +355,11 @@ const plugins: Story = {
       clicks: 3,
       hold: 0.8,
     },
-    { label: "quote", target: ".pick", frame: RSS_FRAME, zoom: { x: 0, y: 0, w: 1440 }, hold: 1.4 },
+    { label: "quote", target: ".pick", frame: RSS_FRAME, hold: 1.4 },
     {
       label: "needs-you-again",
       target: rail("Needs you"),
-      zoom: { x: 760, y: 0, w: 680 },
-      hold: 1.2,
+      hold: 1.0,
     },
     {
       label: "open-approval",
@@ -352,7 +371,6 @@ const plugins: Story = {
       label: "mail",
       target: rail("邮箱"),
       settle: 1500,
-      zoom: { x: 0, y: 0, w: 1440 },
       hold: 1.2,
       after: async ({ page }) => {
         await page.frameLocator(MAIL_FRAME).locator("text=Frontend Weekly").first().waitFor();
@@ -371,7 +389,6 @@ const plugins: Story = {
       label: "refresh",
       target: '[aria-label="刷新"]',
       frame: MAIL_FRAME,
-      zoom: { x: 760, y: 0, w: 680 },
       hold: 1.2,
       after: async ({ page }) => {
         await page
@@ -385,21 +402,18 @@ const plugins: Story = {
       label: "git",
       target: '[aria-label="Git"]',
       settle: 2000,
-      zoom: { x: 250, y: 40, w: 920 },
       hold: 1.2,
     },
     {
       label: "commit",
       target: '[role="listbox"][aria-label="提交"] [role="option"]:has-text("payment form")',
       settle: 1500,
-      zoom: { x: 250, y: 40, w: 920 },
       hold: 1.2,
     },
     {
       label: "diff",
       target: '[role="listbox"][aria-label="提交的文件"] [role="option"]',
       settle: 1500,
-      zoom: { x: 250, y: 200, w: 1100 },
       hold: 1.6,
     },
   ],

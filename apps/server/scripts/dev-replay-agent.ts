@@ -70,6 +70,11 @@ export const SCENARIOS = [
     file: "./dev-replay/showcase_question_transcript.ndjson",
   },
   {
+    id: "showcase-reply",
+    name: "Showcase follow recommendation",
+    file: "./dev-replay/showcase_reply_transcript.ndjson",
+  },
+  {
     id: "showcase-mail",
     name: "Showcase mail approval",
     file: "./dev-replay/showcase_mail_transcript.ndjson",
