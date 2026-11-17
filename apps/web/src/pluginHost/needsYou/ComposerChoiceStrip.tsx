@@ -3,18 +3,21 @@ import { useEffect, useRef } from "react";
 import { Button } from "~/components/ui/button";
 
 import type { ComposerChoice } from "./composerChoices.logic";
+import { FOLLOW_RECOMMENDATION } from "./needsYou.logic";
 
 /**
- * One button per option of the reply, above the editor of an empty composer. A click fills the
- * composer and sends nothing. While the editor has focus Tab fills the first button and Esc
- * dismisses the strip; the keys are taken before the editor sees them.
+ * One button per option of the reply, above the editor of an empty composer. A click on an option
+ * fills the composer and sends nothing, so a word can follow; a click on 按推荐 sends it. While the
+ * editor has focus Tab fills the first button, 按推荐 included, and Esc dismisses the strip; the
+ * keys are taken before the editor sees them.
  */
 export function ComposerChoiceStrip(props: {
   readonly choices: ReadonlyArray<ComposerChoice>;
   readonly onPick: (fill: string) => void;
+  readonly onSend: (text: string) => void;
   readonly onDismiss: () => void;
 }) {
-  const { choices, onPick, onDismiss } = props;
+  const { choices, onPick, onSend, onDismiss } = props;
   const stripRef = useRef<HTMLDivElement>(null);
   const first = choices[0]?.fill;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Tab and Esc reach the editor before React, so the strip listens on the document first
@@ -54,7 +57,7 @@ export function ComposerChoiceStrip(props: {
           title={choice.detail === "" ? undefined : `${choice.fill} ${choice.detail}`}
           // Keeps the editor focused, so the filled text lands where the cursor already is.
           onPointerDown={(event) => event.preventDefault()}
-          onClick={() => onPick(choice.fill)}
+          onClick={() => (choice.fill === FOLLOW_RECOMMENDATION ? onSend : onPick)(choice.fill)}
         >
           {choice.fill}
           {choice.detail === "" ? null : (
