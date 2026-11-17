@@ -80,6 +80,16 @@ export const SCENARIOS = [
     file: "./dev-replay/showcase_mail_transcript.ndjson",
   },
   {
+    id: "showcase-choices-zh",
+    name: "Showcase choices",
+    file: "./dev-replay/showcase_choices_zh_transcript.ndjson",
+  },
+  {
+    id: "showcase-choices-en",
+    name: "Showcase choices",
+    file: "./dev-replay/showcase_choices_en_transcript.ndjson",
+  },
+  {
     id: "command-output",
     name: "Command output",
     file: "./dev-replay/command_output_transcript.ndjson",

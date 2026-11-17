@@ -1,0 +1,10 @@
+{"type": "transcript_start", "provider": "acpRegistry", "protocol": "acp.ndjson-jsonrpc", "version": "1", "scenario": "dev_replay_showcase_choices_zh", "metadata": {"generatedBy": "hand-written for the choices showcase"}}
+{"type": "expect_outbound", "frame": {"kind": "request", "method": "session/prompt", "params": "<any>"}}
+{"type": "emit_inbound", "frame": {"kind": "notification", "method": "session/update", "params": {"sessionId": "dev-replay-session", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "找到原因了：登录成功后写 Cookie 用的是 `SameSite=Strict`，从第三方登录页跳回来时浏览器不带它，于是又被送回 /login。\n\n**待你定：怎么修**\n- **甲（推荐）**：改成 `SameSite=Lax`，只改 1 行，今天能合。\n- **乙**：把登录回调换成同站跳转，要改 3 个文件。"}}}}}
+{"type": "emit_inbound", "frame": {"kind": "response", "method": "session/prompt", "result": {"stopReason": "end_turn"}}}
+{"type": "expect_outbound", "frame": {"kind": "request", "method": "session/prompt", "params": "<any>"}}
+{"type": "emit_inbound", "frame": {"kind": "notification", "method": "session/update", "params": {"sessionId": "dev-replay-session", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "已改成 `SameSite=Lax`，本地登录不再来回跳。跑测试时发现有 2 条旧用例还按 `Strict` 断言。\n\n**待你定：旧用例怎么处理**\n- **甲（推荐）**：把这 2 条断言改成 `Lax`。\n- **乙**：删掉这 2 条，另补一条端到端用例。"}}}}}
+{"type": "emit_inbound", "frame": {"kind": "response", "method": "session/prompt", "result": {"stopReason": "end_turn"}}}
+{"type": "expect_outbound", "frame": {"kind": "request", "method": "session/prompt", "params": "<any>"}}
+{"type": "emit_inbound", "frame": {"kind": "notification", "method": "session/update", "params": {"sessionId": "dev-replay-session", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "重定向循环修好了，42 条测试全过。顺手发现会话过期时间写死成了 30 秒。\n\n**待你定：过期时间怎么改**\n- **甲（推荐）**：改成读配置，默认 7 天。只动 2 个文件，今天能合。\n- **乙**：先改成 1 小时顶一下，配置化另开一张票。\n- **丙**：不动。30 秒就 30 秒，谁登录谁倒霉。"}}}}}
+{"type": "emit_inbound", "frame": {"kind": "response", "method": "session/prompt", "result": {"stopReason": "end_turn"}}}

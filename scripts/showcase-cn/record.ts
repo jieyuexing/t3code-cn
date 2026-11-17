@@ -193,18 +193,19 @@ async function main() {
   try {
     const origin = `http://127.0.0.1:${port}`;
     await waitReady(`${origin}/.well-known/t3/environment`, app);
-    if (story.supervised) {
+    const settingsPatch = {
       // 默认的完全访问会自动批准回放里的审批请求；演示要让它停在等用户点头。
+      ...(story.supervised ? { defaultRuntimeMode: "approval-required" } : {}),
+      ...story.settings,
+    };
+    if (Object.keys(settingsPatch).length > 0) {
       const settingsFile = NodePath.join(home, "userdata/settings.json");
       const settings = JSON.parse(NodeFS.readFileSync(settingsFile, "utf8"));
-      NodeFS.writeFileSync(
-        settingsFile,
-        JSON.stringify({ ...settings, defaultRuntimeMode: "approval-required" }),
-      );
+      NodeFS.writeFileSync(settingsFile, JSON.stringify({ ...settings, ...settingsPatch }));
       await sleep(2000);
     }
     const threads = seedProjects();
-    const browser = await chromium.launch();
+    const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
       viewport: VIEWPORT,
       deviceScaleFactor: 2,
@@ -286,9 +287,16 @@ async function main() {
         hold: step.hold ?? 1.6,
       });
     }
+    if (story.still) {
+      const { x, y, w, h } = story.still.close;
+      await page.screenshot({
+        path: NodePath.join(outDir, "close-raw.png"),
+        clip: { x, y, width: w, height: h },
+      });
+    }
     NodeFS.writeFileSync(
       NodePath.join(outDir, "beats.json"),
-      JSON.stringify({ viewport: VIEWPORT, scale: 2, dark, beats }, null, 2),
+      JSON.stringify({ viewport: VIEWPORT, scale: 2, dark, still: !!story.still, beats }, null, 2),
     );
     await browser.close();
   } finally {

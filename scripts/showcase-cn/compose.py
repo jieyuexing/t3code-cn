@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """把 record.ts 的关键帧合成推特展示视频：渐变底、圆角窗口、推近镜头、光标移动、点击波纹、交叉淡入。
 
-用法：python3 -I compose.py <关键帧目录>，产出同目录下 showcase.mp4 与 cover.png。依赖 Pillow 与 ffmpeg。
+用法：python3 -I compose.py <关键帧目录>，产出同目录下 showcase.mp4 与 cover.png；静态剧本（beats.json 里 still 为真）只出 cover.png 与 close.png，不出视频。依赖 Pillow 与 ffmpeg。
 """
 import json
 import subprocess
@@ -47,21 +47,42 @@ def lerp(a, b, t):
     return tuple(x + (y - x) * t for x, y in zip(a, b))
 
 
-def stage_bg():
+def stage_bg(sw, sh, px, py, w, h):
     c1, c2 = ((30, 27, 75), (59, 7, 100)) if meta.get("dark") else ((199, 210, 254), (233, 213, 255))
     g = Image.new("RGB", (160, 90))
     g.putdata([tuple(round(a + (b - a) * (x / 159 * 0.6 + y / 89 * 0.4)) for a, b in zip(c1, c2))
                for y in range(90) for x in range(160)])
-    bg = g.resize((SW, SH), Image.BICUBIC).convert("RGBA")
-    shadow = Image.new("RGBA", (SW, SH), (0, 0, 0, 0))
-    ImageDraw.Draw(shadow).rounded_rectangle((PX, PY + 24, PX + W, PY + H + 24), radius=R, fill=(30, 27, 75, 90))
+    bg = g.resize((sw, sh), Image.BICUBIC).convert("RGBA")
+    shadow = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle((px, py + 24, px + w, py + h + 24), radius=R, fill=(30, 27, 75, 90))
     return Image.alpha_composite(bg, shadow.filter(ImageFilter.GaussianBlur(48))).convert("RGB")
 
 
-BG = stage_bg()
+BG = stage_bg(SW, SH, PX, PY, W, H)
 MASK = Image.new("L", (W, H), 0)
 ImageDraw.Draw(MASK).rounded_rectangle((0, 0, W - 1, H - 1), radius=R, fill=255)
 FULL = (SW / 2, SH / 2, SW)
+
+
+def still(win, path, pad):
+    """静态图：窗口四周留 pad 像素的渐变底，圆角，缩到 1920x1080。"""
+    w, h = win.size
+    sh = h + 2 * pad
+    sw = max(round(sh * 16 / 9), w + 2 * pad)
+    sh = round(sw * 9 / 16)
+    px, py = (sw - w) // 2, (sh - h) // 2
+    img = stage_bg(sw, sh, px, py, w, h)
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=R, fill=255)
+    img.paste(win, (px, py), mask)
+    img.resize((OW, OH), Image.LANCZOS).save(path)
+
+
+if meta.get("still"):
+    still(frames[-1], src / "cover.png", PY)
+    still(Image.open(src / "close-raw.png").convert("RGB"), src / "close.png", 50)
+    print(f"{src / 'cover.png'}、{src / 'close.png'}")
+    sys.exit(0)
 
 
 def camera(beat):

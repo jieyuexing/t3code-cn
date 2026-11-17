@@ -23,6 +23,18 @@ export interface NeedsYouEntry {
 
 /** The text that tells a thread to take the recommendation it just wrote. */
 export const FOLLOW_RECOMMENDATION = "按推荐";
+const FOLLOW_RECOMMENDATION_EN = "Go with your recommendation";
+
+const CJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
+
+/** 按推荐的说法跟着回复的语言走：回复里有中日韩文字用中文，否则用英文。 */
+export function followRecommendationFor(reply: string): string {
+  return CJK.test(reply) ? FOLLOW_RECOMMENDATION : FOLLOW_RECOMMENDATION_EN;
+}
+
+export function isFollowRecommendation(text: string): boolean {
+  return text === FOLLOW_RECOMMENDATION || text === FOLLOW_RECOMMENDATION_EN;
+}
 
 export const KIND_LABELS: Readonly<Record<NeedsYouKind, string>> = {
   reply: "回复待决",

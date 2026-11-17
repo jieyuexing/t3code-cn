@@ -1,6 +1,6 @@
 import type { OrchestrationV2ProjectedTurnItem, RunId } from "@t3tools/contracts";
 
-import { FOLLOW_RECOMMENDATION } from "./needsYou.logic";
+import { followRecommendationFor } from "./needsYou.logic";
 import { replyOptions } from "./replyOptions";
 import { pendingItems } from "./replyPending";
 
@@ -11,10 +11,10 @@ export interface ComposerChoice {
   readonly detail: string;
 }
 
-/** The buttons for one reply: its options and 按推荐, or 按推荐 alone when the labels cannot be told apart or only 待你定 is there. */
+/** The buttons for one reply: its options and 按推荐, or the follow-the-recommendation button alone when the labels cannot be told apart or only 待你定 is there. */
 export function composerChoices(reply: string): ReadonlyArray<ComposerChoice> {
   const options = replyOptions(reply);
-  const follow: ComposerChoice = { fill: FOLLOW_RECOMMENDATION, detail: "" };
+  const follow: ComposerChoice = { fill: followRecommendationFor(reply), detail: "" };
   if (options !== "multi" && options.length >= 2) {
     return [...options.map((option) => ({ fill: option.label, detail: option.text })), follow];
   }

@@ -22,4 +22,15 @@ describe("输入框决策快捷条的按钮", () => {
     expect(fills("**甲**：a\n**乙**：b\n\n**甲**：c\n**乙**：d")).toEqual(["按推荐"]);
     expect(fills("## 待你定\n1. 要不要合并？")).toEqual(["按推荐"]);
   });
+
+  it("回复没有中日韩文字时，按钮和发出的话都是英文", () => {
+    const reply = "**A (recommended)**: Lax\n**B**: Same-site";
+    expect(fills(reply)).toEqual(["A", "B", "Go with your recommendation"]);
+    expect(fills("**A**: slow\n**B (recommended)**: fast")).toEqual([
+      "B",
+      "A",
+      "Go with your recommendation",
+    ]);
+    expect(fills("**甲**：慢\n**乙**：快 with CI")).toEqual(["甲", "乙", "按推荐"]);
+  });
 });

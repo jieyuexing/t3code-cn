@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { Button } from "~/components/ui/button";
 
 import type { ComposerChoice } from "./composerChoices.logic";
-import { FOLLOW_RECOMMENDATION } from "./needsYou.logic";
+import { isFollowRecommendation } from "./needsYou.logic";
 
 /**
  * One button per option of the reply, above the editor of an empty composer. A click on an option
@@ -57,7 +57,7 @@ export function ComposerChoiceStrip(props: {
           title={choice.detail === "" ? undefined : `${choice.fill} ${choice.detail}`}
           // Keeps the editor focused, so the filled text lands where the cursor already is.
           onPointerDown={(event) => event.preventDefault()}
-          onClick={() => (choice.fill === FOLLOW_RECOMMENDATION ? onSend : onPick)(choice.fill)}
+          onClick={() => (isFollowRecommendation(choice.fill) ? onSend : onPick)(choice.fill)}
         >
           {choice.fill}
           {choice.detail === "" ? null : (

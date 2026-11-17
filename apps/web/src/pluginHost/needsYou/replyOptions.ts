@@ -19,7 +19,7 @@ const BOLD_OPTION = new RegExp(
 const LISTED_OPTION = new RegExp(
   `^\\s*(?:[-*+•]|\\d+[.)、])\\s*(?:选项|方案)?\\s*${LABEL}\\s*(?:[.．、:：]|(?=[（(]))`,
 );
-const RECOMMENDED = /(?<![不非])推荐/;
+const RECOMMENDED = /(?<![不非])推荐|(?<!\bnot\s)\brecommended\b/i;
 
 /**
  * The labelled options of a reply, the recommended one first and at most four. A label that shows
@@ -36,7 +36,8 @@ export function replyOptions(reply: string): ReadonlyArray<ReplyOption> | "multi
     repeated ||= found.some((option) => option.label === label);
     const text = stripMarkdown(line.slice(match[0].length))
       .replace(/^[.．、:：]\s*/, "")
-      .replace(/^([（(]推荐[）)])\s*[:：]\s*/, "$1");
+      .replace(/^([（(]推荐[）)])\s*[:：]\s*/, "$1")
+      .replace(/^(\(recommended\))\s*:\s*/i, "$1 ");
     found.push({ label, recommended: RECOMMENDED.test(text), text });
   }
   if (repeated) return new Set(found.map((option) => option.label)).size >= 2 ? "multi" : [];

@@ -57,6 +57,16 @@ describe("提取带标号的选项", () => {
     ]);
   });
 
+  it("英文 recommended 同样算推荐项，not recommended 不算，括号后的冒号不留", () => {
+    const options = replyOptions(
+      "- **A**: Not recommended, slow\n- **B (Recommended)**: Read it from config",
+    );
+    expect(options).toEqual([
+      { label: "B", recommended: true, text: "(Recommended) Read it from config" },
+      { label: "A", recommended: false, text: "Not recommended, slow" },
+    ]);
+  });
+
   it("最多四项，推荐项在第五位时仍排进来", () => {
     expect(labels("- 甲. 一\n- 乙. 二\n- 丙. 三\n- 丁. 四\n- A. 五（推荐）")).toEqual([
       "A",

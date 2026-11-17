@@ -39,6 +39,10 @@ interface Story {
   readonly pluginData: (demo: { readonly mailPort: number }) => Record<string, unknown>;
   /** 线程用「需要审批」的运行模式，回放里的审批请求才会停下等用户。 */
   readonly supervised?: true;
+  /** 服务端设置里要改的项，如打开 Labs 开关；写入后等服务端读到再建项目。 */
+  readonly settings?: Record<string, unknown>;
+  /** 静态展示图：不录视频，只出整窗封面，并按 close 区域（CSS 像素）再裁一张近景。 */
+  readonly still?: { readonly close: { x: number; y: number; w: number; h: number } };
   /** 录第一帧之前跑一遍：让插件子进程先读完钥匙串、连上邮箱，正式一拍里面板秒开。 */
   readonly prepare?: (context: StepContext) => Promise<void>;
   readonly mailAccountId?: string;
@@ -419,7 +423,52 @@ const plugins: Story = {
   ],
 };
 
+/** closeY 是近景上沿：英文回复折行多一行，要比中文高出约 22 像素才框得住最后一条用户消息。 */
+const choicesStory = (
+  turns: {
+    readonly title: string;
+    readonly model: string;
+    readonly messages: ReadonlyArray<string>;
+  },
+  closeY: number,
+): Story => ({
+  plugins: [],
+  rail: [
+    { _tag: "builtin", id: "needsYou" },
+    { _tag: "builtin", id: "browser" },
+    { _tag: "builtin", id: "terminal" },
+    { _tag: "builtin", id: "files" },
+    { _tag: "builtin", id: "diff" },
+  ],
+  pluginData: () => ({}),
+  settings: { promptSuggestionsEnabled: true },
+  still: { close: { x: 330, y: closeY, w: 756, h: 883 - closeY } },
+  projects: [{ name: "acme-dashboard", files: acme, threads: [{ key: "login", ...turns }] }],
+  open: "login",
+  steps: [{ label: "overview", hold: 1 }],
+});
+
 export const STORIES: Record<string, Story> = {
+  "choices-zh": choicesStory(
+    {
+      title: "修登录页的重定向循环",
+      model: "showcase-choices-zh",
+      messages: ["登录后一直在 /login 和 /home 之间来回跳，查一下", "按推荐", "按推荐"],
+    },
+    428,
+  ),
+  "choices-en": choicesStory(
+    {
+      title: "Fix the login redirect loop",
+      model: "showcase-choices-en",
+      messages: [
+        "Login keeps bouncing between /login and /home. Take a look.",
+        "Go with your recommendation",
+        "Go with your recommendation",
+      ],
+    },
+    406,
+  ),
   rail: {
     plugins: [rssPlugin, mailPlugin],
     rail: [
