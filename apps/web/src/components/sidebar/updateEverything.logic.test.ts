@@ -1,3 +1,4 @@
+import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import { EnvironmentId, type ServerSelfUpdateCapability } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -8,6 +9,7 @@ import {
   collectServerUpdateTargets,
   describeUpdateCapsule,
   describeUpdateEverything,
+  resolveUpdateRunMachineStatus,
   runUpdateEverything,
   type UpdateEverythingMachine,
 } from "./updateEverything.logic";
@@ -343,12 +345,16 @@ describe("collectRestartingMachines", () => {
 });
 
 describe("runUpdateEverything", () => {
+  const [slow, fast] = [EnvironmentId.make("slow"), EnvironmentId.make("fast")];
+  const never = new Promise<never>(() => {});
+
   it("still updates remote machines when the local download fails", async () => {
     const calls: string[] = [];
     const result = await runUpdateEverything({
       downloadLocal: async () => false,
-      updateProviders: async () => {
+      updateProviders: () => {
         calls.push("providers");
+        return new Map([[fast, Promise.resolve("updated")]]);
       },
       updateServers: async () => {
         calls.push("servers");
@@ -357,20 +363,16 @@ describe("runUpdateEverything", () => {
 
     expect(calls).toEqual(["providers", "servers"]);
     expect(result.localReady).toBe(false);
+    expect(result.providers).toEqual(["updated"]);
   });
 
   it("stages servers while providers install and updates each once its own stage settles", async () => {
     const calls: string[] = [];
-    const [slow, fast] = [EnvironmentId.make("slow"), EnvironmentId.make("fast")];
-    let finishProviders = () => {};
     let failSlowStage = () => {};
-    const providers = new Promise<void>((resolve) => (finishProviders = resolve));
     const run = runUpdateEverything({
       updateProviders: () => {
         calls.push("providers");
-        return providers.then(() => {
-          calls.push("providers done");
-        });
+        return new Map();
       },
       stageServers: () => {
         calls.push("stage");
@@ -379,28 +381,93 @@ describe("runUpdateEverything", () => {
           [fast, Promise.resolve()],
         ]);
       },
-      updateServers: (staged) => {
-        calls.push("servers");
-        return Promise.all(
+      updateServers: (staged) =>
+        Promise.all(
           [slow, fast].map(async (id) => {
             await staged.get(id);
             calls.push(`server ${id}`);
             if (id === fast) failSlowStage();
           }),
-        );
+        ),
+    });
+    await run;
+
+    expect(calls).toEqual(["stage", "providers", "server fast", "server slow"]);
+  });
+
+  it("starts a machine's server once its own providers finish, while another machine's are still running", async () => {
+    const calls: string[] = [];
+    let finishSlow = () => {};
+    const slowProviders = new Promise<string>((resolve) => (finishSlow = () => resolve("slow")));
+    const run = runUpdateEverything({
+      updateProviders: () =>
+        new Map([
+          [slow, slowProviders],
+          [fast, Promise.resolve("fast")],
+        ]),
+      updateServers: (_staged, providersDone) =>
+        Promise.all(
+          [slow, fast].map(async (id) => {
+            await providersDone.get(id);
+            calls.push(`server ${id}`);
+            if (id === fast) finishSlow();
+          }),
+        ),
+    });
+    const result = await run;
+
+    expect(calls).toEqual(["server fast", "server slow"]);
+    expect(result.providers).toEqual(["slow", "fast"]);
+  });
+
+  it("never holds a machine without provider updates behind another machine's providers", async () => {
+    const calls: string[] = [];
+    void runUpdateEverything({
+      updateProviders: () => new Map([[slow, never]]),
+      updateServers: async (_staged, providersDone) => {
+        expect(providersDone.has(fast)).toBe(false);
+        await providersDone.get(fast);
+        calls.push(`server ${fast}`);
       },
     });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(calls).toEqual([`server ${fast}`]);
+  });
+
+  it("keeps a machine's server behind its own providers even when its stage is ready", async () => {
+    const calls: string[] = [];
+    let finishProviders = () => {};
+    const providers = new Promise<void>((resolve) => (finishProviders = resolve));
+    const run = runUpdateEverything({
+      updateProviders: () => new Map([[fast, providers.then(() => calls.push("providers done"))]]),
+      stageServers: () => new Map([[fast, Promise.resolve()]]),
+      updateServers: async (staged, providersDone) => {
+        await providersDone.get(fast);
+        await staged.get(fast);
+        calls.push("server");
+      },
+    });
+    await Promise.resolve();
+    expect(calls).toEqual([]);
     finishProviders();
     await run;
 
-    expect(calls).toEqual([
-      "stage",
-      "providers",
-      "providers done",
-      "servers",
-      "server fast",
-      "server slow",
-    ]);
+    expect(calls).toEqual(["providers done", "server"]);
+  });
+
+  it("does not let a failed provider update block its own machine's server", async () => {
+    const calls: string[] = [];
+    await runUpdateEverything({
+      updateProviders: () => new Map([[fast, Promise.resolve("failed")]]),
+      updateServers: async (_staged, providersDone) => {
+        await providersDone.get(fast);
+        calls.push("server");
+      },
+    });
+
+    expect(calls).toEqual(["server"]);
   });
 });
 
@@ -450,7 +517,7 @@ describe("describeUpdateCapsule", () => {
       machine: {
         environmentId: EnvironmentId.make("remote"),
         label: "remote",
-        updatesProviders: false,
+        updatingProviders: false,
         server: {
           environmentId: EnvironmentId.make("remote"),
           serverLabel: "remote",
@@ -471,5 +538,37 @@ describe("describeUpdateCapsule", () => {
     expect(describeUpdateCapsule({ ...run, trackSwitch: true }, [failed], null, 0).action).toBe(
       "dismiss",
     );
+  });
+
+  it("points the slow notice at the machine that is still on its providers", () => {
+    const machine = (label: string, startedAt: number, updatingProviders: boolean) => ({
+      environmentId: EnvironmentId.make(label),
+      label,
+      updatingProviders,
+      server: null,
+      handedOffVersion: null,
+      startedAt,
+      result: null,
+      failure: null,
+      providerFailure: null,
+    });
+    const run = {
+      localVersion: null,
+      phase: "providers" as const,
+      restartAt: null,
+      machines: [machine("omarchy", 60_000, false), machine("141", 0, true)],
+    };
+    const serverState = { status: "idle" } as ServerUpdateState;
+    const views = run.machines.map((entry) => ({
+      machine: entry,
+      status: resolveUpdateRunMachineStatus(entry, run.phase, serverState),
+    }));
+
+    expect(views.map(({ status }) => status)).toEqual(["waiting", "providers"]);
+    expect(describeUpdateCapsule(run, views, null, 4 * 60_000)).toMatchObject({
+      tone: "slow",
+      label: "141",
+      slow: { status: "updating providers", elapsed: "4m" },
+    });
   });
 });
