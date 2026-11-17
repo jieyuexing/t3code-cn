@@ -652,6 +652,8 @@ describe("PluginHost", () => {
         }),
       );
 
+      const pinnedEcho = (yield* latest(first))?.rail ?? DEFAULT_RAIL_CONFIG;
+      expect(pinnedEcho.items.at(-1)).toMatchObject({ _tag: "plugin", pluginId: PLUGIN_ID });
       let manifestReads = 0;
       const countingFs: FileSystem.FileSystem = {
         ...fs,
@@ -670,7 +672,7 @@ describe("PluginHost", () => {
         plugins: [],
         views: [],
         services: [],
-        rail: DEFAULT_RAIL_CONFIG,
+        rail: pinnedEcho,
       });
       const refused = yield* call(host, { _tag: "add", path: good }).pipe(Effect.flip);
       expect(refused.reason).toBe("host-disabled");
@@ -697,7 +699,7 @@ describe("PluginHost", () => {
         plugins: [],
         views: [],
         services: [],
-        rail: DEFAULT_RAIL_CONFIG,
+        rail: pinnedEcho,
       });
       const afterOff = yield* call(host, {
         _tag: "invoke",
@@ -790,6 +792,59 @@ describe("PluginHost", () => {
       expect(refused.reason).toBe("io-failed");
       expect(yield* fs.readFileString(file)).toBe('{"enabled":');
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  const echoPin = { _tag: "plugin", pluginId: PLUGIN_ID, viewId: "clock", title: "Echo Clock" };
+
+  it.live("the first consent pins the plugin's views to the end of the rail, once", () =>
+    Effect.gen(function* () {
+      const { fs, path, root, stateDir, host, copyExample } = yield* setup();
+      yield* call(host, { _tag: "add", path: yield* copyExample("echo") });
+      expect((yield* latest(host))?.rail).toEqual(DEFAULT_RAIL_CONFIG);
+
+      yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
+      const pinnedRail = { ...DEFAULT_RAIL_CONFIG, items: [...DEFAULT_RAIL_CONFIG.items, echoPin] };
+      expect((yield* latest(host))?.rail).toEqual(pinnedRail);
+      const saved = yield* fs.readFileString(path.join(stateDir, "plugins", "rail.json"));
+      expect(JSON.parse(saved)).toEqual(pinnedRail);
+
+      yield* call(host, { _tag: "setRail", rail: DEFAULT_RAIL_CONFIG });
+      yield* call(host, { _tag: "reload", pluginId });
+      yield* call(host, { _tag: "disable", pluginId });
+      yield* call(host, { _tag: "enable", pluginId });
+      expect((yield* latest(host))?.rail).toEqual(DEFAULT_RAIL_CONFIG);
+
+      const reopened = yield* PluginHost.make({
+        stateDir,
+        ...makeOptions({ count: 0 }, root),
+      });
+      expect((yield* latest(reopened))?.rail).toEqual(DEFAULT_RAIL_CONFIG);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live(
+    "a plugin already on the rail, or enabled again after an update, is not pinned twice",
+    () =>
+      Effect.gen(function* () {
+        const { fs, path, host, copyExample } = yield* setup();
+        const directory = yield* copyExample("echo");
+        yield* call(host, { _tag: "add", path: directory });
+        yield* call(host, { _tag: "setRail", rail: { enabled: true, items: [echoPin as never] } });
+        yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
+        expect((yield* latest(host))?.rail?.items).toEqual([echoPin]);
+
+        yield* call(host, { _tag: "setRail", rail: DEFAULT_RAIL_CONFIG });
+        const manifestPath = path.join(directory, "plugin.json");
+        yield* fs.copyFile(path.join(directory, "index.mjs"), path.join(directory, "other.mjs"));
+        yield* fs.writeFileString(
+          manifestPath,
+          (yield* fs.readFileString(manifestPath)).replace('"./index.mjs"', '"./other.mjs"'),
+        );
+        yield* call(host, { _tag: "reload", pluginId });
+        expect(entryOf((yield* latest(host))!)?.consent).toBe("required");
+        yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
+        expect((yield* latest(host))?.rail).toEqual(DEFAULT_RAIL_CONFIG);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it("the rail payload takes web pages once each and nothing else", () => {

@@ -25,13 +25,14 @@ import {
   PuzzleIcon,
   SquareMenuIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { PanelLayoutControlsProps } from "~/components/chat/PanelLayoutControls";
 import { PopoverCreateHandle, PopoverTrigger } from "~/components/ui/popover";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { shortcutLabelForCommand } from "~/keybindings";
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import {
@@ -48,10 +49,13 @@ import { NeedsYouPopup } from "../needsYou/NeedsYouPopup";
 import { useNeedsYou } from "../needsYou/useNeedsYou";
 import { useThreadPlanProgress } from "../threadPlan/useThreadPlan";
 import { RAIL_BUILTIN_LABELS } from "./railBuiltins";
+import { RailOverflowPopover, type RailOverflowRow } from "./RailOverflowPopover";
 import { RailPinPopover } from "./RailPinPopover";
 import { RailWebAppDialog } from "./RailWebAppDialog";
 import { railIconOf } from "./railIcons";
 import {
+  RAIL_OVERFLOW_ROW,
+  fitRailItems,
   groupRailItems,
   isRailItemShowing,
   monogram,
@@ -264,12 +268,38 @@ export function AppRail(props: AppRailProps) {
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const [dialog, setDialog] = useState<RailDialog | null>(null);
 
-  const groups = groupRailItems(config);
+  const [nav, setNav] = useState<HTMLElement | null>(null);
+  const topRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const [available, setAvailable] = useState<number | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the room for apps is the window's height, which only the DOM knows
+  useEffect(() => {
+    const top = topRef.current;
+    const bottom = bottomRef.current;
+    if (nav === null || top === null || bottom === null) return;
+    return observeResize(nav, () => {
+      const overflow =
+        bottom.querySelector("[data-rail-overflow]") === null ? 0 : RAIL_OVERFLOW_ROW;
+      // The scroll area's own 8px of vertical padding.
+      setAvailable(nav.clientHeight - top.offsetHeight - (bottom.offsetHeight - overflow) - 8);
+    });
+  }, [nav]);
+
+  const allGroups = groupRailItems(config);
+  const hostEnabled = snapshot?.hostEnabled === true;
+  const fit = fitRailItems(
+    [...allGroups.builtin, ...(hostEnabled ? allGroups.plugin : []), ...allGroups.web],
+    available,
+  );
+  const groups = {
+    builtin: allGroups.builtin.filter((item) => fit.visible.includes(item)),
+    plugin: allGroups.plugin.filter((item) => fit.visible.includes(item)),
+    web: allGroups.web.filter((item) => fit.visible.includes(item)),
+  };
   const webContext = useRailWebContext(
     threadRef,
     config.items.filter((item): item is WebAppItem => item._tag === "web"),
   );
-  const hostEnabled = snapshot?.hostEnabled === true;
   const views: ReadonlyArray<PluginHostView> = hostEnabled ? (snapshot?.views ?? []) : [];
 
   const fail = (title: string, error: unknown) =>
@@ -384,6 +414,41 @@ export function AppRail(props: AppRailProps) {
     </SortableRailItem>
   ));
 
+  const overflowRows = fit.hidden.map((item): RailOverflowRow => {
+    const showing = isRailItemShowing(panel, item, webContext);
+    const key = railItemKey(item);
+    if (item._tag === "builtin") {
+      const { label, icon: Icon } = RAIL_BUILTIN_LABELS[item.id];
+      const action = builtins[item.id];
+      return {
+        key,
+        label,
+        icon: <Icon className="size-4" />,
+        showing,
+        unavailable: action?.available ? undefined : "Unavailable in this thread",
+        onSelect: () => click(item, () => action?.open()),
+      };
+    }
+    if (item._tag === "plugin") {
+      const state = railPluginState(item, snapshot);
+      return {
+        key,
+        label: item.title,
+        icon: <PluginAppIcon view={viewOf(item)} title={item.title} />,
+        showing,
+        unavailable: state.ready ? undefined : state.reason,
+        onSelect: () => click(item, () => openPlugin(item)),
+      };
+    }
+    return {
+      key,
+      label: item.title,
+      icon: <AppGlyph title={item.title} />,
+      showing,
+      onSelect: () => click(item, () => openWeb(item)),
+    };
+  });
+
   const sections = [
     { key: "builtin", keys: groups.builtin.map(railItemKey), nodes: builtinItems },
     { key: "plugin", keys: groups.plugin.map(railItemKey), nodes: pluginItems },
@@ -394,11 +459,12 @@ export function AppRail(props: AppRailProps) {
 
   return (
     <nav
+      ref={setNav}
       aria-label="App rail"
       data-app-rail
       className="flex w-10 shrink-0 flex-col items-center border-l bg-background [-webkit-app-region:no-drag]"
     >
-      <div aria-hidden className="h-(--workspace-topbar-height) w-full shrink-0" />
+      <div ref={topRef} aria-hidden className="h-(--workspace-topbar-height) w-full shrink-0" />
       <div className="flex min-h-0 w-full flex-1 flex-col items-center scrollbar-gutter-both overflow-y-auto overflow-x-hidden py-1">
         <RailButton
           label="Thread details"
@@ -429,7 +495,7 @@ export function AppRail(props: AppRailProps) {
           </div>
         ))}
       </div>
-      <div className="flex shrink-0 flex-col items-center pb-2">
+      <div ref={bottomRef} className="flex shrink-0 flex-col items-center pb-2">
         <Separator />
         <div className="flex flex-col items-center gap-1">
           <RailButton
@@ -456,16 +522,23 @@ export function AppRail(props: AppRailProps) {
           </RailButton>
         </div>
         <Separator />
-        <RailPinPopover
-          config={config}
-          views={views}
-          canEdit={canEdit}
-          onChange={(next) => void save(next)}
-          onAddWebApp={() => setDialog({ app: null })}
-          onEditWebApp={(app) => setDialog({ app })}
-        >
-          <PlusIcon className="size-4" />
-        </RailPinPopover>
+        <div className="flex flex-col items-center gap-1">
+          {overflowRows.length === 0 ? null : (
+            <div data-rail-overflow className="flex">
+              <RailOverflowPopover rows={overflowRows} />
+            </div>
+          )}
+          <RailPinPopover
+            config={config}
+            views={views}
+            canEdit={canEdit}
+            onChange={(next) => void save(next)}
+            onAddWebApp={() => setDialog({ app: null })}
+            onEditWebApp={(app) => setDialog({ app })}
+          >
+            <PlusIcon className="size-4" />
+          </RailPinPopover>
+        </div>
       </div>
       {dialog === null ? null : (
         <RailWebAppDialog
