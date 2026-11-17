@@ -381,7 +381,10 @@ import { ThreadVisitWatermark } from "./chat/ThreadVisitWatermark";
 import { ChatTerminalDrawers } from "./chat/ChatTerminalDrawers";
 import { ChatRightPanel } from "./chat/ChatRightPanel";
 import { AppRail } from "../pluginHost/rail/AppRail";
-import { useAppRailVisible } from "../pluginHost/rail/useAppRailVisible";
+import {
+  RAIL_TITLEBAR_OFFSET_CLASS,
+  useAppRailVisible,
+} from "../pluginHost/rail/useAppRailVisible";
 import { useDraftEnvironmentRouting } from "./chat/useDraftEnvironmentRouting";
 import { branchMismatchBannerItem, extensionStatusBannerItem } from "./chat/ThreadActivityBanners";
 import { ThreadNow } from "./chat/ThreadNow";
@@ -3338,7 +3341,11 @@ export default function ChatView(props: ChatViewProps) {
           state={deviceState}
         />
       )}
-      {rightPanelControlsAtRoot && !embedded ? panelLayoutControls : null}
+      {rightPanelControlsAtRoot && !embedded ? (
+        <div className={railVisible ? RAIL_TITLEBAR_OFFSET_CLASS : "contents"}>
+          {panelLayoutControls}
+        </div>
+      ) : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",

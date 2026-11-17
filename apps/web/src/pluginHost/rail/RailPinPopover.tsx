@@ -5,7 +5,7 @@ import {
   type RailConfig,
   type RailItem,
 } from "@t3tools/contracts";
-import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { PencilIcon, PlusIcon, PuzzleIcon, Trash2Icon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -15,6 +15,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
 import { RAIL_BUILTIN_LABELS } from "./railBuiltins";
 import { isPinned, removeItem, togglePin, type WebAppItem } from "./rail.logic";
+import { railIconOf } from "./railIcons";
 
 function PinRow(props: {
   readonly label: string;
@@ -39,6 +40,17 @@ function PinRow(props: {
     </div>
   );
 }
+
+const pluginIcon = (views: ReadonlyArray<PluginHostView>, item: RailItem) => {
+  const view =
+    item._tag === "plugin"
+      ? views.find(
+          (candidate) => candidate.pluginId === item.pluginId && candidate.viewId === item.viewId,
+        )
+      : undefined;
+  const className = "size-4 text-muted-foreground";
+  return railIconOf(view?.icon, className) ?? <PuzzleIcon className={className} />;
+};
 
 const SectionTitle = (props: { readonly children: ReactNode }) => (
   <div className="px-2 pt-2 pb-1 font-medium text-muted-foreground text-xs">{props.children}</div>
@@ -116,6 +128,7 @@ export function RailPinPopover(props: {
                 <PinRow
                   key={railItemKey(item)}
                   label={item._tag === "plugin" ? item.title : ""}
+                  icon={pluginIcon(props.views, item)}
                   checked={isPinned(config, item)}
                   disabled={!canEdit}
                   onToggle={() => onChange(togglePin(config, item))}

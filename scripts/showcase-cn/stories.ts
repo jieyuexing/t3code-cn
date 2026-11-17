@@ -36,10 +36,7 @@ interface Story {
 
 const universe = NodePath.resolve(import.meta.dirname, "../../../../..");
 const rssPlugin = NodePath.join(universe, "projects/personal/t3-plugins/t3-rss-plugin");
-const gitStatusPlugin = NodePath.resolve(
-  import.meta.dirname,
-  "../../plugin-host-examples/git-status",
-);
+const mailPlugin = NodePath.join(universe, "projects/personal/t3-plugins/t3-mail-plugin");
 
 /** 只取公开技术源的本机缓存，订阅列表里的其他源不进演示。 */
 const PUBLIC_FEEDS = ["martinfowler.com", "vercel.com", "atlasnote.ai"];
@@ -71,7 +68,7 @@ const acme = {
 
 export const STORIES: Record<string, Story> = {
   rail: {
-    plugins: [rssPlugin, gitStatusPlugin],
+    plugins: [rssPlugin, mailPlugin],
     rail: [
       { _tag: "builtin", id: "needsYou" },
       { _tag: "builtin", id: "browser" },
@@ -79,7 +76,7 @@ export const STORIES: Record<string, Story> = {
       { _tag: "builtin", id: "files" },
       { _tag: "builtin", id: "diff" },
       { _tag: "plugin", pluginId: "t3-rss", viewId: "panel", title: "订阅" },
-      { _tag: "plugin", pluginId: "example.git-status", viewId: "status", title: "Git Status" },
+      { _tag: "plugin", pluginId: "t3-mail", viewId: "mailbox", title: "邮箱" },
     ],
     pluginData: rssDemoData,
     projects: [
