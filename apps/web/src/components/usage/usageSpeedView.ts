@@ -1,5 +1,7 @@
 import type { SpeedRanking } from "@t3tools/shared/usageSpeed";
 
+import { modelDisplayName } from "./usageShareModel";
+
 /** Tokens per second: one decimal below 100, whole numbers above. */
 export function formatRate(value: number): string {
   return value >= 100 ? String(Math.round(value)) : value.toFixed(1);
@@ -10,7 +12,8 @@ export function formatSeconds(value: number): string {
 }
 
 export function speedModelLabel(row: Pick<SpeedRanking, "model" | "tier">): string {
-  return row.tier === undefined ? row.model : `${row.model} (${row.tier})`;
+  const name = modelDisplayName(row.model);
+  return row.tier === undefined ? name : `${name} (${row.tier})`;
 }
 
 /** The rate a row's bar shows: long-output speed, else every request's speed, and whether it is thin. */

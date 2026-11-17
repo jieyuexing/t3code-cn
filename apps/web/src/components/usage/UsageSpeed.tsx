@@ -110,7 +110,7 @@ export function UsageSpeed({
                   className="border-b border-border/50 text-right whitespace-nowrap text-muted-foreground tabular-nums transition-colors hover:bg-muted/50"
                 >
                   <td className="py-2.5 pr-3 pl-2 text-left text-xs">{index + 1}</td>
-                  <td className="py-2.5 text-left whitespace-normal">
+                  <td className="py-2.5 text-left">
                     <Tooltip>
                       <TooltipTrigger
                         render={<span className="flex items-center gap-2 text-foreground" />}

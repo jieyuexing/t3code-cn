@@ -43,6 +43,6 @@ describe("usage speed view", () => {
   it("formats rates and tier labels", () => {
     expect(formatRate(92.74)).toBe("92.7");
     expect(formatRate(124.6)).toBe("125");
-    expect(speedModelLabel(ranking({ tier: "fast" }))).toBe("claude-opus-5-5 (fast)");
+    expect(speedModelLabel(ranking({ tier: "fast" }))).toBe("Claude Opus 5.5 (fast)");
   });
 });
