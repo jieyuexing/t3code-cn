@@ -237,17 +237,21 @@ async function main() {
       await fetch(`${origin}/.well-known/t3/environment`)
     ).json()) as { environmentId: string };
     // 配对页登录后会自己跳回首页，可能打断紧接着的跳转；落到会话页、应用栏出现为止。
-    const threadUrl = `${origin}/${environmentId}/${threads[story.open]}`;
+    // 剧本没有 open 时停在首页，线程由剧本的 prepare 在界面里自己建。
+    const threadUrl =
+      story.open === undefined ? origin : `${origin}/${environmentId}/${threads[story.open]}`;
+    const ready =
+      story.open === undefined ? '[aria-label="Add project"]' : '[aria-label="App rail"]';
     for (let attempt = 0; ; attempt++) {
       await page.waitForLoadState("networkidle");
       const landed = await page
         .goto(threadUrl)
-        .then(() => page.locator('[aria-label="App rail"]').waitFor({ timeout: 20_000 }))
+        .then(() => page.locator(ready).waitFor({ timeout: 20_000 }))
         .then(
           () => true,
           (error) => (attempt < 3 ? false : Promise.reject(error)),
         );
-      if (landed && page.url() === threadUrl) break;
+      if (landed && (story.open === undefined || page.url() === threadUrl)) break;
     }
     // 输入框光标闪烁会让相邻关键帧出现无意义差异。
     await page.addStyleTag({ content: "*{caret-color:transparent!important}" });

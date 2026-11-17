@@ -81,12 +81,12 @@ export const SCENARIOS = [
   },
   {
     id: "showcase-choices-zh",
-    name: "Showcase choices",
+    name: "演示模型",
     file: "./dev-replay/showcase_choices_zh_transcript.ndjson",
   },
   {
     id: "showcase-choices-en",
-    name: "Showcase choices",
+    name: "Demo model",
     file: "./dev-replay/showcase_choices_en_transcript.ndjson",
   },
   {

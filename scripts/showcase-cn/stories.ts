@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off - 剧本在录制前同步读本机插件缓存，并按当下时间标记缓存新鲜度。
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off - 剧本在录制前同步读本机插件缓存，并按当下时间标记缓存新鲜度，等回复时用计时器。
 // 展示剧本：演示 home 里装哪些插件、放哪些项目与线程、按什么顺序点哪里。
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -57,9 +57,12 @@ interface Story {
       readonly messages: ReadonlyArray<string>;
     }>;
   }>;
-  readonly open: string;
+  /** 起始打开的线程；缺省停在首页，线程由 prepare 在界面里建。 */
+  readonly open?: string;
   readonly steps: ReadonlyArray<Step>;
 }
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const universe = NodePath.resolve(import.meta.dirname, "../../../../..");
 const rssPlugin = NodePath.join(universe, "projects/personal/t3-plugins/t3-rss-plugin");
@@ -423,15 +426,47 @@ const plugins: Story = {
   ],
 };
 
-/** closeY 是近景上沿：英文回复折行多一行，要比中文高出约 22 像素才框得住最后一条用户消息。 */
-const choicesStory = (
-  turns: {
+/**
+ * 用户消息在输入框里真打出来再发：命令行与 MCP 发的消息入库时记作代理，界面会折成「Agent」胶囊。
+ * 模型选择器按名字搜，replyEnds 是每轮回复里独有的一段，用来等这一轮出完。
+ */
+const composeChoices =
+  (turn: {
     readonly title: string;
-    readonly model: string;
+    readonly modelName: string;
     readonly messages: ReadonlyArray<string>;
-  },
-  closeY: number,
-): Story => ({
+    readonly replyEnds: ReadonlyArray<string>;
+  }) =>
+  async ({ page }: StepContext) => {
+    await page.locator('[aria-label="New thread in acme-dashboard"]').click({ force: true });
+    await page.locator('[data-chat-composer-form] button[aria-haspopup="dialog"]').click();
+    await page.getByPlaceholder("Search models...").fill(turn.modelName);
+    await page.keyboard.press("Enter");
+    await page
+      .locator('[data-chat-composer-form] button[aria-haspopup="dialog"]')
+      .filter({ hasText: turn.modelName })
+      .waitFor();
+    await page.keyboard.press("Escape");
+    const editor = page.locator('[data-chat-composer-form] [contenteditable="true"]').first();
+    for (const [index, message] of turn.messages.entries()) {
+      await editor.focus();
+      await page.keyboard.insertText(message);
+      await page.keyboard.press("Enter");
+      await page.getByText(turn.replyEnds[index]!).first().waitFor({ timeout: 60_000 });
+      await sleep(1500);
+    }
+    await page.locator('[aria-label^="Thread actions for"]').first().click({ force: true });
+    await page.getByRole("menuitem", { name: "Rename thread" }).click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.insertText(turn.title);
+    await page.keyboard.press("Enter");
+    await page.getByText(turn.title).first().waitFor();
+    await sleep(800);
+    await page.mouse.move(648, 30);
+  };
+
+/** closeY 是近景上沿：英文回复折行多一行，要比中文高出约 22 像素才框得住最后一条用户消息。 */
+const choicesStory = (turn: Parameters<typeof composeChoices>[0], closeY: number): Story => ({
   plugins: [],
   rail: [
     { _tag: "builtin", id: "needsYou" },
@@ -443,8 +478,8 @@ const choicesStory = (
   pluginData: () => ({}),
   settings: { promptSuggestionsEnabled: true },
   still: { close: { x: 330, y: closeY, w: 756, h: 883 - closeY } },
-  projects: [{ name: "acme-dashboard", files: acme, threads: [{ key: "login", ...turns }] }],
-  open: "login",
+  projects: [{ name: "acme-dashboard", files: acme, threads: [] }],
+  prepare: composeChoices(turn),
   steps: [{ label: "overview", hold: 1 }],
 });
 
@@ -452,22 +487,24 @@ export const STORIES: Record<string, Story> = {
   "choices-zh": choicesStory(
     {
       title: "修登录页的重定向循环",
-      model: "showcase-choices-zh",
+      modelName: "演示模型",
       messages: ["登录后一直在 /login 和 /home 之间来回跳，查一下", "按推荐", "按推荐"],
+      replyEnds: ["要改 3 个文件。", "另补一条端到端用例。", "谁登录谁倒霉。"],
     },
-    428,
+    385,
   ),
   "choices-en": choicesStory(
     {
       title: "Fix the login redirect loop",
-      model: "showcase-choices-en",
+      modelName: "Demo model",
       messages: [
         "Login keeps bouncing between /login and /home. Take a look.",
         "Go with your recommendation",
         "Go with your recommendation",
       ],
+      replyEnds: ["Three files.", "end-to-end test instead.", "builds character."],
     },
-    406,
+    361,
   ),
   rail: {
     plugins: [rssPlugin, mailPlugin],
