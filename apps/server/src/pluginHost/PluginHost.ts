@@ -9,7 +9,10 @@ import {
   type PluginId,
   type PluginSettingValue,
   DEFAULT_RAIL_CONFIG,
+  RAIL_MAX_ITEMS,
+  railItemKey,
   type RailConfig,
+  type RailItem,
 } from "@t3tools/contracts";
 import { resolveSelfInvocation, selfInvocationArgs } from "@t3tools/shared/nodeRuntime";
 import * as Clock from "effect/Clock";
@@ -576,6 +579,26 @@ export const make = Effect.fn("PluginHost.make")(function* (
     yield* emit;
   });
 
+  /** Only a plugin's first consent pins its apps; what the user takes off the rail later stays off. A rail that cannot be saved is left alone. */
+  const pinViews = (slot: Slot, registration: PluginRegistration) =>
+    Effect.suspend(() => {
+      const added = registration.manifest.views.map((view): RailItem => ({
+        _tag: "plugin",
+        pluginId: slot.id,
+        viewId: view.id,
+        title: view.title,
+      }));
+      const items = [
+        ...rail.items,
+        ...added.filter(
+          (item) => !rail.items.some((entry) => railItemKey(entry) === railItemKey(item)),
+        ),
+      ];
+      return added.length === 0 || railProblem !== undefined || items.length > RAIL_MAX_ITEMS
+        ? Effect.void
+        : setRail({ ...rail, items }).pipe(Effect.ignore);
+    });
+
   const enable = Effect.fn("PluginHost.enable")(function* (slot: Slot, grantConsent: boolean) {
     const registration = slot.registration;
     if (registration === undefined || slot.problem !== undefined)
@@ -591,12 +614,14 @@ export const make = Effect.fn("PluginHost.make")(function* (
     }
     if (slot.consent !== "granted") {
       if (!grantConsent) return yield* fail("consent-required", slot.id);
+      const firstConsent = consent[slot.id] === undefined;
       const next = { ...consent, [slot.id]: registration.digest };
       yield* store
         .writeConsent(next)
         .pipe(Effect.mapError((error) => fail("io-failed", error.message)));
       consent = next;
       slot.consent = "granted";
+      if (firstConsent) yield* pinViews(slot, registration);
     }
     slot.enabled = true;
     yield* persistRegistry.pipe(Effect.tapError(() => Effect.sync(() => (slot.enabled = false))));

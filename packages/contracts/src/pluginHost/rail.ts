@@ -19,7 +19,7 @@ export const RAIL_BUILTIN_IDS = [
 export const RailBuiltinId = Schema.Literals(RAIL_BUILTIN_IDS);
 export type RailBuiltinId = typeof RailBuiltinId.Type;
 
-const RAIL_MAX_ITEMS = 64;
+export const RAIL_MAX_ITEMS = 64;
 
 /** Only web pages: the rail opens them in the thread's T3 browser. */
 export const RailWebUrl = TrimmedNonEmptyString.check(

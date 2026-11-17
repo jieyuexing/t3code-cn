@@ -167,6 +167,46 @@ export function groupRailItems(config: RailConfig) {
   };
 }
 
+const ITEM_HEIGHT = 32;
+const ITEM_GAP = 4;
+const GROUP_SEPARATOR = 9;
+/** What the overflow button takes from the rail when it shows. */
+export const RAIL_OVERFLOW_ROW = ITEM_GAP + ITEM_HEIGHT;
+
+/** The height of the details button and the groups of `items`, which come builtin, plugin, web. */
+function railItemsHeight(items: ReadonlyArray<RailItem>): number {
+  let height = ITEM_HEIGHT;
+  for (const tag of ["builtin", "plugin", "web"] as const) {
+    const count = items.filter((item) => item._tag === tag).length;
+    if (count > 0) height += GROUP_SEPARATOR + count * ITEM_HEIGHT + (count - 1) * ITEM_GAP;
+  }
+  return height;
+}
+
+/**
+ * Splits `items` into what the rail shows in `available` px and what moves into the overflow menu, from the end;
+ * `needsYou` has a popup of its own and always shows. An unknown height shows everything.
+ */
+export function fitRailItems(
+  items: ReadonlyArray<RailItem>,
+  available: number | null,
+): { readonly visible: ReadonlyArray<RailItem>; readonly hidden: ReadonlyArray<RailItem> } {
+  if (available === null || railItemsHeight(items) <= available) {
+    return { visible: items, hidden: [] };
+  }
+  const budget = available - RAIL_OVERFLOW_ROW;
+  const isSticky = (item: RailItem) => item._tag === "builtin" && item.id === "needsYou";
+  const visible = items.filter(isSticky);
+  const hidden: Array<RailItem> = [];
+  for (const item of items) {
+    if (isSticky(item)) continue;
+    const next = [...visible, item];
+    if (hidden.length === 0 && railItemsHeight(next) <= budget) visible.push(item);
+    else hidden.push(item);
+  }
+  return { visible: items.filter((item) => visible.includes(item)), hidden };
+}
+
 export type RailPluginState =
   | { readonly ready: true }
   | {

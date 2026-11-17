@@ -1,4 +1,5 @@
 import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
+import type { ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
@@ -7,6 +8,7 @@ import { resolveChatCanvasLayout } from "~/components/chat/chatCanvasLayout";
 import { ThreadDetailsCard } from "~/components/chat/ThreadDetailsCard";
 import { PopoverCreateHandle } from "~/components/ui/popover";
 import { selectThreadPanelOpen, useRightPanelStore } from "~/rightPanelStore";
+import "~/index.css";
 import { render } from "../../../test/render";
 import type { NeedsYouEntry } from "../needsYou/needsYou.logic";
 import { AppRail } from "./AppRail";
@@ -35,7 +37,17 @@ const popoverOpen = () =>
     "popover",
   );
 
-function Harness({ anchor, handle }: { anchor: HTMLElement; handle: PopoverHandle }) {
+function Harness({
+  anchor,
+  handle,
+  height = 800,
+  builtins = {},
+}: {
+  anchor: HTMLElement;
+  handle: PopoverHandle;
+  height?: number;
+  builtins?: ComponentProps<typeof AppRail>["builtins"];
+}) {
   const open = useRightPanelStore((state) =>
     selectThreadPanelOpen(state.threadPanelVisibilityByThreadKey, threadRef, "popover"),
   );
@@ -61,28 +73,30 @@ function Harness({ anchor, handle }: { anchor: HTMLElement; handle: PopoverHandl
       >
         {() => <p>Details body</p>}
       </ThreadDetailsCard>
-      <AppRail
-        threadRef={threadRef}
-        controls={{
-          terminalAvailable: false,
-          terminalOpen: false,
-          terminalShortcutLabel: null,
-          threadPanelOpen: open,
-          threadPanelPresentation: "popover",
-          threadPanelPopoverHandle: handle,
-          threadPanelShortcutLabel: null,
-          rightPanelAvailable: false,
-          rightPanelOpen: false,
-          rightPanelShortcutLabel: null,
-          onToggleTerminal: () => {},
-          onToggleThreadPanel: () =>
-            useRightPanelStore.getState().toggleThreadPanel(threadRef, "popover"),
-          onToggleRightPanel: () => {},
-        }}
-        onActivate={() => {}}
-        onCollapse={() => {}}
-        builtins={{}}
-      />
+      <div className="flex" style={{ height }}>
+        <AppRail
+          threadRef={threadRef}
+          controls={{
+            terminalAvailable: false,
+            terminalOpen: false,
+            terminalShortcutLabel: null,
+            threadPanelOpen: open,
+            threadPanelPresentation: "popover",
+            threadPanelPopoverHandle: handle,
+            threadPanelShortcutLabel: null,
+            rightPanelAvailable: false,
+            rightPanelOpen: false,
+            rightPanelShortcutLabel: null,
+            onToggleTerminal: () => {},
+            onToggleThreadPanel: () =>
+              useRightPanelStore.getState().toggleThreadPanel(threadRef, "popover"),
+            onToggleRightPanel: () => {},
+          }}
+          onActivate={() => {}}
+          onCollapse={() => {}}
+          builtins={builtins}
+        />
+      </div>
     </ChatCanvasContext>
   );
 }
@@ -144,4 +158,32 @@ it("opens and closes the needs-you list with one click each, and counts only wha
   await expect.element(button).toHaveTextContent("2");
   await userEvent.click(button);
   await expect.element(page.getByText("待你定 · 2")).toBeVisible();
+});
+
+it("moves the apps that do not fit into a More apps menu, and shows no menu when all fit", async () => {
+  useRightPanelStore.setState({ threadPanelVisibilityByThreadKey: {} });
+  const anchor = document.createElement("div");
+  document.body.append(anchor);
+  using _anchor = { [Symbol.dispose]: () => anchor.remove() };
+  const openDiff = vi.fn();
+  const builtins = {
+    files: { available: true, open: () => {} },
+    diff: { available: true, open: openDiff },
+  };
+  await using screen = await render(
+    <Harness anchor={anchor} handle={PopoverCreateHandle()} height={800} builtins={builtins} />,
+  );
+  await expect.element(page.getByRole("button", { name: "Diff" })).toBeVisible();
+  expect(screen.container.querySelector("[aria-label='More apps']")).toBeNull();
+
+  await screen.rerender(
+    <Harness anchor={anchor} handle={PopoverCreateHandle()} height={290} builtins={builtins} />,
+  );
+  await expect.element(page.getByRole("button", { name: "More apps" })).toBeVisible();
+  expect(screen.container.querySelector("[aria-label='Diff']")).toBeNull();
+  await expect.element(page.getByRole("button", { name: "Needs you" })).toBeVisible();
+
+  await userEvent.click(page.getByRole("button", { name: "More apps" }));
+  await userEvent.click(page.getByRole("button", { name: "Diff" }));
+  expect(openDiff).toHaveBeenCalledOnce();
 });

@@ -1,9 +1,16 @@
-import { DEFAULT_RAIL_CONFIG, type PluginHostSnapshot, type RailConfig } from "@t3tools/contracts";
+import {
+  DEFAULT_RAIL_CONFIG,
+  railItemKey,
+  type PluginHostSnapshot,
+  type RailConfig,
+  type RailItem,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { RightPanelSurface } from "../../rightPanelStore";
 import { providerEntry } from "../testing/snapshots";
 import {
+  fitRailItems,
   groupRailItems,
   isRailItemShowing,
   moveItem,
@@ -243,5 +250,39 @@ describe("railPluginState", () => {
       railPluginState({ ...item, pluginId: "gone" as never }, snapshotWith("standby")).ready,
     ).toBe(false);
     expect(railPluginState(item, null).ready).toBe(false);
+  });
+});
+
+describe("fitRailItems", () => {
+  const files = { _tag: "builtin", id: "files" } as const;
+  const needsYou = { _tag: "builtin", id: "needsYou" } as const;
+  const plugin = (viewId: string): PluginAppItem => ({
+    _tag: "plugin",
+    pluginId: "a.b" as never,
+    viewId,
+    title: viewId,
+  });
+  const items = [terminal, files, plugin("p1"), plugin("p2"), docs];
+  // The details button, then each group's 9px separator and its 32px rows 4px apart: 32 + 77 + 77 + 41.
+  const FULL = 227;
+  const keys = (list: ReadonlyArray<RailItem>) => list.map(railItemKey);
+
+  it("shows everything when it fits, or when the height is not known yet", () => {
+    expect(fitRailItems(items, FULL)).toEqual({ visible: items, hidden: [] });
+    expect(fitRailItems(items, null)).toEqual({ visible: items, hidden: [] });
+  });
+
+  it("moves what does not fit from the end into the overflow, leaving room for its button", () => {
+    const fit = fitRailItems(items, FULL - 1);
+    expect(keys(fit.visible)).toEqual(keys([terminal, files, plugin("p1"), plugin("p2")]));
+    expect(keys(fit.hidden)).toEqual(keys([docs]));
+    expect(keys(fitRailItems(items, FULL - 41).hidden)).toEqual(keys([plugin("p2"), docs]));
+    expect(keys(fitRailItems(items, 0).visible)).toEqual([]);
+  });
+
+  it("never moves needs-you into the overflow", () => {
+    const fit = fitRailItems([needsYou, terminal, plugin("p1")], 80);
+    expect(keys(fit.visible)).toEqual(keys([needsYou]));
+    expect(keys(fit.hidden)).toEqual(keys([terminal, plugin("p1")]));
   });
 });
