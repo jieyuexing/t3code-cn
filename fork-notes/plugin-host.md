@@ -92,6 +92,19 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 
 展示视频用的 `scripts/showcase-cn/` 与 `apps/server/scripts/dev-replay/showcase_*` 也是 fork 自有：`plugins` 剧本用插件仓的合成 IMAP、测试专用钥匙串条目和两份自写回放录音（提问、邮件审批）。两份录音在上游 `dev-replay-agent.ts` 的 `SCENARIOS` 里各插了一项，同步冲突时按插入点重挂。
 
+## 插件测试件
+
+插件仓的测试不再各写一份模拟宿主：`apps/web/src/pluginHost/testkit/index.ts` 的 `createViewHost` 把视图一侧的 `call`／`callService`／`callHost` 交给宿主真实的规则，再转给插件登记的处理器。规则本身在两个无导入的纯文件里，宿主自己也用它们，所以不会各漂各的：
+
+- `bridgeRules.ts`：单条消息 64K、嵌套 32 层、id 合法与不得并发、同时在途 16 条、调用名／服务名模式、应答 64K（`createBridgeGate`），以及视图前缀 `viewHandlerName`（`PluginViewFrame.tsx` 同一个函数）。`bridge.ts` 只管端口、心跳和违规计数。
+- `hostMethods.ts`：`callHost` 全部方法与各自需要的能力（唯一一张表，`hostApi.ts` 的 `HANDLERS` 用它的键做类型），`hostMethodDenial` 给出被拒的原因。
+
+`createViewHost({ viewId, handlers, capabilities, host?, service? })`：`handlers` 是插件 `context.handle` 登记的全名（`view:panel:open`），视图只传裸名；调用名多带前缀回 `invalid`、没登记回 `call-failed`、`callHost` 缺能力或方法不在表里回 `denied`，错误是带 `code` 的 `ViewCallError`。`host` 放宿主方法的替身（通过能力检查后才会走到），`callService` 的规则未做，只能给 `service` 替身。
+
+插件仓怎么用：设 `T3_FORK_DIR` 指向含本目录的 fork 检出（没设时按 `../../t3code-cn` 找），测试里用 `createRequire(import.meta.url)(<fork>/apps/web/src/pluginHost/testkit/index.ts)` 同步加载，Node 原生剥类型执行（需要 Node ≥ 22.18）；不要用 vitest 的 `import()`，它拦着不让加载仓外文件。找不到文件必须抛错，不能 `skipIf`。因为是 Node 原生加载，这几个文件只能用可擦除的 TypeScript、相对导入带 `.ts`、不导入 `effect` 与 `@t3tools/*`；`testkit/index.test.ts` 里有一条用裸 Node 加载它的测试守着这一点。
+
+还没做：存储单值 256 KiB（`PluginHost.ts`）和缓存单值 2 MiB（`PluginCache.ts`）的判断、`context.handle` 登记名在激活时的 `HandlerName` 检查（`PluginIpc.ts`）、`callService` 的 `inject`／方法声明检查与 `inputProblem`（`PluginServiceCall.ts`）、`readOnly` 与 `changed`。这几处在 Effect 文件里，要先抽成无导入的纯函数；上游文件 0 行。
+
 ## 上游挂载点
 
 （PR 页「Git 日志」页签的上游挂载单独记在 `fork-notes/git-log.md`。）
