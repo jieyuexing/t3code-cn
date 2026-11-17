@@ -67,6 +67,17 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 
 **网页引文（`host.composer`）**：输入框里的一种“网页引文”项，插件视图（订阅、邮箱）经 `t3.addToComposer` 放进来，以后 T3 自带浏览器也用同一种，不做某个插件专用的类型。形态是复用输入框已有的评论项（`review-comment`）：草稿存放、持久化、发送与单条删除全走评论项原有的路，`sectionId` 以 `quote:` 起头标记它是引文（`packages/shared/src/composerQuote.ts`，`isQuoteComment`），字段对应 `sectionTitle`＝标题、`filePath`＝链接（没有链接时用标题）、`rangeLabel`＝来源、`diff`＝选段全文（`fenceLanguage` 为 `text`）。发给 Agent 时投影成 `title／url／source／quote` 四段而不是评论项的 `file／range／section`；输入框与消息里的标签显示 “Quote”，标题取 `sectionTitle`。不复用预览批注（`PreviewAnnotation*`）：它是点选页面元素的产物，没有来源字段，文字只能放 8000 字上限的 `comment`，预览里的标记与截图界面都不适用。草稿库对解析不出的线程会静默不收，所以宿主写入后回读确认。入口只有 `callHost`，未做插件自己的发送；逻辑在 `apps/web/src/pluginHost/composerQuote.ts`。
 
+## 缓存
+
+每个插件一份缓存，插件经子进程里的 `context.cache.get(key)`／`set(key, value)`／`delete(key)` 存取（值是 JSON）。不是能力项，不进同意摘要，装好的插件不用重新同意。借鉴 Raycast 的 `Cache`（按扩展分目录、一键一文件、内存只放轻量索引）与 VS Code 的 `globalStorageUri`。逻辑在 `apps/server/src/pluginHost/PluginCache.ts`，上游文件 0 行。
+
+- **存放**：`<stateDir>/plugins/cache/<pluginId>/<键的 sha256 前 32 位>.json`，文件里是 `{key, value}`；键超过 128 字符截断（与存储一致）。写入先写临时文件再改名，不留半截文件；目录里不是 `.json` 的残留在重建索引时删掉。
+- **上限**：单值序列化后 ≤2 MiB（够放一篇长文的译文好几份），超了回 `The value is too large to cache.`；每个插件总量 ≤50 MiB，写入后超了按最近最少使用淘汰到上限以下，刚写的那条留下。读也算使用（内存里记次序，并改文件时间，重启后按文件时间从旧到新重建）。
+- **随时可能没有**：宿主可因上限、「清缓存」、移除插件而丢掉任何一条，取不到（`null`）就当没有，插件不能把缓存当唯一的一份。文件损坏也按没有。
+- **与存储的区别**：`context.storage` 是一个整份重写的 JSON（单值 ≤256 KB，要 `settings` 能力），放不能丢的数据；缓存一键一文件、可丢、不要能力。清缓存与移除插件不碰 `data/<id>.json` 与设置；移除插件时缓存目录一并删，数据文件照旧保留。
+- **占用到网页端**：不放进快照（缓存每写一次快照就得重发，订阅翻译时一分钟几十次）。`pluginHost.call` 新增两个 `_tag`：`cacheUsage`（回 `{ [pluginId]: bytes }`，只含占用大于 0 的插件，来自内存索引，每个插件第一次读目录建索引，之后不再扫）与 `clearCache`（只清一个插件）。设置页「插件」打开时、插件清单变化时读一次，清完再读；插件行显示 “Cache 12.3 MB”（无缓存时不显示）与「Clear cache」，没有管理权限时按钮灰掉。缓存在设置页开着期间变多不会自动刷新。
+- **没有覆盖**：Electron 桌面端与 141 Windows 上没有走查；多环境各自一份缓存，不跨环境。
+
 ## 自有目录
 
 | 目录                                               | 内容                                                                                                                 |

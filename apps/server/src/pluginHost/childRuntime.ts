@@ -24,6 +24,12 @@ interface PluginContext {
     readonly get: (key: string) => Promise<Json>;
     readonly set: (key: string, value: Json) => Promise<Json>;
   };
+  /** The plugin's own cache: the host may drop any of it at any time, so a miss (`null`) is normal. */
+  cache: {
+    readonly get: (key: string) => Promise<Json>;
+    readonly set: (key: string, value: Json) => Promise<Json>;
+    readonly delete: (key: string) => Promise<Json>;
+  };
 }
 
 interface PluginModule {
@@ -48,7 +54,14 @@ export function runPluginChild() {
   const provided = new Map<string, Array<string>>();
 
   const hostCall = (
-    method: "settings.get" | "storage.get" | "storage.set" | "service.call",
+    method:
+      | "settings.get"
+      | "storage.get"
+      | "storage.set"
+      | "cache.get"
+      | "cache.set"
+      | "cache.delete"
+      | "service.call",
     input: Json,
   ) =>
     new Promise<Json>((resolve, reject) => {
@@ -84,6 +97,11 @@ export function runPluginChild() {
             const { input, caller } = call as { input: Json; caller: string };
             return fn(input, { caller });
           });
+      },
+      cache: {
+        get: (key) => hostCall("cache.get", { key }),
+        set: (key, value) => hostCall("cache.set", { key, value }),
+        delete: (key) => hostCall("cache.delete", { key }),
       },
       services: Object.fromEntries(
         message.services.map((service) => [

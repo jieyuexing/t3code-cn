@@ -52,6 +52,7 @@ import {
   providedServices,
   type Slot,
 } from "./PluginSlot.ts";
+import { makePluginCache } from "./PluginCache.ts";
 import { makePluginStore, type PluginStore, type RegistryRecord } from "./PluginStore.ts";
 import {
   issueViewUrl,
@@ -108,6 +109,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
 ) {
   const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
   const store: PluginStore = yield* makePluginStore(overrides.stateDir);
+  const cache = yield* makePluginCache(overrides.stateDir).pipe(Effect.provide(platform));
   const delivery = yield* makePluginViewDelivery(overrides);
   const load = (directory: string) => loadPluginDirectory(directory).pipe(Effect.provide(platform));
   const self = yield* resolveSelfInvocation();
@@ -193,7 +195,14 @@ export const make = Effect.fn("PluginHost.make")(function* (
 
   const serveHostCall = (slot: Slot) =>
     Effect.fn("PluginHost.serveHostCall")(function* (
-      method: "settings.get" | "storage.get" | "storage.set" | "service.call",
+      method:
+        | "settings.get"
+        | "storage.get"
+        | "storage.set"
+        | "cache.get"
+        | "cache.set"
+        | "cache.delete"
+        | "service.call",
       input: Json,
     ) {
       if (method === "service.call") return yield* serviceCalls.callFromPlugin(slot, input);
@@ -206,6 +215,15 @@ export const make = Effect.fn("PluginHost.make")(function* (
         return declared
           ? (slot.settingValues[key] ?? null)
           : yield* Effect.fail(`Unknown setting ${key}.`);
+      }
+      if (method === "cache.get") return yield* cache.get(slot.id, key);
+      if (method === "cache.delete") {
+        yield* cache.delete(slot.id, key);
+        return null;
+      }
+      if (method === "cache.set") {
+        yield* cache.set(slot.id, key, request.value ?? null);
+        return null;
       }
       if (method === "storage.get") {
         const data = yield* readData(slot);
@@ -572,6 +590,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
         }),
       ),
     );
+    yield* cache.clear(slot.id);
     const { [slot.id]: _removed, ...rest } = consent;
     consent = rest;
     yield* store.writeConsent(consent).pipe(Effect.ignore);
@@ -723,6 +742,13 @@ export const make = Effect.fn("PluginHost.make")(function* (
             Effect.flatMap((slot) => setSetting(slot, input.key, input.value)),
           ),
         ).pipe(Effect.andThen(none));
+      case "cacheUsage":
+        return { value: yield* cache.usage() };
+      case "clearCache":
+        return yield* slotOf(input.pluginId).pipe(
+          Effect.flatMap((slot) => cache.clear(slot.id)),
+          Effect.andThen(none),
+        );
       case "add":
         return yield* mutate(add(input.path)).pipe(Effect.andThen(none));
       case "remove":

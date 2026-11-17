@@ -24,11 +24,15 @@ const fixture = vi.hoisted(() => ({
   confirm: true,
   /** What the host answers a `setSetting` with; null accepts it. */
   rejection: null as string | null,
+  /** What `cacheUsage` answers: bytes per plugin id. */
+  usage: {} as Record<string, number>,
 }));
 
 vi.mock("./usePluginHost", () => ({
   pluginHostFailureMessage: () => fixture.rejection ?? "",
-  usePluginHostCall: () => async (input: unknown) => {
+  usePluginHostCall: () => async (input: { _tag?: string }) => {
+    // The usage read is background plumbing, not something the user did.
+    if (input._tag === "cacheUsage") return AsyncResult.success({ value: fixture.usage });
     fixture.actions.push(input);
     return fixture.rejection === null
       ? AsyncResult.success({ value: null })
@@ -85,6 +89,7 @@ function setup(
   fixture.actions = [];
   fixture.confirm = true;
   fixture.rejection = null;
+  fixture.usage = {};
   usePluginSettingsStore.setState({ opened: {}, reveal: null });
   fixture.canCall = options.canCall ?? true;
   fixture.snapshot = {
@@ -433,4 +438,28 @@ it("ignores a request made for another environment", async () => {
   await expect
     .element(screen.getByRole("textbox", { name: "cvs executable" }))
     .not.toBeInTheDocument();
+});
+
+it("shows a plugin's cache size only when it holds one, and clears just that plugin's cache", async () => {
+  setup();
+  fixture.usage = { "example.running-plugin": 1_572_864 };
+  await using screen = await render(settings, { router: "/" });
+  await expect.element(screen.getByText("Cache 1.5 MB", { exact: false })).toBeVisible();
+  const clear = screen.getByRole("button", { name: "Clear cache" });
+  expect(clear.elements()).toHaveLength(1);
+  await clear.click();
+  await vi.waitFor(() =>
+    expect(fixture.actions.at(-1)).toEqual({
+      _tag: "clearCache",
+      pluginId: "example.running-plugin",
+    }),
+  );
+});
+
+it("leaves Clear cache read-only without the manage grant", async () => {
+  setup({ canCall: false });
+  fixture.usage = { "example.running-plugin": 2048 };
+  await using screen = await render(settings, { router: "/" });
+  await expect.element(screen.getByText("Cache 2 KB", { exact: false })).toBeVisible();
+  await expect.element(screen.getByRole("button", { name: "Clear cache" })).toBeDisabled();
 });
