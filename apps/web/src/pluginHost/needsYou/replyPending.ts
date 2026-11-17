@@ -10,7 +10,7 @@ const BOLD_LINE = /^\s*(?:\*\*|__)[^*_]+(?:\*\*|__)\s*[:：]?\s*$/;
 const RULE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const LIST_ITEM = /^(\s*)(?:\d+[.)、]|[-*+•])\s+(.*)$/;
 
-function stripMarkdown(line: string): string {
+export function stripMarkdown(line: string): string {
   return line
     .replace(/^\[[ xX]\]\s+/, "")
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")

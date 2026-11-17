@@ -1,0 +1,25 @@
+import { describe, expect, it } from "vite-plus/test";
+import { composerChoices } from "./composerChoices.logic";
+
+const fills = (reply: string) => composerChoices(reply).map((choice) => choice.fill);
+
+describe("输入框决策快捷条的按钮", () => {
+  it("两个以上选项：选项加「按推荐」，推荐项在前", () => {
+    expect(fills("**甲**：慢\n**乙（推荐）**：快\n**丙**：折中")).toEqual([
+      "乙",
+      "甲",
+      "丙",
+      "按推荐",
+    ]);
+  });
+
+  it("只有一个标号或没有选项：没有按钮", () => {
+    expect(fills("**甲**：只有一项")).toEqual([]);
+    expect(fills("做完了。")).toEqual([]);
+  });
+
+  it("多组选项，或只有「待你定」没有标号：只给「按推荐」", () => {
+    expect(fills("**甲**：a\n**乙**：b\n\n**甲**：c\n**乙**：d")).toEqual(["按推荐"]);
+    expect(fills("## 待你定\n1. 要不要合并？")).toEqual(["按推荐"]);
+  });
+});
