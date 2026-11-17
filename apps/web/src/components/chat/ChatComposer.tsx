@@ -3543,6 +3543,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <ComposerChoiceStrip
                 choices={composerChoices.choices}
                 onPick={(fill) => applyPromptReplacement(0, 0, fill)}
+                onSend={(text) => applyPromptReplacement(0, 0, text) && submitComposer()}
                 onDismiss={composerChoices.dismiss}
               />
             ) : null}

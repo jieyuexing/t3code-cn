@@ -1,6 +1,6 @@
 # 输入框决策快捷条
 
-回复里列了带标号的选项（甲乙丙丁、A–D）时，输入框编辑区上方给每个选项一个按钮，外加「按推荐」。点按钮只把标号填进输入框、不发送，光标在末尾；输入框一有字就收起，清空后重新出现。Tab（输入框为空且聚焦）填入第一个按钮，Esc 本轮收起。回复里有两组以上选项（同一标号出现两次以上），或只有「待你定」段没有标号时，只给「按推荐」。只读回复文字，不调模型。受上游 Labs「下一步建议」开关 `promptSuggestionsEnabled` 控制，不新增设置项。
+回复里列了带标号的选项（甲乙丙丁、A–D）时，输入框编辑区上方给每个选项一个按钮，外加「按推荐」。点选项按钮只把标号填进输入框、不发送，光标在末尾（用户常接着补一句）；点「按推荐」直接把这三个字作为一条消息发出，走输入框自己的发送路径（`submitComposer`），与空输入框里打“按推荐”回车等价，不走「待你定」弹层的 `startTurn`；输入框一有字就收起，清空后重新出现。Tab（输入框为空且聚焦）只填入第一个按钮的内容，第一个是「按推荐」时也不发送；Esc 本轮收起。回复里有两组以上选项（同一标号出现两次以上），或只有「待你定」段没有标号时，只给「按推荐」。只读回复文字，不调模型。受上游 Labs「下一步建议」开关 `promptSuggestionsEnabled` 控制，不新增设置项。
 
 ## 现行结构
 
@@ -14,14 +14,14 @@
 
 ## 上游文件改动（相对 `2f24a064c9`）
 
-只有 `apps/web/src/components/chat/ChatComposer.tsx`：插入 23 行（含 2 行 import）、改行 2 行。
+只有 `apps/web/src/components/chat/ChatComposer.tsx`：插入 24 行（含 2 行 import）、改行 2 行。
 
 | 位置                                                    | 动作                                                                                                                                     |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | import 区                                               | 插入 `ComposerChoiceStrip`、`useComposerChoices` 两行                                                                                    |
 | `const offeredPromptSuggestion =`（约 `:2314`）         | 改名 `promptSuggestionSlot`，条件原样不动；`? promptSuggestion` 改成 `? { ghost: promptSuggestion }`                                     |
 | 其后                                                    | 插入 `useComposerChoices` 调用、`showComposerChoices`，再按原名 `offeredPromptSuggestion` 取灰字或 null，占位文字与 Tab 提示因此一行不改 |
-| 输入框正文 `data-chat-composer-body` 之前（约 `:3540`） | 插入 `<ComposerChoiceStrip>`                                                                                                             |
+| 输入框正文 `data-chat-composer-body` 之前（约 `:3540`） | 插入 `<ComposerChoiceStrip>`，`onPick` 只填入，`onSend` 填入后调 `submitComposer()`                                                      |
 
 快捷条出现时灰字占位与 Tab 提示一并让位；上游的 Tab 填灰字、Esc 收灰字仍只管灰字。
 

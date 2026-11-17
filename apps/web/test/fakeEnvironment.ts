@@ -103,7 +103,10 @@ export const CLAUDE_PROVIDER = {
 };
 
 const decodeServerConfig = Schema.decodeUnknownSync(ServerConfig);
-const makeServerConfig = (providers: ReadonlyArray<unknown>): ServerConfig => ({
+const makeServerConfig = (
+  providers: ReadonlyArray<unknown>,
+  settings: object = {},
+): ServerConfig => ({
   ...decodeServerConfig({
     environment: descriptor,
     auth,
@@ -119,7 +122,7 @@ const makeServerConfig = (providers: ReadonlyArray<unknown>): ServerConfig => ({
       otlpTracesEnabled: false,
       otlpMetricsEnabled: false,
     },
-    settings: {},
+    settings,
     threadSnapshotPagination: true,
     threadResumeCompletionMarker: true,
     shellResumeCompletionMarker: true,
@@ -568,11 +571,13 @@ export function installFakeEnvironment(
     /** Commands left unanswered even when accepting, until `rejectPendingCommand`. */
     readonly holdCommand?: (command: OrchestrationV2Command) => boolean;
     readonly providers?: ReadonlyArray<unknown>;
+    /** Server settings that differ from the defaults. */
+    readonly serverSettings?: object;
   },
 ): Disposable {
   threads = fixtures;
   baseServerConfig = {
-    ...makeServerConfig(options?.providers ?? [CODEX_PROVIDER]),
+    ...makeServerConfig(options?.providers ?? [CODEX_PROVIDER], options?.serverSettings),
     keybindings: options?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS,
   };
   dispatched = [];
