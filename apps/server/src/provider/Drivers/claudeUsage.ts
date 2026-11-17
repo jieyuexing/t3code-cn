@@ -45,6 +45,31 @@ export function parseClaudeLine(
   return parseClaudeRecord(parsed, state);
 }
 
+// Claude Code writes `type` near the start of a line and the entry's own `timestamp` right after its
+// `uuid`; the large tool results of a user line sit between and after them.
+const TYPE_SCAN_LENGTH = 400;
+const USER_TYPE = Buffer.from('"type":"user"');
+const TIMESTAMP_KEY = Buffer.from('"timestamp":"');
+const UUID_BEFORE_TIMESTAMP = /"uuid":"[0-9a-f-]{36}",$/;
+const QUOTE = 0x22;
+
+/** Dates a `user` line from its bytes without decoding it; undefined sends the line to the parser. */
+function parseClaudeBytes(
+  line: Buffer,
+  state: ClaudeScanState,
+): readonly UsageRecord[] | undefined {
+  if (!line.subarray(0, TYPE_SCAN_LENGTH).includes(USER_TYPE)) return undefined;
+  const key = line.indexOf(TIMESTAMP_KEY);
+  if (key < 60 || !UUID_BEFORE_TIMESTAMP.test(line.toString("latin1", key - 60, key)))
+    return undefined;
+  const start = key + TIMESTAMP_KEY.length;
+  const end = line.indexOf(QUOTE, start);
+  const timestampMs = end === -1 ? null : parseTimestampMs(line.toString("latin1", start, end));
+  if (timestampMs === null) return undefined;
+  state.lastUserMs = timestampMs;
+  return [];
+}
+
 function cacheCreation1h(usage: Record<string, unknown>): { cacheCreation1hTokens?: number } {
   const split = usage["cache_creation"];
   if (typeof split !== "object" || split === null) return {};
@@ -152,6 +177,7 @@ export const claudeUsageFormat: TranscriptUsageFormat<ClaudeScanState> = {
   // User entries carry no usage; they date the start of the next request.
   usageMarkers: ['"usage"', '"type":"user"'],
   parseLine: parseClaudeLine,
+  parseBytes: parseClaudeBytes,
   parseProjected: parseClaudeRecord,
   state: { initial: initialClaudeScanState, schema: ClaudeScanState },
 };

@@ -50,6 +50,21 @@ Speed 分段标题行右侧的「Share image」按钮：一键把当前排行画
 - 展示名规则在 `usageShareModel.ts` 的 `modelDisplayName`：`claude-opus-5-5`→Claude Opus 5.5、`gpt-6.1-sol`→GPT-6.1 Sol、`gemini-4-argon-high`→Gemini 4 Argon (high)，速度档保留成 “(fast)”；`deepseek-flash` 是网关别名，写死为 DeepSeek V4.1 Flash（沿用参考成品）。
 - 文件：`UsageShareImage.tsx`（按钮与弹窗）、`usageShareModel.ts`（数据、文案、展示名，纯函数）、`usageShareCanvas.ts`（绘制与换行）及各自测试，均为 fork 自有。上游文件只有 `UsagePage.tsx` 多 1 行（把时段传给 `UsageSpeed`）。下载走与聊天附件、计划导出相同的 `<a download>`（Electron 里由已有的下载处理接住），复制用 `navigator.clipboard.write` 的 `ClipboardItem`。
 
+## 速度开销
+
+加 Speed 前后在本机真实日志（Claude 约 6.2 GB、Codex 约 1.1 GB，30 天窗口）上，同一台机器、独立状态目录、`UsageService.readSummary` 的实测：
+
+| 场景                                 | 加 Speed 前 | 加 Speed 后（main）                 | 优化后 |
+| ------------------------------------ | ----------- | ----------------------------------- | ------ |
+| 无缓存冷扫 30 天                     | 6.5 s       | 9.2 s                               | 7.2 s  |
+| 重启后首次请求（缓存已落盘，无变化） | 0.33 s      | 0.40 s                              | 0.36 s |
+| 同一进程再次请求                     | 0.22 s      | 0.28 s                              | 0.26 s |
+| summary 体积（30 天）                | 95 KB       | 131 KB（其中 `requestSpeed` 35 KB） | 同左   |
+
+多出来的冷扫时间几乎都在 Claude 的 `user` 行：为取请求起点，原先被标记门槛跳过的 tool_result 大行现在都要读。优化是给 `TranscriptUsageFormat` 加可选的 `parseBytes`（读取器在解码与门槛之前先问一次，上游 `usageTranscriptReader.ts` 插 5 行、`provider-core` 插 2 行），Claude 用它直接在字节上找 `type`、`uuid` 后紧跟的 `timestamp`，不解码整行；形状对不上就退回完整解析。`UsageSpeedAccumulator` 也不再每条记录 `JSON.stringify` 取行键。
+
+升级到 v18 的一次性代价：缓存里 Claude、Codex 旧条目全标 legacy，首次请求要把窗口内的日志重读一遍补上起止（实测 30 天约 4.4 s，90 天窗口再约 7.8 s，主要是 Codex 归档），之后落盘即回到上表的重启数字。这一步无法省：没有重读就没有起止数据。
+
 ## 同步上游时
 
 冲突按插入点重挂。`usageScanCache.ts` 的版本号与旧文件清单要接着上游往后排；Claude 的 `usageMarkers` 若上游改了，保留 `"type":"user"`。`mergeUsageCopies` 若上游加了新字段，保持 `request` 取首起点、最大终点。

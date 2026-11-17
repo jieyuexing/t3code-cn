@@ -75,6 +75,40 @@ describe("Claude request spans", () => {
     },
   );
 
+  it("dates a user entry by its own timestamp when tool data nests another", async () => {
+    const path = NodePath.join(dir, "claude-nested.jsonl");
+    await NodeFSP.writeFile(
+      path,
+      lines(
+        {
+          type: "user",
+          // Nested data ahead of the entry's own timestamp, and after it.
+          message: { role: "user", content: [{ type: "tool_result", timestamp: at(500) }] },
+          timestamp: at(0),
+          toolUseResult: { timestamp: at(900) },
+        },
+        assistant("msg_1", 12, 300, "text"),
+        {
+          type: "user",
+          message: { role: "user", content: "next" },
+          timestamp: at(20),
+          toolUseResult: { timestamp: at(900) },
+        },
+        assistant("msg_2", 31, 300, "text"),
+      ),
+    );
+
+    const result = await readTranscriptRecords(path, TEST_FORMATS.claude);
+    assert.isNotNull(result);
+    assert.deepStrictEqual(
+      result.records.map((record) => record.request),
+      [
+        { startMs: BASE, endMs: BASE + 12_000 },
+        { startMs: BASE + 20_000, endMs: BASE + 31_000 },
+      ],
+    );
+  });
+
   it("resumes with the last user entry carried in the scan state", async () => {
     const path = NodePath.join(dir, "claude-resume.jsonl");
     await NodeFSP.writeFile(
