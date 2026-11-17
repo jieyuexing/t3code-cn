@@ -57,7 +57,15 @@ const PluginChildMessage = Schema.Union([
   Schema.TaggedStruct("Deactivated", {}),
   Schema.TaggedStruct("HostCall", {
     requestId: RequestId,
-    method: Schema.Literals(["settings.get", "storage.get", "storage.set", "service.call"]),
+    method: Schema.Literals([
+      "settings.get",
+      "storage.get",
+      "storage.set",
+      "cache.get",
+      "cache.set",
+      "cache.delete",
+      "service.call",
+    ]),
     input: Schema.Json,
   }),
 ]);

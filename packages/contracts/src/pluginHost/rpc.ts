@@ -48,6 +48,10 @@ export const PluginHostCallInput = Schema.Union([
     key: TrimmedNonEmptyString,
     value: PluginSettingValue,
   }),
+  /** Bytes each plugin's cache holds, for the plugins that hold any: `{ [pluginId]: bytes }`. */
+  Schema.TaggedStruct("cacheUsage", {}),
+  /** Drops one plugin's cache only; its storage and settings stay. */
+  Schema.TaggedStruct("clearCache", Target),
   Schema.TaggedStruct("add", { path: TrimmedNonEmptyString }),
   Schema.TaggedStruct("remove", Target),
   /** `grantConsent` records consent to the manifest as it is now. */

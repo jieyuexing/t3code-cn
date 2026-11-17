@@ -22,7 +22,13 @@ import {
   usePluginSettingsStore,
 } from "./pluginSettingsStore";
 import { PLUGIN_STATUS_VARIANT_BY_KIND, pluginStatus } from "./pluginStatus";
-import { useCanCallPluginHost, usePluginHostAction, usePluginHostSnapshot } from "./usePluginHost";
+import { formatBytes, usePluginCacheUsage } from "./pluginCache";
+import {
+  useCanCallPluginHost,
+  usePluginHostAction,
+  usePluginHostCall,
+  usePluginHostSnapshot,
+} from "./usePluginHost";
 
 export function PluginsSettings() {
   const { environment } = useSettingsScope();
@@ -98,6 +104,14 @@ function PluginsSettingsBody(props: { readonly environmentId: EnvironmentId }) {
   );
 }
 
+function usePluginCacheSizes(environmentId: EnvironmentId, snapshot: PluginHostSnapshot) {
+  const { usage, refresh } = usePluginCacheUsage(
+    usePluginHostCall(environmentId),
+    snapshot.plugins.map((plugin) => plugin.id).join(","),
+  );
+  return { usage, refreshUsage: refresh };
+}
+
 function PluginList(props: {
   readonly environmentId: EnvironmentId;
   readonly snapshot: PluginHostSnapshot;
@@ -105,6 +119,7 @@ function PluginList(props: {
 }) {
   const { environmentId, snapshot, canManage } = props;
   const act = usePluginHostAction(environmentId);
+  const { usage, refreshUsage } = usePluginCacheSizes(environmentId, snapshot);
   const [path, setPath] = useState("");
   const [adding, setAdding] = useState(false);
 
@@ -181,6 +196,8 @@ function PluginList(props: {
           plugin={plugin}
           snapshot={snapshot}
           canManage={canManage}
+          cacheBytes={usage[plugin.id] ?? 0}
+          onCacheCleared={refreshUsage}
         />
       ))}
     </>
@@ -199,8 +216,11 @@ function PluginRow(props: {
   readonly plugin: PluginHostEntry;
   readonly snapshot: PluginHostSnapshot;
   readonly canManage: boolean;
+  /** What the plugin's cache holds; 0 shows nothing. */
+  readonly cacheBytes: number;
+  readonly onCacheCleared: () => Promise<void>;
 }) {
-  const { environmentId, plugin, snapshot, canManage } = props;
+  const { environmentId, plugin, snapshot, canManage, cacheBytes, onCacheCleared } = props;
   const act = usePluginHostAction(environmentId);
   const [confirming, setConfirming] = useState(false);
   const settingsKey = pluginSettingsKey(environmentId, plugin.id);
@@ -241,9 +261,16 @@ function PluginRow(props: {
     );
     if (result._tag === "Success") setConfirming(false);
   };
+  const clearCache = async () => {
+    const result = await act(
+      { _tag: "clearCache", pluginId: plugin.id },
+      { title: "Could not clear the plugin's cache" },
+    );
+    if (result._tag === "Success") await onCacheCleared();
+  };
   const remove = async () => {
     const confirmed = await requestConfirmDialog(
-      `Remove ${plugin.name}?\nIts data files are kept.`,
+      `Remove ${plugin.name}?\nIts data files are kept; its cache is deleted.`,
       { variant: "destructive" },
     );
     if (confirmed === true)
@@ -258,7 +285,7 @@ function PluginRow(props: {
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant={PLUGIN_STATUS_VARIANT_BY_KIND[status.kind]}>{status.label}</Badge>
-            <span>{`${views} views · ${services} services${plugin.settings.length === 0 ? "" : ` · ${plugin.settings.length} settings`}${plugin.pid === undefined ? "" : ` · process ${plugin.pid}`}`}</span>
+            <span>{`${views} views · ${services} services${plugin.settings.length === 0 ? "" : ` · ${plugin.settings.length} settings`}${plugin.pid === undefined ? "" : ` · process ${plugin.pid}`}${cacheBytes > 0 ? ` · Cache ${formatBytes(cacheBytes)}` : ""}`}</span>
           </div>
           {state._tag === "backoff" ? (
             <p>{`Stopped after ${state.failures} failures. Retrying at ${new Date(state.retryAt).toLocaleTimeString()}. ${state.reason}`}</p>
@@ -304,6 +331,16 @@ function PluginRow(props: {
               }
             >
               Retry
+            </Button>
+          ) : null}
+          {cacheBytes > 0 ? (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={!canManage}
+              onClick={() => void clearCache()}
+            >
+              Clear cache
             </Button>
           ) : null}
           <Button
