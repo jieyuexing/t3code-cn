@@ -9,6 +9,7 @@ import { cn } from "../../lib/utils";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PROVIDER_PRESENTATION } from "./usageProviders";
+import { UsageShareImage } from "./UsageShareImage";
 import {
   formatRate,
   formatSeconds,
@@ -30,10 +31,12 @@ function presentationOf(provider: string) {
 export function UsageSpeed({
   ranking,
   timeZone,
+  period,
   loading,
 }: {
   readonly ranking: readonly SpeedRanking[];
   readonly timeZone: string;
+  readonly period: { readonly sinceDay: string; readonly untilDay: string };
   readonly loading: boolean;
 }) {
   const shares = speedBarShares(ranking);
@@ -41,7 +44,10 @@ export function UsageSpeed({
   return (
     <section aria-busy={loading} className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h2 className="text-sm font-medium text-foreground">Output speed</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-medium text-foreground">Output speed</h2>
+          <UsageShareImage ranking={ranking} period={period} />
+        </div>
         <p className="max-w-3xl text-xs text-muted-foreground">
           Output tokens, thinking included, divided by the wall-clock time of one model request,
           measured on this machine. Time to first token, network and queueing count. The bar is the

@@ -538,6 +538,7 @@ export function UsagePage() {
               <UsageSpeed
                 ranking={merged.requestSpeed}
                 timeZone={shownWindow.timeZone}
+                period={{ sinceDay: shownWindow.sinceDay, untilDay: shownWindow.untilDay }}
                 loading={
                   usageLoading(showingKept, selectedEnvironments, refreshingUsage, hiddenProviders)
                     .partial

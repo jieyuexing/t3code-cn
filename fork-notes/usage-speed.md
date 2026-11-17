@@ -28,7 +28,7 @@
 
 ## 上游文件改动
 
-约 267 行插入、32 行改行（含 `CommandPalette.tsx` 一个词的改动被格式化成多行）：
+约 268 行插入、32 行改行（含分享图在 `UsagePage.tsx` 的 1 行）（含 `CommandPalette.tsx` 一个词的改动被格式化成多行）：
 
 | 文件                                                                                                                                    | 挂的是什么                                                                            |
 | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -40,6 +40,15 @@
 | `apps/web/src/components/usage/{UsagePage,usageShortcuts,usagePagePreferences}.tsx`、`CommandPalette.tsx`                               | Speed 分段、偏好枚举、命令面板搜索词                                                  |
 
 fork 自有新文件：`contracts/src/usageSpeed.ts`、`shared/src/usageSpeed.ts`、`server/src/usage/{usageSpeedRows,dispatchScores}.ts`、`web/src/components/usage/{UsageSpeed.tsx,usageSpeedView.ts}` 及各自测试。
+
+## 分享图
+
+Speed 分段标题行右侧的「Share image」按钮：一键把当前排行画成适合发 X 的深色 PNG（1200 CSS 像素宽、2 倍像素输出），弹窗里预览，可下载或复制到剪贴板，弹窗内小切换选中文／EN。默认语言取界面语言（`getI18nSnapshot().locale` 以 zh 开头为中文，否则英文）；文件名 `model-speed-<日期>-<zh|en>.png`。副标题写页面当前时段，署名只写“由 T3 Code 生成”／“Generated with T3 Code”。
+
+- 版式照参考成品（总仓 `.local/tmp/model-speed/x-post-*.html`、`make_x.py`），直接用 canvas 绘制，不引依赖，字体用系统字体栈。没有长输出样本的行不进图；样本 <20 的条用斜纹。条形色按模型厂商（Anthropic #d95926、Google #4a90f0、OpenAI #199e70、DeepSeek #c060c0、xAI #d4a017，未识别的厂商用中性灰），通道标签色按通道所属厂商，OpenCode 等第三方客户端用 #8a93a3。图例只列图里出现的厂商；没有派发评分时整列、“—”图例和相应口径一句都不出。
+- 与参考成品的差别：行是按页面当前时段与通道自动汇总的，不是手工挑的 18 行；Codex 的 fast 与标准档单列；脚注第二句不再写协调模型名与数据时段（时段在副标题）；署名不写具体模型。
+- 展示名规则在 `usageShareModel.ts` 的 `modelDisplayName`：`claude-opus-5-5`→Claude Opus 5.5、`gpt-6.1-sol`→GPT-6.1 Sol、`gemini-4-argon-high`→Gemini 4 Argon (high)，速度档保留成 “(fast)”；`deepseek-flash` 是网关别名，写死为 DeepSeek V4.1 Flash（沿用参考成品）。
+- 文件：`UsageShareImage.tsx`（按钮与弹窗）、`usageShareModel.ts`（数据、文案、展示名，纯函数）、`usageShareCanvas.ts`（绘制与换行）及各自测试，均为 fork 自有。上游文件只有 `UsagePage.tsx` 多 1 行（把时段传给 `UsageSpeed`）。下载走与聊天附件、计划导出相同的 `<a download>`（Electron 里由已有的下载处理接住），复制用 `navigator.clipboard.write` 的 `ClipboardItem`。
 
 ## 同步上游时
 
