@@ -327,10 +327,9 @@ export default function DiffPanel({
       ? diffSelection.baseRef
       : null;
   const pluginReveal = usePluginDiffReveal(routeThreadRef);
-  // @pierre/diffs trims trailing whitespace from parsed file names; leading whitespace survives.
   const selectedFilePath =
     diffSelection.kind === "turn"
-      ? diffSelection.filePath?.trimEnd() || null
+      ? (diffSelection.filePath ?? null)
       : (pluginReveal?.filePath ?? null);
   const selectedFileRevealRequestId =
     diffSelection.kind === "turn" ? diffSelection.revealRequestId : (pluginReveal?.requestId ?? 0);
