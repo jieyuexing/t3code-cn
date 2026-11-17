@@ -68,6 +68,8 @@ export interface TranscriptUsageFormat<State> {
   /** ASCII markers must match every relevant line, including state-only updates. */
   readonly usageMarkers: readonly [string, ...string[]];
   parseLine(line: string, state: State): readonly UsageRecord[];
+  /** Reads a line from its bytes alone, sparing the decode of large lines; undefined sends it on to the gate and `parseLine`. */
+  parseBytes?(line: Buffer, state: State): readonly UsageRecord[] | undefined;
   parseProjected(projected: unknown, state: State): readonly UsageRecord[];
   /** Cumulative malformed or inconsistent usage records, including skipped records. */
   readMalformedRecords?(state: State): number;

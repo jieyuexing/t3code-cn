@@ -25,6 +25,8 @@ interface Row {
 /** Collects per-request output speed from records that carry a request span. */
 export class UsageSpeedAccumulator {
   readonly #rows = new Map<string, Row>();
+  // Records of one model arrive together, so the last row usually serves the next.
+  #last: Row | undefined;
 
   add(record: UsageRecord, source: string): void {
     if (record.request === undefined) return;
@@ -35,22 +37,31 @@ export class UsageSpeedAccumulator {
     );
     if (sample === null) return;
     const tier = record.speed === "standard" ? undefined : record.speed;
-    const key = JSON.stringify([record.provider, record.model, tier ?? null, source]);
-    let row = this.#rows.get(key);
-    if (row === undefined) {
-      row = {
-        provider: record.provider,
-        model: record.model,
-        tier,
-        source,
-        long: new Map(),
-        all: new Map(),
-        short: new Map(),
-        outputTokens: 0,
-        firstMs: record.request.endMs,
-        lastMs: record.request.endMs,
-      };
-      this.#rows.set(key, row);
+    let row = this.#last;
+    if (
+      row?.provider !== record.provider ||
+      row.model !== record.model ||
+      row.tier !== tier ||
+      row.source !== source
+    ) {
+      const key = JSON.stringify([record.provider, record.model, tier ?? null, source]);
+      row = this.#rows.get(key);
+      if (row === undefined) {
+        row = {
+          provider: record.provider,
+          model: record.model,
+          tier,
+          source,
+          long: new Map(),
+          all: new Map(),
+          short: new Map(),
+          outputTokens: 0,
+          firstMs: record.request.endMs,
+          lastMs: record.request.endMs,
+        };
+        this.#rows.set(key, row);
+      }
+      this.#last = row;
     }
     addToBins(row.all, sample.tokensPerSecond);
     if (sample.outputTokens >= SPEED_LONG_OUTPUT_TOKENS)
