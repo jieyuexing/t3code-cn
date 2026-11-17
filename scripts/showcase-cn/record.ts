@@ -10,7 +10,9 @@ import * as NodePath from "node:path";
 
 import { chromium, type Page } from "playwright-core";
 
-import { STORIES, type Step } from "./stories.ts";
+import { applyHistory } from "./history.ts";
+import { startDemoMail, type DemoMail } from "./mail.ts";
+import { STORIES, mailPlugin, type Step } from "./stories.ts";
 
 const [storyName = "rail", outDir = "", ...flags] = process.argv.slice(2);
 const found = STORIES[storyName];
@@ -44,7 +46,7 @@ const pluginDigest = (manifestPath: string) => {
   return { id: manifest.name as string, digest };
 };
 
-function writeSeed() {
+function writeSeed(mailPort: number) {
   NodeFS.rmSync(seed, { recursive: true, force: true });
   const plugins = NodePath.join(seed, "userdata/plugins");
   NodeFS.mkdirSync(NodePath.join(plugins, "data"), { recursive: true });
@@ -64,7 +66,7 @@ function writeSeed() {
     NodePath.join(plugins, "rail.json"),
     JSON.stringify({ enabled: true, items: story.rail }),
   );
-  for (const [id, data] of Object.entries(story.pluginData())) {
+  for (const [id, data] of Object.entries(story.pluginData({ mailPort }))) {
     NodeFS.writeFileSync(NodePath.join(plugins, "data", `${id}.json`), JSON.stringify(data));
   }
 }
@@ -120,8 +122,12 @@ function seedProjects() {
     }
     const git = (...args: string[]) => NodeChildProcess.execFileSync("git", args, { cwd: dir });
     git("init", "--quiet", "--initial-branch=main");
-    git("add", "--all");
-    git("-c", "user.name=Demo", "-c", "user.email=demo@example.invalid", "commit", "-qm", "init");
+    if (project.history) {
+      applyHistory(dir, project.history);
+    } else {
+      git("add", "--all");
+      git("-c", "user.name=Demo", "-c", "user.email=demo@example.invalid", "commit", "-qm", "init");
+    }
     cli(["project", "add", dir, "--title", project.name]);
     for (const thread of project.threads) {
       const [first = "Start", ...rest] = thread.messages;
@@ -145,16 +151,23 @@ function seedProjects() {
   return threads;
 }
 
+const locate = (page: Page, step: Step) =>
+  (step.frame ? page.frameLocator(step.frame) : page).locator(step.target!).first();
+
 async function boxOf(page: Page, step: Step) {
   if (!step.target) return null;
-  const box = await page.locator(step.target).first().boundingBox();
+  const box = await locate(page, step).boundingBox();
   return box && { x: box.x, y: box.y, w: box.width, h: box.height };
 }
 
 async function main() {
   NodeFS.rmSync(outDir, { recursive: true, force: true });
   NodeFS.mkdirSync(outDir, { recursive: true });
-  writeSeed();
+  const mailPort = await freePort();
+  writeSeed(mailPort);
+  const mail: DemoMail | null = story.mailAccountId
+    ? await startDemoMail(mailPlugin, mailPort, story.mailAccountId)
+    : null;
   const port = await freePort();
   const log = NodeFS.openSync(NodePath.join(outDir, "app.log"), "w");
   const app = NodeChildProcess.spawn(
@@ -171,11 +184,25 @@ async function main() {
       stdio: ["ignore", log, log],
     },
   );
-  const stop = () => app.exitCode === null && app.kill("SIGTERM");
+  const stop = () => {
+    if (app.exitCode === null) app.kill("SIGTERM");
+    mail?.stop();
+  };
   process.on("exit", stop);
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => process.exit(1));
   try {
     const origin = `http://127.0.0.1:${port}`;
     await waitReady(`${origin}/.well-known/t3/environment`, app);
+    if (story.supervised) {
+      // 默认的完全访问会自动批准回放里的审批请求；演示要让它停在等用户点头。
+      const settingsFile = NodePath.join(home, "userdata/settings.json");
+      const settings = JSON.parse(NodeFS.readFileSync(settingsFile, "utf8"));
+      NodeFS.writeFileSync(
+        settingsFile,
+        JSON.stringify({ ...settings, defaultRuntimeMode: "approval-required" }),
+      );
+      await sleep(2000);
+    }
     const threads = seedProjects();
     const browser = await chromium.launch();
     const context = await browser.newContext({
@@ -224,6 +251,7 @@ async function main() {
     // 输入框光标闪烁会让相邻关键帧出现无意义差异。
     await page.addStyleTag({ content: "*{caret-color:transparent!important}" });
     await sleep(1500);
+    await story.prepare?.({ page, mail });
 
     const beats: Array<{
       label: string;
@@ -234,7 +262,13 @@ async function main() {
     }> = [];
     for (const step of story.steps) {
       const box = await boxOf(page, step);
-      if (step.target && step.click !== false) await page.locator(step.target).first().click();
+      if (step.target && step.click !== false) {
+        await locate(page, step).click({ clickCount: step.clicks ?? 1 });
+      }
+      await step.after?.({ page, mail }).catch(async (error) => {
+        await page.screenshot({ path: NodePath.join(outDir, `failed-${step.label}.png`) });
+        throw error;
+      });
       if (step.key) {
         // 鼠标停到标题栏空白处、焦点移走，免得悬停或聚焦提示留在画面里。
         await page.mouse.move(VIEWPORT.width * 0.45, 30);

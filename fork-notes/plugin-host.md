@@ -90,6 +90,8 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 | `plugin-host-examples/`                            | 示例 `echo-clock`（带 `icon`）、`greeter`、`git-status`                                                              |
 | `plugin-host-cordis/`                              | 可选的 Cordis 适配包与示例 `example.counter`                                                                         |
 
+展示视频用的 `scripts/showcase-cn/` 与 `apps/server/scripts/dev-replay/showcase_*` 也是 fork 自有：`plugins` 剧本用插件仓的合成 IMAP、测试专用钥匙串条目和两份自写回放录音（提问、邮件审批）。两份录音在上游 `dev-replay-agent.ts` 的 `SCENARIOS` 里各插了一项，同步冲突时按插入点重挂。
+
 ## 上游挂载点
 
 （PR 页「Git 日志」页签的上游挂载单独记在 `fork-notes/git-log.md`。）

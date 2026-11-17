@@ -65,6 +65,16 @@ export const SCENARIOS = [
     file: `${FIXTURES}/multi_turn/registry_transcript.ndjson`,
   },
   {
+    id: "showcase-question",
+    name: "Showcase question",
+    file: "./dev-replay/showcase_question_transcript.ndjson",
+  },
+  {
+    id: "showcase-mail",
+    name: "Showcase mail approval",
+    file: "./dev-replay/showcase_mail_transcript.ndjson",
+  },
+  {
     id: "command-output",
     name: "Command output",
     file: "./dev-replay/command_output_transcript.ndjson",

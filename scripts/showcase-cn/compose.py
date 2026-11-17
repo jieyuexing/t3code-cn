@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 FPS, OW, OH = 30, 1920, 1080
 MOVE, FADE, RIPPLE = 0.8, 0.3, 0.45
@@ -18,6 +18,19 @@ meta = json.loads((src / "beats.json").read_text())
 beats, k = meta["beats"], meta["scale"]
 frames = [Image.open(src / b["file"]).convert("RGB") for b in beats]
 W, H = frames[0].size
+MAX_SECONDS, MIN_CHANGED = 50, 0.001
+
+
+def changed_ratio(a, b):
+    """两张关键帧里明显不同的像素占比：一拍点了却没有变化，说明点空了。"""
+    diff = ImageChops.difference(a, b).convert("L").point(lambda v: 255 if v > 24 else 0)
+    return sum(diff.histogram()[255:]) / (W * H)
+
+
+for i in range(1, len(frames)):
+    ratio = changed_ratio(frames[i - 1], frames[i])
+    if ratio < MIN_CHANGED:
+        sys.exit(f"关键帧 {beats[i]['label']} 与上一帧几乎没有区别（{ratio:.4%}），这一拍没有产生可见变化")
 PY = 160
 SH = H + 2 * PY
 SW = round(SH * 16 / 9)
@@ -106,6 +119,8 @@ for i, beat in enumerate(beats):
                          click=t + move, ripple=bool(beat["target"])))
     cam, pos, t = new_cam, new_pos, t + dur
 TOTAL = t
+if TOTAL > MAX_SECONDS:
+    sys.exit(f"视频 {TOTAL:.1f} 秒，超过 {MAX_SECONDS} 秒上限，压缩各拍的 hold")
 
 
 def render(now):
