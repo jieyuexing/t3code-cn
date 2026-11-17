@@ -1,6 +1,8 @@
 import type { PluginHostErrorReason } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
+import { BRIDGE_MAX_VIOLATIONS, createBridgeGate, type BridgeCall } from "./bridgeRules.ts";
+
 /** The host side of the `t3-view` handshake and port protocol; the page side ships with each view. */
 export type BridgeErrorCode =
   | PluginHostErrorReason
@@ -35,24 +37,9 @@ export class BridgeCallError extends Schema.TaggedError<BridgeCallError>()("Brid
 }) {}
 const isBridgeCallError = Schema.is(BridgeCallError);
 
-const BRIDGE_MAX_MESSAGE_CHARS = 64 * 1024;
-const BRIDGE_MAX_DEPTH = 32;
-const BRIDGE_MAX_PENDING_CALLS = 16;
-const BRIDGE_MAX_VIOLATIONS = 8;
 const BRIDGE_PING_INTERVAL_MS = 5_000;
-const HANDLER_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
-const SERVICE_PATTERN = /^[a-z][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
-const METHOD_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-const HOST_METHOD_MAX_CHARS = 64;
-const MAX_CALL_ID = 2 ** 31 - 1;
 
 export type BridgeTeardownReason = "unresponsive" | "violations";
-
-function exceedsDepth(value: unknown, depth: number): boolean {
-  if (typeof value !== "object" || value === null) return false;
-  if (depth >= BRIDGE_MAX_DEPTH) return true;
-  return Object.values(value).some((child) => exceedsDepth(child, depth + 1));
-}
 
 /**
  * Answers `ready` messages from the frame's own window with one port, then serves page calls on it.
@@ -78,7 +65,7 @@ export function attachPluginViewBridge(options: {
   let port: MessagePort | null = null;
   let sentContext = "";
   let pingTimer: ReturnType<typeof setInterval> | null = null;
-  let pending = new Set<number>();
+  const gate = createBridgeGate();
   let violations = 0;
   let ping = 0;
   let answeredPing = 0;
@@ -88,7 +75,7 @@ export function attachPluginViewBridge(options: {
     pingTimer = null;
     port?.close();
     port = null;
-    pending = new Set();
+    gate.reset();
   };
   const send = (channel: MessagePort, message: object) => {
     // oxlint-disable-next-line unicorn/require-post-message-target-origin -- MessagePort has no target origin
@@ -99,41 +86,15 @@ export function attachPluginViewBridge(options: {
     options.onTeardown(reason);
   };
 
-  /** What a call message asks for: a handler of the plugin or a service it injects; `null` if it is neither. */
-  const callTarget = (body: {
-    readonly _tag?: unknown;
-    readonly handler?: unknown;
-    readonly service?: unknown;
-    readonly method?: unknown;
-  }):
-    | { readonly run: (input: unknown) => Promise<unknown> }
-    | { readonly refusal: string }
-    | null => {
-    if (body._tag === "call" && typeof body.handler === "string") {
-      const handler = body.handler;
-      return HANDLER_PATTERN.test(handler)
-        ? { run: (input) => options.call(handler, input) }
-        : { refusal: "Invalid handler name." };
+  const runCall = (call: BridgeCall): Promise<unknown> => {
+    switch (call.kind) {
+      case "call":
+        return options.call(call.handler, call.input);
+      case "callService":
+        return options.callService(call.service, call.method, call.input);
+      case "callHost":
+        return options.callHost(call.method, call.input);
     }
-    if (
-      body._tag === "callService" &&
-      typeof body.service === "string" &&
-      typeof body.method === "string"
-    ) {
-      const { service, method } = body;
-      return SERVICE_PATTERN.test(service) && METHOD_PATTERN.test(method)
-        ? { run: (input) => options.callService(service, method, input) }
-        : { refusal: "Invalid service or method name." };
-    }
-    if (
-      body._tag === "callHost" &&
-      typeof body.method === "string" &&
-      body.method.length <= HOST_METHOD_MAX_CHARS
-    ) {
-      const method = body.method;
-      return { run: (input) => options.callHost(method, input) };
-    }
-    return null;
   };
 
   const connect = () => {
@@ -158,53 +119,37 @@ export function attachPluginViewBridge(options: {
     };
 
     mine.onmessage = (event: MessageEvent) => {
-      const raw = event.data;
-      if (typeof raw !== "string") return violate("invalid");
-      if (raw.length > BRIDGE_MAX_MESSAGE_CHARS) return violate("too-large");
-      let message: unknown;
-      try {
-        message = JSON.parse(raw);
-      } catch {
-        return violate("invalid");
+      const outcome = gate.admit(event.data);
+      switch (outcome._tag) {
+        case "pong":
+          if (typeof outcome.n === "number") answeredPing = Math.max(answeredPing, outcome.n);
+          return;
+        case "ignored":
+          return;
+        case "violation":
+          return violate(outcome.reason);
+        case "refused":
+          return refuse(outcome.id, outcome.code, outcome.message);
+        case "cancelled":
+          reply({ _tag: "error", id: outcome.id, code: "cancelled", message: "Cancelled." });
+          return;
+        case "busy":
+          reply({
+            _tag: "error",
+            id: outcome.id,
+            code: "busy",
+            message: "Too many calls are running.",
+          });
+          return;
+        case "run":
+          break;
       }
-      const body = message as {
-        _tag?: unknown;
-        id?: unknown;
-        n?: unknown;
-        handler?: unknown;
-        service?: unknown;
-        method?: unknown;
-        input?: unknown;
-      };
-      if (body._tag === "pong") {
-        if (typeof body.n === "number") answeredPing = Math.max(answeredPing, body.n);
-        return;
-      }
-      const id = body.id;
-      if (typeof id !== "number" || !Number.isInteger(id) || id < 1 || id > MAX_CALL_ID) {
-        return violate("invalid");
-      }
-      if (body._tag === "cancel") {
-        if (pending.delete(id))
-          reply({ _tag: "error", id, code: "cancelled", message: "Cancelled." });
-        return;
-      }
-      const target = callTarget(body);
-      if (target === null) return violate("invalid");
-      if ("refusal" in target) return refuse(id, "invalid", target.refusal);
-      if (pending.has(id)) return refuse(id, "invalid", "Call id is already in use.");
-      if (exceedsDepth(body.input, 0))
-        return refuse(id, "too-deep", "The input is nested too deeply.");
-      if (pending.size >= BRIDGE_MAX_PENDING_CALLS) {
-        reply({ _tag: "error", id, code: "busy", message: "Too many calls are running." });
-        return;
-      }
-      pending.add(id);
-      target.run(body.input ?? null).then(
+      const { id } = outcome;
+      runCall(outcome.call).then(
         (value) => {
-          if (!pending.delete(id)) return;
-          const encoded = JSON.stringify({ _tag: "result", id, value: value ?? null });
-          if (encoded.length > BRIDGE_MAX_MESSAGE_CHARS) {
+          const encoded = gate.finish(id, value);
+          if (encoded === undefined) return;
+          if (encoded === null) {
             reply({ _tag: "error", id, code: "too-large", message: "The result is too large." });
           } else if (port === mine) {
             // oxlint-disable-next-line unicorn/require-post-message-target-origin -- MessagePort has no target origin
@@ -212,7 +157,7 @@ export function attachPluginViewBridge(options: {
           }
         },
         (error: unknown) => {
-          if (!pending.delete(id)) return;
+          if (!gate.drop(id)) return;
           reply({
             _tag: "error",
             id,

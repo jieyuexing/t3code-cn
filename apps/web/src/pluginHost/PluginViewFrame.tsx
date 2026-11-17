@@ -18,6 +18,7 @@ import {
   type BridgeErrorCode,
   type PluginFocus,
 } from "./bridge";
+import { viewHandlerName } from "./bridgeRules.ts";
 import { useHostApi } from "./useHostApi";
 import { pluginHostFailureMessage, usePluginHostCall } from "./usePluginHost";
 import { usePluginViewContext } from "./viewContext";
@@ -140,7 +141,7 @@ export function PluginViewFrame(props: {
           call({
             _tag: "invoke",
             pluginId,
-            handler: `view:${viewId}:${handler}`,
+            handler: viewHandlerName(viewId, handler),
             input: input as never,
           }),
         ),

@@ -12,17 +12,9 @@ import { isAbsolutePath } from "@t3tools/shared/path";
 
 import { BridgeCallError } from "./bridge";
 import type { PluginQuote } from "./composerQuote";
+import { hostMethodDenial, type HostMethod } from "./hostMethods.ts";
 import { openableUrl } from "./openUrl";
 import { clipReply, type PendingThread } from "./pendingThreads";
-
-const VCS_READ_CAPABILITY = "host.vcs-read";
-const SETTINGS_CAPABILITY = "settings";
-const THREADS_READ_CAPABILITY = "host.threads-read";
-const THREADS_ORGANIZE_CAPABILITY = "host.threads-organize";
-const OPEN_URL_CAPABILITY = "host.open-url";
-const BROWSER_CAPABILITY = "host.browser";
-const OPEN_FILE_CAPABILITY = "host.open-file";
-const COMPOSER_CAPABILITY = "host.composer";
 
 export interface DiffTarget {
   readonly kind: "working-tree" | "commit";
@@ -143,7 +135,7 @@ function changeOf(diff: string, path: string) {
 
 type Handler = (deps: HostApiDeps, input: Readonly<Record<string, unknown>>) => Promise<unknown>;
 
-const HANDLERS: Readonly<Record<string, Handler>> = {
+const HANDLERS: Readonly<Record<HostMethod, Handler>> = {
   "vcs.status": (deps, input) => deps.status({ cwd: readText(input, "cwd") }),
   "review.diffPreview": (deps, input) =>
     deps.preview(
@@ -281,21 +273,6 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
     deps.browserProfiles().map(({ id, name, kind }) => ({ id, name, kind })),
 };
 
-/** The capability a method needs; the Git and diff methods all need `host.vcs-read`. */
-const CAPABILITY_OF: Readonly<Record<string, string>> = {
-  "t3.openPluginSettings": SETTINGS_CAPABILITY,
-  "threads.pending": THREADS_READ_CAPABILITY,
-  "threads.lastReply": THREADS_READ_CAPABILITY,
-  "threads.question": THREADS_READ_CAPABILITY,
-  "t3.openThread": THREADS_READ_CAPABILITY,
-  "threads.snooze": THREADS_ORGANIZE_CAPABILITY,
-  "t3.openUrl": OPEN_URL_CAPABILITY,
-  "browser.open": BROWSER_CAPABILITY,
-  "browser.profiles": BROWSER_CAPABILITY,
-  "t3.openFile": OPEN_FILE_CAPABILITY,
-  "t3.addToComposer": COMPOSER_CAPABILITY,
-};
-
 /**
  * What a view's `callHost` reaches: a read-only slice of T3's Git, the diff panel, the thread
  * list and replies, snoozing, opening a web page in the system browser or the thread's T3 browser, opening a workspace file in the thread's file panel, adding a quote to the thread's composer, and the caller's own settings
@@ -304,15 +281,8 @@ const CAPABILITY_OF: Readonly<Record<string, string>> = {
  */
 export function createHostApi(deps: HostApiDeps) {
   return async (method: string, input: unknown): Promise<unknown> => {
-    const handler = Object.hasOwn(HANDLERS, method) ? HANDLERS[method] : undefined;
-    const capability = CAPABILITY_OF[method] ?? VCS_READ_CAPABILITY;
-    if (handler === undefined || !deps.capabilities.includes(capability)) {
-      throw denied(
-        handler === undefined
-          ? `The host does not offer "${method}".`
-          : `"${method}" needs the ${capability} capability.`,
-      );
-    }
-    return handler(deps, readObject(input));
+    const denial = hostMethodDenial(method, deps.capabilities);
+    if (denial !== null) throw denied(denial);
+    return HANDLERS[method as HostMethod](deps, readObject(input));
   };
 }
