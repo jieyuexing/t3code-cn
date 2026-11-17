@@ -37,6 +37,8 @@ import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as HostResources from "../resourceTelemetry/HostResources.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ScratchThreadPromotion from "../project/ScratchThreadPromotion.ts";
+import * as IssueService from "../issue/IssueService.ts";
+import * as IssueTrackerConnections from "../issue/IssueTrackerConnections.ts";
 import * as McpAppRequests from "../mcpApps/McpAppRequests.ts";
 import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
@@ -162,6 +164,8 @@ const layerRpcServices = Layer.mergeAll(
   Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({}),
   Layer.mock(PullRequestReviewGuideService.PullRequestReviewGuideService)({}),
   Layer.mock(PullRequestService.PullRequestService)({}),
+  Layer.mock(IssueService.IssueService)({}),
+  Layer.mock(IssueTrackerConnections.IssueTrackerConnections)({}),
   Layer.mock(PullRequestSyncReactor.PullRequestSyncReactor)({}),
   Layer.mock(RelayClient.RelayClient)({}),
   Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),
