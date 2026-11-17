@@ -410,6 +410,7 @@ describe("readOpenCodeUsage", () => {
         reasoningTokens: 0,
       });
       assert.strictEqual(records[0]?.reportedCostUsd, 0.01);
+      assert.deepStrictEqual(records[1]?.request, { startMs: 1792620090000, endMs: 1792620090500 });
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

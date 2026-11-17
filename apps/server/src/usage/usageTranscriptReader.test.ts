@@ -10,6 +10,7 @@ import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest";
 import { totalTokens, type TranscriptUsageFormat } from "@t3tools/provider-core/server/usage";
 import * as Schema from "effect/Schema";
 
+import { initialClaudeScanState } from "../provider/Drivers/claudeUsage.ts";
 import { TEST_FORMATS } from "./usageTestFormats.ts";
 import {
   listTranscriptFiles,
@@ -224,7 +225,7 @@ describe("readTranscriptRecords resume", () => {
           state.errors += 1;
           return [];
         }
-        return TEST_FORMATS.claude.parseProjected(value, undefined);
+        return TEST_FORMATS.claude.parseProjected(value, initialClaudeScanState());
       },
       readMalformedRecords: (state: { errors: number }) => state.errors,
     };

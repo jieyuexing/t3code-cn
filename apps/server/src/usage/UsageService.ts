@@ -31,6 +31,7 @@ import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { formatMalformedUsageWarning } from "@t3tools/shared/usageFormat";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { readDispatchScores } from "./dispatchScores.ts";
 import { BUILT_IN_USAGE_DRIVERS, type BuiltInUsageReadersEnv } from "../provider/builtInDrivers.ts";
 import type { ProviderDriver } from "@t3tools/provider-core/server/driver";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
@@ -1154,6 +1155,10 @@ export const make = Effect.gen(function* () {
     }
 
     const aggregated = aggregator.finish();
+    const dispatchScores =
+      settings.usageDispatchScoresPath === ""
+        ? undefined
+        : yield* Effect.promise(() => readDispatchScores(settings.usageDispatchScoresPath));
     const readAt = yield* DateTime.now;
     const finishedAtMs = yield* Clock.currentTimeMillis;
 
@@ -1167,6 +1172,8 @@ export const make = Effect.gen(function* () {
       sources,
       pricing: summaryPricing,
       scanDurationMs: Math.max(0, finishedAtMs - startedAtMs),
+      requestSpeed: aggregated.requestSpeed,
+      ...(dispatchScores === undefined ? {} : { dispatchScores }),
       ...(input.modelFilter === undefined ? {} : { modelFilter: input.modelFilter }),
     } satisfies UsageSummary;
     return { summary, fromMemory };

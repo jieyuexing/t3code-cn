@@ -1687,7 +1687,17 @@ function OpenCommandPaletteDialog(props: {
   actionItems.push({
     kind: "action",
     value: "action:usage",
-    searchTerms: ["usage", "use", "tokens", "cost", "spend", "limits", "stats", "analytics"],
+    searchTerms: [
+      "usage",
+      "use",
+      "tokens",
+      "cost",
+      "spend",
+      "limits",
+      "speed",
+      "stats",
+      "analytics",
+    ],
     title: "Open usage",
     icon: <ChartNoAxesColumnIcon className={ITEM_ICON_CLASS} />,
     shortcutCommand: "usage.open",

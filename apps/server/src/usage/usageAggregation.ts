@@ -6,11 +6,13 @@ import type {
   UsageModelFilter,
   UsageModelSelector,
   UsageResolution,
+  UsageSpeedRow,
   UsageTokenTotals,
 } from "@t3tools/contracts";
 
 import { EMPTY_TOTALS, type UsageRecord } from "@t3tools/provider-core/server/usage";
 import { cacheSavingsUsd, lookupRate, priceUsage, type RateTable } from "./usagePricing.ts";
+import { mergeRequestSpans, UsageSpeedAccumulator } from "./usageSpeedRows.ts";
 
 // en-CA gives ISO-ordered parts in the requested zone; Date getters are host-local.
 function makeDayFormatter(timeZone: string): (timestampMs: number) => string {
@@ -138,6 +140,7 @@ export function canonicalModelFilter(
 
 export interface AggregateResult {
   readonly buckets: readonly UsageBucket[];
+  readonly requestSpeed: readonly UsageSpeedRow[];
   readonly duplicatesDropped: number;
   readonly outOfWindow: number;
 }
@@ -149,6 +152,7 @@ export interface AggregateResult {
 export function mergeUsageCopies(held: UsageRecord, copy: UsageRecord): UsageRecord {
   const a = held.totals;
   const b = copy.totals;
+  const request = mergeRequestSpans(held.request, copy.request);
   const reportedCostUsd =
     held.reportedCostUsd === null || copy.reportedCostUsd === null
       ? (held.reportedCostUsd ?? copy.reportedCostUsd)
@@ -160,7 +164,8 @@ export function mergeUsageCopies(held: UsageRecord, copy: UsageRecord): UsageRec
     b.outputTokens <= a.outputTokens &&
     b.reasoningTokens <= a.reasoningTokens &&
     (copy.cacheCreation1hTokens ?? 0) <= (held.cacheCreation1hTokens ?? 0) &&
-    reportedCostUsd === held.reportedCostUsd
+    reportedCostUsd === held.reportedCostUsd &&
+    request === held.request
   ) {
     return held;
   }
@@ -170,6 +175,7 @@ export function mergeUsageCopies(held: UsageRecord, copy: UsageRecord): UsageRec
   );
   return {
     ...held,
+    ...(request === undefined ? {} : { request }),
     ...(cacheCreation1hTokens > 0 ? { cacheCreation1hTokens } : {}),
     totals: {
       uncachedInputTokens: Math.max(a.uncachedInputTokens, b.uncachedInputTokens),
@@ -210,12 +216,14 @@ interface Contribution {
   record: UsageRecord;
   /** Null when the first copy fell outside the window. */
   readonly bucket: MutableBucket | null;
+  readonly source: string;
 }
 
 /** Deduplicates across the whole scan; Claude copies records into resumed/forked transcripts. */
 export class UsageAggregator {
   readonly #buckets = new Map<string, MutableBucket>();
   readonly #seen = new Map<string, Contribution>();
+  readonly #requestSpeed = new UsageSpeedAccumulator();
   readonly #toDay: (timestampMs: number) => string;
   readonly #hourlyWindow: { readonly sinceTimeMs: number; readonly untilTimeMs: number } | null;
   readonly #options: AggregateOptions;
@@ -263,14 +271,15 @@ export class UsageAggregator {
       }
     }
 
-    const bucket = this.#placeInWindow(record, sourcePath ?? "");
-    if (record.dedupeKey !== null) this.#seen.set(record.dedupeKey, { record, bucket });
+    const source = sourcePath ?? "";
+    const bucket = this.#placeInWindow(record, source);
+    if (record.dedupeKey !== null) this.#seen.set(record.dedupeKey, { record, bucket, source });
     if (bucket === null) {
       this.#outOfWindow += 1;
       return false;
     }
     // Keyed usage is counted in finish(), once all its copies are merged.
-    if (record.dedupeKey === null) this.#accumulate(bucket, record);
+    if (record.dedupeKey === null) this.#accumulate(bucket, record, source);
     if (record.sessionId.length > 0) bucket.sessions.add(record.sessionId);
     return true;
   }
@@ -299,7 +308,8 @@ export class UsageAggregator {
     return this.#bucketFor(day, hourIndex, record.provider, record.model, source);
   }
 
-  #accumulate(bucket: MutableBucket, record: UsageRecord): void {
+  #accumulate(bucket: MutableBucket, record: UsageRecord, source: string): void {
+    this.#requestSpeed.add(record, source);
     const priced = priceUsage(this.#options.rates, record, this.#options.priceOverrides);
 
     const totals = bucket.totals;
@@ -400,8 +410,8 @@ export class UsageAggregator {
   }
 
   finish(): AggregateResult {
-    for (const { record, bucket } of this.#seen.values()) {
-      if (bucket !== null) this.#accumulate(bucket, record);
+    for (const { record, bucket, source } of this.#seen.values()) {
+      if (bucket !== null) this.#accumulate(bucket, record, source);
     }
     this.#seen.clear();
     const buckets: UsageBucket[] = [];
@@ -451,6 +461,7 @@ export class UsageAggregator {
 
     return {
       buckets,
+      requestSpeed: this.#requestSpeed.finish(),
       duplicatesDropped: this.#duplicatesDropped,
       outOfWindow: this.#outOfWindow,
     };

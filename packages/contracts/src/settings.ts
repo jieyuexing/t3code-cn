@@ -1592,6 +1592,9 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
 
+  /** Absolute path of a dispatch score JSONL to show beside request speeds; edit in settings.json. Empty hides the column. */
+  usageDispatchScoresPath: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+
   /** Sent by the Usage tab with each summary request to this environment; edit in settings.json. Invalid values are ignored. */
   usageModelFilter: ForwardCompatibleOptional(UsageModelFilter),
 });
