@@ -1,6 +1,7 @@
 import type { ClaudeSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import {
@@ -20,14 +21,28 @@ export const CLAUDE_SYNTHETIC_MODEL = "<synthetic>";
  * Subagent blocks can progress from stream-start to final usage, so callers
  * must count each key once using the maximum of each token channel.
  */
-export function parseClaudeLine(line: string): readonly UsageRecord[] {
+/**
+ * A request starts at the last `user` entry before its message (the prompt or a tool result);
+ * attachments and other entries sit between and would shorten it.
+ */
+export const ClaudeScanState = Schema.Struct({
+  lastUserMs: Schema.mutableKey(Schema.NullOr(Schema.Finite)),
+});
+export type ClaudeScanState = typeof ClaudeScanState.Type;
+
+export const initialClaudeScanState = (): ClaudeScanState => ({ lastUserMs: null });
+
+export function parseClaudeLine(
+  line: string,
+  state: ClaudeScanState = initialClaudeScanState(),
+): readonly UsageRecord[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
   } catch {
     return [];
   }
-  return parseClaudeRecord(parsed);
+  return parseClaudeRecord(parsed, state);
 }
 
 function cacheCreation1h(usage: Record<string, unknown>): { cacheCreation1hTokens?: number } {
@@ -37,10 +52,14 @@ function cacheCreation1h(usage: Record<string, unknown>): { cacheCreation1hToken
   return tokens > 0 ? { cacheCreation1hTokens: tokens } : {};
 }
 
-function parseClaudeRecord(parsed: unknown): readonly UsageRecord[] {
+function parseClaudeRecord(parsed: unknown, state: ClaudeScanState): readonly UsageRecord[] {
   if (typeof parsed !== "object" || parsed === null) return [];
 
   const record = parsed as Record<string, unknown>;
+  if (record["type"] === "user") {
+    state.lastUserMs = parseTimestampMs(record["timestamp"]) ?? state.lastUserMs;
+    return [];
+  }
   if (record["type"] !== "assistant") return [];
 
   const message = record["message"];
@@ -81,6 +100,9 @@ function parseClaudeRecord(parsed: unknown): readonly UsageRecord[] {
     reportedCostUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
     speed: usageRecord["speed"] === "fast" ? "fast" : "standard",
     dedupeKey,
+    ...(state.lastUserMs !== null && state.lastUserMs <= timestampMs
+      ? { request: { startMs: state.lastUserMs, endMs: timestampMs } }
+      : {}),
   };
 
   // Top-level `usage` is the executor's alone. Advisor calls run on another model at its own rates
@@ -118,7 +140,7 @@ function parseClaudeRecord(parsed: unknown): readonly UsageRecord[] {
   return records;
 }
 
-export const claudeUsageFormat: TranscriptUsageFormat<void> = {
+export const claudeUsageFormat: TranscriptUsageFormat<ClaudeScanState> = {
   selectFields: {
     type: true,
     timestamp: true,
@@ -127,9 +149,11 @@ export const claudeUsageFormat: TranscriptUsageFormat<void> = {
     costUSD: true,
     message: { id: true, model: true, usage: true },
   },
-  usageMarkers: ['"usage"'],
-  parseLine: (line) => parseClaudeLine(line),
-  parseProjected: (projected) => parseClaudeRecord(projected),
+  // User entries carry no usage; they date the start of the next request.
+  usageMarkers: ['"usage"', '"type":"user"'],
+  parseLine: parseClaudeLine,
+  parseProjected: parseClaudeRecord,
+  state: { initial: initialClaudeScanState, schema: ClaudeScanState },
 };
 
 export const claudeUsageReader: ProviderUsageReader<ClaudeSettings, Path.Path> = {

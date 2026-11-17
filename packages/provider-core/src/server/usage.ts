@@ -24,6 +24,13 @@ export interface UsageRecord {
   readonly speed: UsageSpeed;
   readonly unresolvedServiceTierTurnId?: string;
   readonly dedupeKey: string | null;
+  /** Wall-clock span of the model request behind this record, when the source gives a reliable one. */
+  readonly request?: UsageRequestSpan;
+}
+
+export interface UsageRequestSpan {
+  readonly startMs: number;
+  readonly endMs: number;
 }
 
 export const EMPTY_TOTALS: UsageTokenTotals = {

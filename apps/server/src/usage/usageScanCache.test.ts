@@ -225,15 +225,11 @@ describe("scan cache round trip", () => {
       };
 
       const restored = decodeScanCache(JSON.parse(JSON.stringify(legacy)), TEST_FORMAT_MAP);
-      expect(restored.get("/gone.jsonl")).toEqual(
-        version >= 13
-          ? original.get("/gone.jsonl")
-          : {
-              ...original.get("/gone.jsonl"),
-              size: -1,
-              position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
-            },
-      );
+      expect(restored.get("/gone.jsonl")).toEqual({
+        ...original.get("/gone.jsonl"),
+        size: -1,
+        position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
+      });
       expect(restored.get("/gone-codex.jsonl")).toEqual({
         ...original.get("/gone-codex.jsonl"),
         size: -1,
@@ -283,6 +279,7 @@ describe("scan cache round trip", () => {
     // Served while unchanged, but its state predates the latest snapshot time, so it cannot resume.
     expect(restored.get("/clean-codex.jsonl")).toEqual({
       ...codex(0),
+      size: -1,
       position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
     });
     // The migrated entries persist without a state and load again under the current version.
@@ -322,6 +319,7 @@ describe("scan cache round trip", () => {
       decodeScanCache({ ...current, version: 15 }, TEST_FORMAT_MAP).get("/codex.jsonl"),
     ).toEqual({
       ...entry,
+      size: -1,
       position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
     });
     expect(decodeScanCache(current, TEST_FORMAT_MAP).get("/codex.jsonl")).toEqual(entry);
@@ -337,6 +335,33 @@ describe("scan cache round trip", () => {
       size: -1,
       position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
     });
+  });
+
+  it("round-trips request spans with and without the optional fields before them", () => {
+    const span = { startMs: 1_785_999_990_000, endMs: 1_786_000_000_000 };
+    const original = cacheWith([
+      ["/spans.jsonl", 100, [record({ request: span }), record({ dedupeKey: "msg_2:" })]],
+      [
+        "/spans-1h.jsonl",
+        100,
+        [record({ request: span, cacheCreation1hTokens: 5, dedupeKey: "msg_3:" })],
+      ],
+    ]);
+    const restored = decodeScanCache(parse(makeScanCacheWriter()(original, {})), TEST_FORMAT_MAP);
+    expect(restored).toEqual(original);
+  });
+
+  it("re-parses v17 Claude and Codex entries so they gain request spans", () => {
+    const original = cacheWith([["/claude.jsonl", 100, [record()]]]);
+    original.set("/codex.jsonl", { ...original.get("/claude.jsonl")!, provider: "codex" });
+    const v17 = { ...parse(makeScanCacheWriter()(original, {})), version: 17 };
+    const restored = decodeScanCache(v17, TEST_FORMAT_MAP);
+    for (const path of ["/claude.jsonl", "/codex.jsonl"]) {
+      expect(restored.get(path)).toMatchObject({
+        size: -1,
+        position: { resumeOffset: 0, state: null },
+      });
+    }
   });
 
   it.each(["s:p:grok-4.5", "s:p:1786000000000:grok-4.5"])(

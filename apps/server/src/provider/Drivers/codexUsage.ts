@@ -152,6 +152,10 @@ export const CodexScanState = Schema.Struct({
   modelProvider: Schema.mutableKey(Schema.String),
   turnId: Schema.mutableKey(Schema.String),
   sawThreadSettings: Schema.mutableKey(Schema.Boolean),
+  // The next model request starts at the last of a user message, a task start or a tool output.
+  requestStartMs: Schema.mutableKey(Schema.optionalKey(Schema.Finite)),
+  callStartMs: Schema.mutableKey(Schema.optionalKey(Schema.Finite)),
+  lastOutputMs: Schema.mutableKey(Schema.optionalKey(Schema.Finite)),
   suppressingForkCopies: Schema.mutableKey(Schema.Boolean),
   forkCopyAnchorMs: Schema.mutableKey(Schema.Finite),
 });
@@ -205,6 +209,7 @@ function isForkCopy(state: CodexScanState, timestampMs: number): boolean {
  * Legacy snapshots validate request deltas against cumulative counters.
  */
 export function parseCodexLine(line: string, state: CodexScanState): readonly UsageRecord[] {
+  if (noteTimingLine(line, state)) return [];
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -212,6 +217,74 @@ export function parseCodexLine(line: string, state: CodexScanState): readonly Us
     return [];
   }
   return parseCodexRecord(parsed, state);
+}
+
+const OUTPUT_ITEMS = new Set(["reasoning", "custom_tool_call", "function_call"]);
+
+/** Dates what the next `token_count` reports: when its request started and when it last produced output. */
+function noteRequestTiming(
+  state: CodexScanState,
+  timestampMs: number,
+  recordType: unknown,
+  payloadType: unknown,
+  role: unknown,
+): void {
+  if (typeof payloadType !== "string") return;
+  if (
+    (recordType === "event_msg" && payloadType === "task_started") ||
+    (recordType === "response_item" &&
+      (payloadType.endsWith("_call_output") || (payloadType === "message" && role === "user")))
+  ) {
+    state.requestStartMs = timestampMs;
+  } else if (
+    recordType === "response_item" &&
+    (OUTPUT_ITEMS.has(payloadType) || (payloadType === "message" && role === "assistant"))
+  ) {
+    if (state.callStartMs === undefined && state.requestStartMs !== undefined) {
+      state.callStartMs = state.requestStartMs;
+    }
+    state.lastOutputMs = timestampMs;
+  }
+}
+
+/** Consumes the timing of the request a snapshot reports; repeats and unbilled snapshots clear it too. */
+function takeRequestSpan(state: CodexScanState): UsageRecord["request"] {
+  const { callStartMs, lastOutputMs } = state;
+  delete state.callStartMs;
+  delete state.lastOutputMs;
+  return callStartMs !== undefined && lastOutputMs !== undefined && lastOutputMs > callStartMs
+    ? { startMs: callStartMs, endMs: lastOutputMs }
+    : undefined;
+}
+
+// Rollout lines open `{"timestamp":..,"type":..,"payload":{"type":..`; the timing items are large, so skip parsing them.
+const TIMING_LINE =
+  /^\{"timestamp":"([^"]+)"(?:,"ordinal":\d+)?,"type":"(response_item|event_msg)","payload":\{"type":"([a-z_]+)"/;
+const ROLE_NEAR_TYPE = /^,(?:"id":"[^"]*",)?"role":"([a-z]+)"/;
+
+function noteTimingLine(line: string, state: CodexScanState): boolean {
+  const match = TIMING_LINE.exec(line);
+  if (match === null) return false;
+  const [head, timestamp, recordType, payloadType] = match as unknown as [
+    string,
+    string,
+    string,
+    string,
+  ];
+  let role: string | undefined;
+  if (payloadType === "message") {
+    role = ROLE_NEAR_TYPE.exec(line.slice(head.length, head.length + 120))?.[1];
+    if (role === undefined) return false;
+  } else if (
+    payloadType !== "task_started" &&
+    !payloadType.endsWith("_call_output") &&
+    !OUTPUT_ITEMS.has(payloadType)
+  ) {
+    return false;
+  }
+  const timestampMs = parseTimestampMs(timestamp);
+  if (timestampMs !== null) noteRequestTiming(state, timestampMs, recordType, payloadType, role);
+  return true;
 }
 
 function parseCodexRecord(parsed: unknown, state: CodexScanState): readonly UsageRecord[] {
@@ -222,6 +295,16 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): readonly Usag
   if (typeof payload !== "object" || payload === null) return [];
   const payloadRecord = payload as Record<string, unknown>;
   const payloadType = payloadRecord["type"];
+  const timestampForTiming = parseTimestampMs(record["timestamp"]);
+  if (timestampForTiming !== null) {
+    noteRequestTiming(
+      state,
+      timestampForTiming,
+      record["type"],
+      payloadType,
+      payloadRecord["role"],
+    );
+  }
 
   if (record["type"] === "session_meta") {
     // Only the first meta identifies this session; copied ancestor metas would misattribute later records.
@@ -261,6 +344,7 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): readonly Usag
     // Copied history is already billed in the parent.
     if (isForkCopy(state, timestampMs)) return [];
     const responseId = payloadRecord["response_id"];
+    const span = takeRequestSpan(state);
     if (typeof responseId === "string" && responseId.length > 0) {
       const pending = state.unreportedRequests ?? [];
       state.requestLedgerActive = true;
@@ -274,6 +358,7 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): readonly Usag
         ...pending.map((request) => codexRequestRecord(state, request.usage, request)),
         {
           ...codexRequestRecord(state, usage, codexAttribution(state, timestampMs)),
+          ...(span === undefined ? {} : { request: span }),
           dedupeKey: JSON.stringify(["codex", state.sessionId, responseId]),
         },
       ];
@@ -297,6 +382,7 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): readonly Usag
   const info = payloadRecord["info"];
   if (typeof info !== "object" || info === null) return [];
   const infoRecord = info as Record<string, unknown>;
+  const span = takeRequestSpan(state);
 
   // Codex may re-emit these counters after the model or timestamp becomes available.
   const timestampMs = parseTimestampMs(record["timestamp"]);
@@ -419,8 +505,11 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): readonly Usag
   state.lastUsageSignature = signature;
 
   return [
-    ...unreported.map((request) => codexRequestRecord(state, request.usage, request)),
-    codexRequestRecord(state, last, codexAttribution(state, timestampMs)),
+    ...unreported.map((pending) => codexRequestRecord(state, pending.usage, pending)),
+    {
+      ...codexRequestRecord(state, last, codexAttribution(state, timestampMs)),
+      ...(span === undefined ? {} : { request: span }),
+    },
   ];
 }
 
@@ -488,6 +577,7 @@ export const codexUsageFormat: TranscriptUsageFormat<CodexScanState> = {
       id: true,
       session_id: true,
       model_provider: true,
+      role: true,
       turn_id: true,
       response_id: true,
       model: true,
@@ -505,6 +595,8 @@ export const codexUsageFormat: TranscriptUsageFormat<CodexScanState> = {
     '"turn_context"',
     '"thread_settings_applied"',
     '"session_meta"',
+    '"response_item"',
+    '"task_started"',
   ],
   parseLine: parseCodexLine,
   parseProjected: parseCodexRecord,
