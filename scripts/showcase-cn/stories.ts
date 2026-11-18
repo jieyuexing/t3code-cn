@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off - 剧本在录制前同步读本机插件缓存，并按当下时间标记缓存新鲜度。
 // 展示剧本：演示 home 里装哪些插件、放哪些项目与线程、按什么顺序点哪里。
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -57,9 +58,17 @@ interface Story {
   readonly steps: ReadonlyArray<Step>;
 }
 
-const universe = NodePath.resolve(import.meta.dirname, "../../../../..");
-const rssPlugin = NodePath.join(universe, "projects/personal/t3-plugins/t3-rss-plugin");
-export const mailPlugin = NodePath.join(universe, "projects/personal/t3-plugins/t3-mail-plugin");
+/** 插件在总仓里的位置按登记 id 取（`host/bin/universe path`），目录布局变了不用改这里。 */
+function universePlugin(id: string): string {
+  for (let dir = import.meta.dirname; dir !== NodePath.dirname(dir); dir = NodePath.dirname(dir)) {
+    if (!NodeFS.existsSync(NodePath.join(dir, "host/config/workspaces.json"))) continue;
+    const cli = NodePath.join(dir, "host/bin/universe");
+    return NodeChildProcess.execFileSync(cli, ["path", id], { encoding: "utf8" }).trim();
+  }
+  throw new Error(`找不到总仓根，无法定位插件 ${id}；请在总仓里的 t3code-cn 检出运行`);
+}
+const rssPlugin = universePlugin("t3-rss-plugin");
+export const mailPlugin = universePlugin("t3-mail-plugin");
 
 /** 只取公开技术源的本机缓存，订阅列表里的其他源不进演示。 */
 const PUBLIC_FEEDS = ["martinfowler.com", "vercel.com", "atlasnote.ai"];
