@@ -25,7 +25,6 @@ function handler(
       } satisfies ThreadHistoryController.ThreadHistoryLoadEarlierResult);
     },
     reconcilePendingWork: () => Effect.void,
-    threadCreated: () => Effect.void,
   };
 }
 
