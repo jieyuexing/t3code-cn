@@ -11,7 +11,7 @@
 - 网页 `apps/web/src/gitLog/`：`GitLogPage.tsx`（页面：仓下拉、筛选框、刷新；上半提交列表，列为 分支图｜时间 MM-DD HH:mm｜作者｜说明，分支／标签名作小标签；下半「作者 · 时间 · 说明」、文件清单（状态字母 A/M/D/R 与增删数）、选中文件的差异）、`GitLogFileDiff.tsx`（`review.diffFilePatch` 加自带 `FileDiff`，统一／并排用 T3 自带的客户端设置 `diffLayout`）、`GitLogGraphCell.tsx`（一行的 SVG 分支图）、`graph.ts`（泳道算法，纯函数，带 `graph.test.ts`）、`GitLogSourceSwitch.tsx`、`GitLogRoute.tsx`（`source !== "git"` 时回到原 `PullRequestsPage`）、`gitLog.logic.ts`、`gitLogState.ts`。
 - 翻页：把 `limit` 加 100 整段重取（服务端每次从头读），页面在加载期间保留上一页；滚到底（距底 80px 内）或点「加载更早…」触发。分支图只在没有筛选词时画：筛选后的历史不连续，连线没有意义。
 - 合并提交的文件清单按第一父提交比较（`review.getDiffPreview` 的既有行为），差异区标注。
-- 公司仓（`projects/etech` 下）照常列出。差异读取受 `ReviewService` 的目录白名单限制：只有项目根之内的仓能看差异，仓发现正是从项目根起，所以一致。
+- 公司仓（`work` 下）照常列出。差异读取受 `ReviewService` 的目录白名单限制：只有项目根之内的仓能看差异，仓发现正是从项目根起，所以一致。
 - 默认仓是「当前项目」所在仓，实现上取最近更新的项目根里发现的第一个仓；页面不在某个线程里，没有“当前线程”可取。
 
 Agent 与移动端：不接 MCP 工具、不做移动端界面；`WS_METHODS` 新增一项对移动端无影响。
