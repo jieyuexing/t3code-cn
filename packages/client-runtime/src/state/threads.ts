@@ -936,6 +936,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           Effect.forkIn(scope),
           Effect.flatMap(Fiber.join),
         ),
+      // A send created the thread: end the miss backoff now instead of at its next probe.
+      threadCreated: () =>
+        Effect.suspend(() =>
+          httpMisses > 0 ? Queue.offer(resubscribes, undefined) : Effect.void,
+        ).pipe(Effect.asVoid),
     });
     yield* Effect.addFinalizer(() => historyController.value.unregister(registration));
   }
