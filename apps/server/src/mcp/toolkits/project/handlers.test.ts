@@ -35,6 +35,7 @@ import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementSer
 import * as ServerConfig from "../../../config.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as Project from "../../../project/ProjectService.ts";
+import * as ProjectCheckout from "../../../project/ProjectCheckout.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
@@ -1183,8 +1184,9 @@ it.effect("reading a project shows the default model saved in Settings", () =>
       overrideModel,
       launched: [],
     });
-    const dependencies = Layer.merge(
+    const dependencies = Layer.mergeAll(
       harness.dependencies,
+      Layer.mock(ProjectCheckout.ProjectCheckout)({ head: () => Effect.succeed(null) }),
       Layer.mock(Project.ProjectService)({
         getById: (projectId) =>
           Effect.succeedSome({
