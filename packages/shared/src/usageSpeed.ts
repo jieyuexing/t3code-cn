@@ -80,7 +80,7 @@ const ANTIGRAVITY_VARIANT_SUFFIX = /(?:-(?:extra-low|low|medium|high|xhigh|trial
  * One model's name across rows. Antigravity names a model per effort ("gemini-4-hydrogen-high") and
  * per route ("gemini-4-argon-trial", which its own metadata labels "Gemini 4 Argon (High)").
  */
-export function speedModel(provider: string, model: string): string {
+function speedModel(provider: string, model: string): string {
   return provider === "antigravity" ? model.replace(ANTIGRAVITY_VARIANT_SUFFIX, "") : model;
 }
 

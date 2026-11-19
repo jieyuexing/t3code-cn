@@ -116,7 +116,12 @@ describe("share helpers", () => {
 describe("share row choices", () => {
   const rows = [
     ranking({ model: "claude-opus-5-5", longRate: 90, longRequests: 3449 }),
-    ranking({ provider: "antigravity", model: "gemini-4-hydrogen", longRate: 80, longRequests: 214 }),
+    ranking({
+      provider: "antigravity",
+      model: "gemini-4-hydrogen",
+      longRate: 80,
+      longRequests: 214,
+    }),
     ranking({
       provider: "antigravity",
       model: "gemini-pro-orchestrator-neon",
@@ -200,6 +205,8 @@ describe("share row choices", () => {
     expect(shareOptionLabel(ranking({ provider: "antigravity", model: "gemini-4-argon" }))).toBe(
       "Gemini 4 Argon · Antigravity",
     );
-    expect(shareOptionLabel(ranking({ tier: "fast" }))).toBe("Claude Opus 5.5 (fast) · Claude Code");
+    expect(shareOptionLabel(ranking({ tier: "fast" }))).toBe(
+      "Claude Opus 5.5 (fast) · Claude Code",
+    );
   });
 });

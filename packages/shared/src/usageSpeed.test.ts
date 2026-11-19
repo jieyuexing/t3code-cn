@@ -149,7 +149,8 @@ describe("request speed", () => {
     });
   });
   it("folds Antigravity effort and route variants of one model into one row", () => {
-    const longOf = (count: number, rate: number) => pairsOf(Array.from({ length: count }, () => rate));
+    const longOf = (count: number, rate: number) =>
+      pairsOf(Array.from({ length: count }, () => rate));
     const rows = [
       row({ provider: "antigravity", model: "gemini-4-hydrogen", long: longOf(109, 100) }),
       row({ provider: "antigravity", model: "gemini-4-hydrogen-high", long: longOf(105, 100) }),
