@@ -27,6 +27,10 @@ T3 Code runs the coding agents on your machine and gives them one fast interface
 
 It works with Claude Code, Codex, Cursor, OpenCode, Grok Build, Antigravity, Kiro, Pi, Muse Code, fx, and any [ACP](./docs/user/providers-acp.md) agent. If an agent is set up on your computer, T3 Code can control it.
 
+## cn build: telemetry is off by default
+
+This fork's builds (`cn-v*` Releases) do not send product usage events to `ingest.t3.codes` unless you opt in. To turn them on, set `T3CODE_TELEMETRY_ENABLED=true` in the server's environment before starting it (the desktop app reads it from your shell profile on macOS and Linux, or from a user environment variable on Windows; on the desktop, set it before launch and restart once, as the first launch after adding it may not pick it up). Relay connection traces are only sent when a build bakes in an Axiom token, which this fork's builds do not.
+
 ## What you get
 
 - **Your subscriptions.** T3 Code does not resell tokens. It drives the agents you are already signed in to.
