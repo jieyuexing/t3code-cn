@@ -149,6 +149,7 @@ const LOGIN_SHELL_ENV_NAMES = [
   "T3CODE_RELEASE_BASE_URL",
   "__MISE_DIFF",
   "JAVA_HOME",
+  "PNPM_HOME",
 ] as const;
 const WINDOWS_PROFILE_ENV_NAMES = ["PATH", "FNM_DIR", "FNM_MULTISHELL_PATH"] as const;
 const LOCALE_ENV_NAMES = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
@@ -571,6 +572,7 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       "SSL_CERT_DIR",
       "NODE_EXTRA_CA_CERTS",
       "JAVA_HOME",
+      "PNPM_HOME",
       "T3CODE_TELEMETRY_ENABLED",
       "T3CODE_GITHUB_APP_CLIENT_ID",
       "T3CODE_RELEASE_BASE_URL",
@@ -691,6 +693,7 @@ const CACHED_ENV_NAMES = [
   "HOMEBREW_CELLAR",
   "HOMEBREW_REPOSITORY",
   "JAVA_HOME",
+  "PNPM_HOME",
   "SSL_CERT_FILE",
   "SSL_CERT_DIR",
   "NODE_EXTRA_CA_CERTS",
@@ -705,6 +708,21 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Scope.Scope;
   const env = process.env;
+  const isLinuxAppImage =
+    environment.platform === "linux" && (env.APPIMAGE !== undefined || env.APPDIR !== undefined);
+  const appDir = env.APPDIR?.replace(/\/+$/u, "");
+  const stripAppImagePaths = (target: NodeJS.ProcessEnv) => {
+    if (!isLinuxAppImage || target.PATH === undefined) return;
+    // Cached PATHs can outlive the AppImage mount that originally contributed them.
+    const kept = target.PATH.split(":").filter(
+      (entry) =>
+        !(appDir && (entry === appDir || entry.startsWith(`${appDir}/`))) &&
+        !/^\/tmp\/\.mount_T3-[^/]+(?:\/|$)/u.test(entry),
+    );
+    if (kept.length > 0) target.PATH = kept.join(":");
+    else delete target.PATH;
+  };
+  stripAppImagePaths(env);
   const inherited = { ...env };
   const key = encodeCacheKey([
     environment.platform,
@@ -742,6 +760,7 @@ export const make = Effect.gen(function* () {
         budget,
       });
       const { prepared } = discovery;
+      stripAppImagePaths(fresh);
       const patch = Object.fromEntries(
         Object.keys(ShellEnvironmentPatch.fields).map((name) => [name, fresh[name] ?? null]),
       );
@@ -803,6 +822,7 @@ export const make = Effect.gen(function* () {
             return typeof value === "string" ? [[name, value]] : [];
           }),
         );
+        stripAppImagePaths(cached);
         const baseline = { ...inherited };
         const cachedPath = cached.PATH;
         if (cachedPath) {
