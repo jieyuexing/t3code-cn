@@ -1,12 +1,15 @@
-import type { SpeedRanking } from "@t3tools/shared/usageSpeed";
+import { speedRowKey, type SpeedRanking } from "@t3tools/shared/usageSpeed";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildShareData,
   defaultShareLang,
+  excludedShareKeys,
   modelDisplayName,
   shareAxis,
   shareFilename,
+  shareOptionLabel,
+  shareOptions,
 } from "./usageShareModel";
 
 const ranking = (overrides: Partial<SpeedRanking>): SpeedRanking => ({
@@ -107,5 +110,96 @@ describe("share helpers", () => {
     expect(shareAxis(200.3).ticks).toEqual([0, 50, 100, 150, 200]);
     expect(shareAxis(95).ticks).toEqual([0, 20, 40, 60, 80]);
     expect(shareAxis(1200).ticks.at(-1)).toBeLessThanOrEqual(1260);
+  });
+});
+
+describe("share row choices", () => {
+  const rows = [
+    ranking({ model: "claude-opus-5-5", longRate: 90, longRequests: 3449 }),
+    ranking({ provider: "antigravity", model: "gemini-4-hydrogen", longRate: 80, longRequests: 214 }),
+    ranking({
+      provider: "antigravity",
+      model: "gemini-pro-orchestrator-neon",
+      longRate: 200,
+      longRequests: 8,
+      lowSample: true,
+    }),
+    ranking({ model: "gpt-5.6-terra", longRate: null, longRequests: 0, lowSample: true }),
+  ];
+  const keyOf = (model: string) => speedRowKey(rows.find((row) => row.model === model)!);
+
+  it("ticks rows with enough long samples by default and offers only rows with a long speed", () => {
+    const options = shareOptions(rows, {});
+    expect(options.map((option) => [option.row.model, option.checked])).toEqual([
+      ["claude-opus-5-5", true],
+      ["gemini-4-hydrogen", true],
+      ["gemini-pro-orchestrator-neon", false],
+    ]);
+  });
+
+  it("lets the user's tick win over the default, and a row's default return once untouched", () => {
+    const options = shareOptions(rows, {
+      [keyOf("gemini-pro-orchestrator-neon")]: true,
+      [keyOf("claude-opus-5-5")]: false,
+    });
+    expect(options.filter((option) => option.checked).map((option) => option.row.model)).toEqual([
+      "gemini-4-hydrogen",
+      "gemini-pro-orchestrator-neon",
+    ]);
+    // Once its samples pile up, an untouched row is in by default.
+    const grown = rows.map((row) =>
+      row.model === "gemini-pro-orchestrator-neon"
+        ? { ...row, longRequests: 25, lowSample: false }
+        : row,
+    );
+    expect(shareOptions(grown, {}).every((option) => option.checked)).toBe(true);
+  });
+
+  it("falls back to the defaults when the choices leave nothing to draw", () => {
+    const none = Object.fromEntries(rows.map((row) => [speedRowKey(row), false]));
+    expect(shareOptions(rows, none).filter((option) => option.checked)).toHaveLength(2);
+  });
+
+  it("ticks every row when none has enough samples", () => {
+    const sparse = rows.map((row) => ({ ...row, lowSample: true }));
+    expect(shareOptions(sparse, {}).every((option) => option.checked)).toBe(true);
+  });
+
+  it("renumbers the ranks and recomputes the legend from the rows left", () => {
+    const mixed = [
+      ranking({ model: "claude-opus-5-5", longRate: 90 }),
+      ranking({
+        provider: "antigravity",
+        model: "gemini-pro-orchestrator-neon",
+        longRate: 200,
+        lowSample: true,
+        dispatch: { successes: 1, total: 2 },
+      }),
+      ranking({ provider: "opencode", model: "deepseek-flash", longRate: 60 }),
+    ];
+    const period = { sinceDay: "2026-11-13", untilDay: "2026-11-19" };
+    const all = buildShareData(mixed, period, "en");
+    expect(all.rows.map((row) => row.rank)).toEqual([1, 2, 3]);
+    expect(all.vendors.map((vendor) => vendor.name)).toEqual(["Anthropic", "Google", "DeepSeek"]);
+    expect(all.strings.thinKey).not.toBeNull();
+    expect(all.showDispatch).toBe(true);
+
+    const options = shareOptions(mixed, {});
+    const trimmed = buildShareData(mixed, period, "en", excludedShareKeys(options));
+    expect(trimmed.rows.map((row) => [row.rank, row.name])).toEqual([
+      [1, "Claude Opus 5.5"],
+      [2, "DeepSeek V4.1 Flash"],
+    ]);
+    expect(trimmed.vendors.map((vendor) => vendor.name)).toEqual(["Anthropic", "DeepSeek"]);
+    expect(trimmed.strings.thinKey).toBeNull();
+    expect(trimmed.showDispatch).toBe(false);
+    expect(trimmed.axis.max).toBeLessThan(all.axis.max);
+  });
+
+  it("names a row by model and channel", () => {
+    expect(shareOptionLabel(ranking({ provider: "antigravity", model: "gemini-4-argon" }))).toBe(
+      "Gemini 4 Argon · Antigravity",
+    );
+    expect(shareOptionLabel(ranking({ tier: "fast" }))).toBe("Claude Opus 5.5 (fast) · Claude Code");
   });
 });

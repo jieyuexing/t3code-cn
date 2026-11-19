@@ -4,6 +4,7 @@ import type { SpeedRanking } from "@t3tools/shared/usageSpeed";
 
 import { getI18nSnapshot } from "../../i18n/runtime";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import {
   Dialog,
   DialogFooter,
@@ -14,8 +15,18 @@ import {
 } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { readShareChoices, saveShareChoices } from "./usageShareChoices";
 import { renderShareImage } from "./usageShareCanvas";
-import { buildShareData, defaultShareLang, shareFilename, type ShareLang } from "./usageShareModel";
+import {
+  buildShareData,
+  defaultShareLang,
+  excludedShareKeys,
+  shareFilename,
+  shareOptionLabel,
+  shareOptions,
+  type ShareChoices,
+  type ShareLang,
+} from "./usageShareModel";
 
 interface RenderedImage {
   readonly lang: ShareLang;
@@ -32,7 +43,10 @@ function today(): string {
   return new Intl.DateTimeFormat("en-CA").format(Date.now());
 }
 
-/** One click renders the current ranking as a PNG, to download or copy, in either language. */
+/**
+ * One click renders the current ranking as a PNG, to download or copy, in either language. Rows
+ * with few long samples start unticked; ticks are remembered per row.
+ */
 export function UsageShareImage({
   ranking,
   period,
@@ -42,14 +56,18 @@ export function UsageShareImage({
 }) {
   const [image, setImage] = useState<RenderedImage | null>(null);
   const [busy, setBusy] = useState(false);
+  const [choices, setChoices] = useState<ShareChoices>(readShareChoices);
   const latest = useRef(0);
+  const options = shareOptions(ranking, choices);
+  const ticked = options.filter((option) => option.checked).length;
 
-  const generate = async (lang: ShareLang) => {
+  const generate = async (lang: ShareLang, current: ShareChoices = choices) => {
     const request = (latest.current += 1);
     setBusy(true);
     let blob: Blob | null = null;
     try {
-      blob = await renderShareImage(buildShareData(ranking, period, lang));
+      const excluded = excludedShareKeys(shareOptions(ranking, current));
+      blob = await renderShareImage(buildShareData(ranking, period, lang, excluded));
     } catch (error) {
       toastManager.add({
         type: "error",
@@ -75,6 +93,13 @@ export function UsageShareImage({
       if (previous !== null) URL.revokeObjectURL(previous.url);
       return null;
     });
+  };
+
+  const toggle = (key: string, checked: boolean, lang: ShareLang) => {
+    const next = { ...choices, [key]: checked };
+    setChoices(next);
+    saveShareChoices(next);
+    void generate(lang, next);
   };
 
   const download = (current: RenderedImage) => {
@@ -123,8 +148,31 @@ export function UsageShareImage({
               <img
                 src={image.url}
                 alt="Output speed ranking"
-                className="max-h-[60vh] w-full rounded-md object-contain object-top"
+                className="max-h-[45vh] w-full rounded-md object-contain object-top"
               />
+              <fieldset className="mt-4 flex flex-col gap-1.5">
+                <legend className="mb-1 text-xs text-muted-foreground">
+                  Rows in the image, with long-output samples
+                </legend>
+                <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+                  {options.map((option) => (
+                    <label
+                      key={option.key}
+                      className="flex min-w-0 items-center gap-2 text-sm text-foreground"
+                    >
+                      <Checkbox
+                        checked={option.checked}
+                        disabled={option.checked && ticked === 1}
+                        onCheckedChange={(checked) => toggle(option.key, checked, image.lang)}
+                      />
+                      <span className="min-w-0 truncate">{shareOptionLabel(option.row)}</span>
+                      <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                        {option.row.longRequests}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
             </DialogPanel>
             <DialogFooter variant="bare" className="items-center sm:justify-between">
               <ToggleGroup

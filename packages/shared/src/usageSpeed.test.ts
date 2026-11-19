@@ -15,6 +15,8 @@ import {
   binsToPairs,
   mergeDispatchScores,
   rankSpeedRows,
+  speedRowKey,
+  splitSparseRows,
 } from "./usageSpeed.ts";
 
 const pairsOf = (values: readonly number[]) => {
@@ -139,11 +141,63 @@ describe("request speed", () => {
         ranking.map((entry) => [`${entry.provider}/${entry.model}`, entry.dispatch]),
       ),
     ).toEqual({
-      "antigravity/gemini-4-hydrogen-high": { successes: 4, total: 4 },
-      "antigravity/claude-sonnet-5-5-high": { successes: 1, total: 1 },
+      "antigravity/gemini-4-hydrogen": { successes: 4, total: 4 },
+      "antigravity/claude-sonnet-5-5": { successes: 1, total: 1 },
       "claude/claude-sonnet-5-5": { successes: 146, total: 159 },
       "opencode/deepseek-flash": { successes: 14, total: 14 },
       "claude/claude-opus-5-5": null,
     });
+  });
+  it("folds Antigravity effort and route variants of one model into one row", () => {
+    const longOf = (count: number, rate: number) => pairsOf(Array.from({ length: count }, () => rate));
+    const rows = [
+      row({ provider: "antigravity", model: "gemini-4-hydrogen", long: longOf(109, 100) }),
+      row({ provider: "antigravity", model: "gemini-4-hydrogen-high", long: longOf(105, 100) }),
+      row({ provider: "antigravity", model: "gemini-4-argon-high", long: longOf(69, 50) }),
+      row({ provider: "antigravity", model: "gemini-4-argon-trial", long: longOf(19, 50) }),
+      row({ provider: "antigravity", model: "gemini-pro-orchestrator-neon", long: longOf(8, 50) }),
+      row({ provider: "antigravity", model: "gemini-4-neon", long: longOf(88, 50) }),
+      // Only Antigravity names its models per effort; elsewhere a suffix is part of the id.
+      row({ provider: "opencode", model: "model-high", long: longOf(30, 50) }),
+    ];
+    const ranking = rankSpeedRows(rows);
+    const longByModel = Object.fromEntries(
+      ranking.map((entry) => [`${entry.provider}/${entry.model}`, entry.longRequests]),
+    );
+    expect(longByModel).toEqual({
+      "antigravity/gemini-4-hydrogen": 214,
+      "antigravity/gemini-4-argon": 88,
+      "antigravity/gemini-pro-orchestrator-neon": 8,
+      "antigravity/gemini-4-neon": 88,
+      "opencode/model-high": 30,
+    });
+    // The merged row does not depend on which variant came first.
+    const reversed = rankSpeedRows([...rows].reverse());
+    expect(reversed.map(speedRowKey).toSorted()).toEqual(ranking.map(speedRowKey).toSorted());
+  });
+
+  it("keeps fast tiers apart from the standard tier when folding variants", () => {
+    const ranking = rankSpeedRows([
+      row({ provider: "antigravity", model: "gemini-4-argon-high" }),
+      row({ provider: "antigravity", model: "gemini-4-argon-trial", tier: "fast" }),
+    ]);
+    expect(ranking.map((entry) => entry.tier)).toHaveLength(2);
+    expect(new Set(ranking.map((entry) => entry.tier))).toEqual(new Set([undefined, "fast"]));
+  });
+
+  it("splits off rows with fewer than 20 long requests, unless every row is that few", () => {
+    const longOf = (count: number) => pairsOf(Array.from({ length: count }, () => 100));
+    const ranking = rankSpeedRows([
+      row({ model: "a", long: longOf(20) }),
+      row({ model: "b", long: longOf(19) }),
+      row({ model: "c", long: [] }),
+    ]);
+    const split = splitSparseRows(ranking);
+    expect(split.solid.map((entry) => entry.model)).toEqual(["a"]);
+    expect(split.sparse.map((entry) => entry.model)).toEqual(["b", "c"]);
+
+    const sparseOnly = splitSparseRows(ranking.filter((entry) => entry.lowSample));
+    expect(sparseOnly.solid.map((entry) => entry.model)).toEqual(["b", "c"]);
+    expect(sparseOnly.sparse).toEqual([]);
   });
 });

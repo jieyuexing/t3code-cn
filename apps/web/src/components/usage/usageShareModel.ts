@@ -1,4 +1,4 @@
-import type { SpeedRanking } from "@t3tools/shared/usageSpeed";
+import { speedRowKey, splitSparseRows, type SpeedRanking } from "@t3tools/shared/usageSpeed";
 
 /** The placeholder for a missing dispatch record. */
 export const EM_DASH = String.fromCharCode(0x2014);
@@ -80,6 +80,10 @@ const CHANNELS: Readonly<Record<string, { label: string; color: string }>> = {
   pi: { label: "Pi", color: VENDORS.other.color },
   muse: { label: "Muse Code", color: VENDORS.other.color },
 };
+
+function shareChannel(provider: string): { label: string; color: string } {
+  return CHANNELS[provider] ?? { label: provider, color: VENDORS.other.color };
+}
 
 // Ids that are gateway aliases rather than the model's own name.
 const NAME_ALIASES: Readonly<Record<string, string>> = {
@@ -188,13 +192,53 @@ function strings(
   };
 }
 
-/** Rows with no long-output sample are left out: their speed rests on short requests only. */
+/** The user's own ticks, by row key; a row they never touched follows the default. */
+export type ShareChoices = Readonly<Record<string, boolean>>;
+
+export interface ShareOption {
+  readonly key: string;
+  readonly row: SpeedRanking;
+  readonly checked: boolean;
+}
+
+/**
+ * The rows an image can show, with their ticks. Rows with no long-output sample have no bar to
+ * draw. Untouched rows are in unless their long samples are few, so they join once enough pile up.
+ * Choices that would leave the image empty give way to the defaults.
+ */
+export function shareOptions(
+  ranking: readonly SpeedRanking[],
+  choices: ShareChoices,
+): ShareOption[] {
+  const candidates = ranking.filter((row) => row.longRate !== null);
+  const defaults = new Set(splitSparseRows(candidates).solid.map(speedRowKey));
+  const options = candidates.map((row) => {
+    const key = speedRowKey(row);
+    return { key, row, checked: choices[key] ?? defaults.has(key) };
+  });
+  return options.some((option) => option.checked)
+    ? options
+    : options.map((option) => ({ ...option, checked: defaults.has(option.key) }));
+}
+
+export function excludedShareKeys(options: readonly ShareOption[]): ReadonlySet<string> {
+  return new Set(options.filter((option) => !option.checked).map((option) => option.key));
+}
+
+/** "Claude Opus 5.5 · Claude Code": how a row is named in the picker. */
+export function shareOptionLabel(row: SpeedRanking): string {
+  const tier = row.tier === undefined ? "" : ` (${row.tier})`;
+  return `${modelDisplayName(row.model)}${tier} · ${shareChannel(row.provider).label}`;
+}
+
+/** Rows with no long-output sample and rows in `excluded` are left out; ranks count what remains. */
 export function buildShareData(
   ranking: readonly SpeedRanking[],
   period: { readonly sinceDay: string; readonly untilDay: string },
   lang: ShareLang,
+  excluded: ReadonlySet<string> = new Set(),
 ): ShareData {
-  const ranked = ranking.filter((row) => row.longRate !== null);
+  const ranked = ranking.filter((row) => row.longRate !== null && !excluded.has(speedRowKey(row)));
   const showDispatch = ranked.some((row) => row.dispatch !== null);
   const rows = ranked.map((row, index): ShareRow => {
     const vendor = vendorOf(row.model);
@@ -202,7 +246,7 @@ export function buildShareData(
     return {
       rank: index + 1,
       name: `${modelDisplayName(row.model)}${tier}`,
-      channel: CHANNELS[row.provider] ?? { label: row.provider, color: VENDORS.other.color },
+      channel: shareChannel(row.provider),
       color: vendor.color,
       rate: row.longRate ?? 0,
       thin: row.lowSample,

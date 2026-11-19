@@ -1,16 +1,22 @@
+import { useState } from "react";
 import { formatCount, formatDayShort, formatTokens } from "@t3tools/shared/usageFormat";
 import type { SpeedRanking } from "@t3tools/shared/usageSpeed";
 import {
   SPEED_LONG_OUTPUT_TOKENS,
   SPEED_LOW_SAMPLE_LONG_REQUESTS,
+  speedRowKey,
 } from "@t3tools/shared/usageSpeed";
 
+import { getI18nSnapshot } from "../../i18n/runtime";
 import { cn } from "../../lib/utils";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PROVIDER_PRESENTATION } from "./usageProviders";
 import { UsageShareImage } from "./UsageShareImage";
+import { defaultShareLang } from "./usageShareModel";
 import {
+  foldSpeedRows,
+  foldToggleLabel,
   formatRate,
   formatSeconds,
   speedBarShares,
@@ -39,7 +45,9 @@ export function UsageSpeed({
   readonly period: { readonly sinceDay: string; readonly untilDay: string };
   readonly loading: boolean;
 }) {
-  const shares = speedBarShares(ranking);
+  const [expanded, setExpanded] = useState(false);
+  const { rows, folded } = foldSpeedRows(ranking, expanded);
+  const shares = speedBarShares(rows);
   const showDispatch = ranking.some((row) => row.dispatch !== null);
   return (
     <section aria-busy={loading} className="flex flex-col gap-3">
@@ -100,13 +108,13 @@ export function UsageSpeed({
               </td>
             </tr>
           ) : (
-            ranking.map((row, index) => {
+            rows.map((row, index) => {
               const presentation = presentationOf(row.provider);
               const color = presentation?.color ?? "var(--muted-foreground)";
               const bar = speedBarValue(row);
               return (
                 <tr
-                  key={`${row.provider}:${row.model}:${row.tier ?? ""}`}
+                  key={speedRowKey(row)}
                   className="border-b border-border/50 text-right whitespace-nowrap text-muted-foreground tabular-nums transition-colors hover:bg-muted/50"
                 >
                   <td className="py-2.5 pr-3 pl-2 text-left text-xs">{index + 1}</td>
@@ -169,6 +177,20 @@ export function UsageSpeed({
                 </tr>
               );
             })
+          )}
+          {folded === 0 ? null : (
+            <tr>
+              <td colSpan={8} className="py-2.5 pl-2 text-left text-xs">
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={() => setExpanded((previous) => !previous)}
+                >
+                  {foldToggleLabel(folded, expanded, defaultShareLang(getI18nSnapshot().locale))}
+                </button>
+              </td>
+            </tr>
           )}
         </tbody>
       </table>

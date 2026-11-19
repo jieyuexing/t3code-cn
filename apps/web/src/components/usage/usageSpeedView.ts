@@ -1,6 +1,6 @@
-import type { SpeedRanking } from "@t3tools/shared/usageSpeed";
+import { splitSparseRows, type SpeedRanking } from "@t3tools/shared/usageSpeed";
 
-import { modelDisplayName } from "./usageShareModel";
+import { modelDisplayName, type ShareLang } from "./usageShareModel";
 
 /** Tokens per second: one decimal below 100, whole numbers above. */
 export function formatRate(value: number): string {
@@ -37,4 +37,20 @@ export function speedDay(ms: number, timeZone: string): string {
     month: "2-digit",
     day: "2-digit",
   }).format(ms);
+}
+
+/** The rows to list: those with few long samples wait behind a toggle, and `folded` counts them. */
+export function foldSpeedRows(
+  ranking: readonly SpeedRanking[],
+  expanded: boolean,
+): { readonly rows: readonly SpeedRanking[]; readonly folded: number } {
+  const { solid, sparse } = splitSparseRows(ranking);
+  return { rows: expanded ? [...solid, ...sparse] : solid, folded: sparse.length };
+}
+
+export function foldToggleLabel(folded: number, expanded: boolean, lang: ShareLang): string {
+  if (lang === "zh") return expanded ? "收起样本少的行" : `另有 ${folded} 个样本少的行`;
+  return expanded
+    ? "Hide rows with few samples"
+    : `${folded} more ${folded === 1 ? "row" : "rows"} with few samples`;
 }

@@ -74,11 +74,19 @@ export function binsMedian(bins: SpeedBins): number | null {
   return total % 2 === 1 ? at((total - 1) / 2) : (at(total / 2 - 1) + at(total / 2)) / 2;
 }
 
-const ANTIGRAVITY_EFFORT_SUFFIX = /-(?:extra-low|low|medium|high|xhigh)$/;
+const ANTIGRAVITY_VARIANT_SUFFIX = /(?:-(?:extra-low|low|medium|high|xhigh|trial))+$/;
 
-/** Scores name a model once; Antigravity transcripts name it per effort ("gemini-4-hydrogen-high"). */
+/**
+ * One model's name across rows. Antigravity names a model per effort ("gemini-4-hydrogen-high") and
+ * per route ("gemini-4-argon-trial", which its own metadata labels "Gemini 4 Argon (High)").
+ */
+export function speedModel(provider: string, model: string): string {
+  return provider === "antigravity" ? model.replace(ANTIGRAVITY_VARIANT_SUFFIX, "") : model;
+}
+
+/** Scores name a model once, whatever effort or route its transcripts name. */
 function scoreKey(provider: string, model: string): string {
-  return `${provider}\u0000${provider === "antigravity" ? model.replace(ANTIGRAVITY_EFFORT_SUFFIX, "") : model}`;
+  return `${provider}\u0000${speedModel(provider, model)}`;
 }
 
 /** Merges per-environment score counts; a file two servers both read shows the same counts, not twice. */
@@ -115,7 +123,24 @@ export interface SpeedRanking {
   readonly dispatch: { readonly successes: number; readonly total: number } | null;
 }
 
-/** Adds up rows of one model across sources, then ranks by long-output speed, rows without one last. */
+export function speedRowKey(row: Pick<SpeedRanking, "provider" | "model" | "tier">): string {
+  return JSON.stringify([row.provider, row.model, row.tier ?? null]);
+}
+
+/**
+ * Splits off rows with too few long requests to rank fairly; they come back when samples pile up.
+ * With nothing but such rows there is nothing to rank against, so none are split off.
+ */
+export function splitSparseRows<Row extends Pick<SpeedRanking, "lowSample">>(
+  rows: readonly Row[],
+): { readonly solid: readonly Row[]; readonly sparse: readonly Row[] } {
+  const solid = rows.filter((row) => !row.lowSample);
+  return solid.length === 0
+    ? { solid: rows, sparse: [] }
+    : { solid, sparse: rows.filter((row) => row.lowSample) };
+}
+
+/** Adds up rows of one model across sources and variants, then ranks by long-output speed, rows without one last. */
 export function rankSpeedRows(
   rows: readonly UsageSpeedRow[],
   scores: readonly UsageDispatchScore[] = [],
@@ -126,7 +151,9 @@ export function rankSpeedRows(
   const grouped = new Map<
     string,
     {
-      first: UsageSpeedRow;
+      provider: string;
+      model: string;
+      tier: UsageSpeedRow["tier"];
       long: SpeedBins;
       all: SpeedBins;
       short: SpeedBins;
@@ -136,11 +163,14 @@ export function rankSpeedRows(
     }
   >();
   for (const row of rows) {
-    const key = JSON.stringify([row.provider, row.model, row.tier ?? null]);
+    const model = speedModel(row.provider, row.model);
+    const key = speedRowKey({ provider: row.provider, model, tier: row.tier });
     let group = grouped.get(key);
     if (group === undefined) {
       group = {
-        first: row,
+        provider: row.provider,
+        model,
+        tier: row.tier,
         long: new Map(),
         all: new Map(),
         short: new Map(),
@@ -161,11 +191,11 @@ export function rankSpeedRows(
   return [...grouped.values()]
     .map((group): SpeedRanking => {
       const longRequests = count(group.long);
-      const score = scoreByModel.get(scoreKey(group.first.provider, group.first.model));
+      const score = scoreByModel.get(scoreKey(group.provider, group.model));
       return {
-        provider: group.first.provider,
-        model: group.first.model,
-        tier: group.first.tier,
+        provider: group.provider,
+        model: group.model,
+        tier: group.tier,
         requests: count(group.all),
         longRequests,
         shortRequests: count(group.short),
