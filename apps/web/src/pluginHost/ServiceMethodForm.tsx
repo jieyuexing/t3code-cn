@@ -1,3 +1,4 @@
+import { msg, T, useGT, Var } from "gt-react";
 import { CheckIcon, ChevronRightIcon, CopyIcon } from "lucide-react";
 import { useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
 
@@ -30,17 +31,25 @@ import type { UiMethod } from "./serviceMethods";
 function errorText(error: FieldError) {
   switch (error.code) {
     case "required":
-      return <>Required</>;
+      return <T>Required</T>;
     case "not-number":
-      return "Not a number";
+      return <T>Not a number</T>;
     case "not-integer":
-      return "Not a whole number";
+      return <T>Not a whole number</T>;
     case "not-json":
-      return "Not valid JSON";
+      return <T>Not valid JSON</T>;
     case "minimum":
-      return `At least ${error.limit}`;
+      return (
+        <T>
+          At least <Var>{error.limit}</Var>
+        </T>
+      );
     case "maximum":
-      return `At most ${error.limit}`;
+      return (
+        <T>
+          At most <Var>{error.limit}</Var>
+        </T>
+      );
   }
 }
 
@@ -144,7 +153,15 @@ function FieldControl(props: {
 
 /** The JSON result or error of a call, in the same box a copied command gets. */
 function ResultBlock(props: { readonly kind: "ok" | "error"; readonly text: string }) {
-  const { copyToClipboard, isCopied } = useCopyToClipboard({ timeout: 1500, target: "result" });
+  const { copyToClipboard, isCopied } = useCopyToClipboard({
+    timeout: 1500,
+    target: {
+      target: "result",
+      unavailableMessage: msg("Clipboard API is unavailable while copying result."),
+      failureMessage: msg("Failed to copy result to the clipboard."),
+    },
+  });
+  const gt = useGT();
   return (
     <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-muted/50 px-3 py-2.5 font-mono text-sm">
       <pre
@@ -160,7 +177,7 @@ function ResultBlock(props: { readonly kind: "ok" | "error"; readonly text: stri
       <Button
         size="icon-xs"
         variant="ghost"
-        aria-label="Copy result"
+        aria-label={gt("Copy result")}
         onClick={() => copyToClipboard(props.text, undefined)}
       >
         {isCopied ? <CheckIcon /> : <CopyIcon />}
@@ -184,6 +201,7 @@ export function ServiceMethodForm(props: {
   ) => Promise<{ kind: "ok" | "error"; text: string }>;
 }) {
   const { environmentId, entry, canCall, call } = props;
+  const gt = useGT();
   const { method, service } = entry;
   const key = methodKey(environmentId, service, method.name);
   const shape = formShape(method.input);
@@ -252,7 +270,7 @@ export function ServiceMethodForm(props: {
             {method.name}
           </span>
           <Badge variant="outline" className="ml-auto">
-            {method.readOnly === true ? "Read only" : "Modifies"}
+            {method.readOnly === true ? <T>Read only</T> : <T>Modifies</T>}
           </Badge>
         </CollapsibleTrigger>
         <CollapsiblePanel>
@@ -271,7 +289,7 @@ export function ServiceMethodForm(props: {
             {shape.kind === "json" ? (
               <FieldRow
                 id={`${key}|`}
-                label="Input (JSON)"
+                label={gt("Input (JSON)")}
                 required={shape.required}
                 description={undefined}
                 error={draft.errors[""]}
@@ -306,7 +324,7 @@ export function ServiceMethodForm(props: {
             )}
             <div>
               <Button type="submit" size="xs" disabled={!canCall}>
-                Call
+                <T>Call</T>
               </Button>
             </div>
             {draft.result === null ? null : (
