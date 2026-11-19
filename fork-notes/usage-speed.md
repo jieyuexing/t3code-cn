@@ -45,7 +45,7 @@ fork 自有新文件：`contracts/src/usageSpeed.ts`、`shared/src/usageSpeed.ts
 
 ## 分享图
 
-Speed 分段标题行右侧的「Share image」按钮：一键把当前排行画成适合发 X 的深色 PNG（1200 CSS 像素宽、2 倍像素输出），弹窗里预览，可下载或复制到剪贴板，弹窗内小切换选中文／EN。默认语言取界面语言（`getI18nSnapshot().locale` 以 zh 开头为中文，否则英文）；文件名 `model-speed-<日期>-<zh|en>.png`。副标题写页面当前时段，署名只写“由 T3 Code 生成”／“Generated with T3 Code”。
+Speed 分段标题行右侧的「Share image」按钮：一键把当前排行画成适合发 X 的深色 PNG（1200 CSS 像素宽、2 倍像素输出），弹窗里预览，可下载或复制到剪贴板，弹窗内小切换选中文／EN。默认语言取界面语言（`getI18nSnapshot().locale` 以 zh 开头为中文，否则英文）；文件名 `model-speed-<日期>-<zh|en>.png`。副标题写页面当前时段，有行没进图时末尾写“未列出 N 个（样本 <20 次的）模型”，免得读者以为图里就是全部；派发成功的脚注写全成功公式的五个条件（与「口径」一节一致）；换行时开括号不落行尾、闭标点不落行首。署名只写“由 T3 Code 生成”／“Generated with T3 Code”。
 
 - 版式照参考成品（总仓 `.local/tmp/model-speed/x-post-*.html`、`make_x.py`），直接用 canvas 绘制，不引依赖，字体用系统字体栈。没有长输出样本的行不进图；图里出现的样本 <20 的条用斜纹（默认只勾样本足够的行，见下）。条形色按模型厂商（Anthropic #d95926、Google #4a90f0、OpenAI #199e70、DeepSeek #c060c0、xAI #d4a017，未识别的厂商用中性灰），通道标签色按通道所属厂商，OpenCode 等第三方客户端用 #8a93a3。图例只列图里出现的厂商；没有派发评分时整列、“—”图例和相应口径一句都不出。
 - 与参考成品的差别：行是按页面当前时段与通道自动汇总的，不是手工挑的 18 行；Codex 的 fast 与标准档单列；脚注第二句不再写协调模型名与数据时段（时段在副标题）；署名不写具体模型。

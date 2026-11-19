@@ -156,13 +156,23 @@ export function shareAxis(maxRate: number): ShareData["axis"] {
 function strings(
   lang: ShareLang,
   period: string,
-  options: { thin: boolean; showDispatch: boolean; missingDispatch: boolean },
+  options: {
+    thin: boolean;
+    showDispatch: boolean;
+    missingDispatch: boolean;
+    hidden: { readonly count: number; readonly sparse: boolean };
+  },
 ): ShareStrings {
+  const { hidden } = options;
   if (lang === "zh") {
+    const omitted =
+      hidden.count === 0
+        ? ""
+        : ` · 未列出 ${hidden.count} 个${hidden.sparse ? "样本 <20 次的" : ""}模型`;
     return {
       title: "我用过的模型 · 输出速率排行",
       badge: "T3 Code",
-      subtitle: `从本机会话日志汇总 · ${period} · 单次输出 ≥1000 token 的请求取中位数`,
+      subtitle: `从本机会话日志汇总 · ${period} · 单次输出 ≥1000 token 的请求取中位数${omitted}`,
       speedHeader: "速率 tok/s",
       dispatchHeader: "派发成功",
       thinKey: options.thin ? "斜纹：速率样本 <20 次" : null,
@@ -170,15 +180,24 @@ function strings(
         options.showDispatch && options.missingDispatch ? `${EM_DASH}：没有派发记录` : null,
       notes: [
         "速率 = 输出 token（含思考）÷ 单次请求耗时（含首字等待、网络与排队），是我这台机器上的实际体验，不是厂商标称的纯生成速度。",
-        `${options.showDispatch ? "派发成功 = 我在 T3 Code 里派给该模型的任务中，经复核通过、未越界、返工不超过 1 轮的次数 / 派发次数（全部历史，不随时段变）。" : ""}名称下方标签为调用通道（客户端），颜色为其所属厂商，OpenCode 为第三方客户端。同一模型经不同通道调用时分开统计。`,
+        ...(options.showDispatch
+          ? [
+              "派发成功 = 我在 T3 Code 里派给该模型的任务中，经复核通过、未虚报、未越界、遇授权拒绝即停、返工不超过 1 轮的次数 / 派发次数（全部历史，不随时段变）。",
+            ]
+          : []),
+        "名称下方标签为调用通道（客户端），颜色对应其所属厂商，OpenCode 为第三方客户端。同一模型经不同通道调用时速率分开统计。",
       ],
       brand: "由 T3 Code 生成",
     };
   }
+  const omitted =
+    hidden.count === 0
+      ? ""
+      : ` · ${hidden.count} ${hidden.sparse ? "low-sample " : ""}model${hidden.count === 1 ? "" : "s"} not shown`;
   return {
     title: "Output Speed of the Models I Use",
     badge: "T3 Code",
-    subtitle: `Compiled from my local session logs · ${period} · median of requests with ≥1,000 output tokens`,
+    subtitle: `Compiled from my local session logs · ${period} · median of requests with ≥1,000 output tokens${omitted}`,
     speedHeader: "tok/s",
     dispatchHeader: "Tasks passed",
     thinKey: options.thin ? "Hatched: <20 speed samples" : null,
@@ -186,7 +205,12 @@ function strings(
       options.showDispatch && options.missingDispatch ? `${EM_DASH}: no delegated tasks` : null,
     notes: [
       "Speed = output tokens (incl. thinking) ÷ request wall time (incl. time to first token, network and queueing). Real-world speed on my machine, not vendor-reported decode speed.",
-      `${options.showDispatch ? "Tasks passed = tasks I delegated to the model in T3 Code that passed review with no scope violation and at most one rework round, out of all tasks delegated (all time, not limited to the period). " : ""}The tag under each name is the client it ran through, colored by the client’s vendor (OpenCode is third-party). The same model used through different clients is counted separately.`,
+      ...(options.showDispatch
+        ? [
+            "Tasks passed = tasks I delegated to the model in T3 Code that passed review cleanly (no false report, no scope violation, stopped when access was denied, at most one rework round), out of all delegated tasks (all-time, not limited to this period).",
+          ]
+        : []),
+      "The tag under each name is the client it ran through, colored by the client’s vendor (OpenCode is third-party). Speed is measured separately when the same model runs through different clients.",
     ],
     brand: "Generated with T3 Code",
   };
@@ -239,6 +263,7 @@ export function buildShareData(
   excluded: ReadonlySet<string> = new Set(),
 ): ShareData {
   const ranked = ranking.filter((row) => row.longRate !== null && !excluded.has(speedRowKey(row)));
+  const hidden = ranking.filter((row) => !ranked.includes(row));
   const showDispatch = ranked.some((row) => row.dispatch !== null);
   const rows = ranked.map((row, index): ShareRow => {
     const vendor = vendorOf(row.model);
@@ -261,6 +286,7 @@ export function buildShareData(
       thin: rows.some((row) => row.thin),
       showDispatch,
       missingDispatch: rows.some((row) => row.dispatch === null),
+      hidden: { count: hidden.length, sparse: hidden.every((row) => row.lowSample) },
     }),
     vendors: VENDOR_ORDER.filter((vendor) => present.has(vendor.name)),
     rows,

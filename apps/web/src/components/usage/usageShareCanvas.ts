@@ -14,9 +14,10 @@ const RATE_RIGHT = TRACK_LEFT + TRACK_WIDTH + 16 + 72;
 const DISPATCH_RIGHT = RATE_RIGHT + 16 + 96;
 const CONTENT_WIDTH = WIDTH - PAD_X * 2;
 
-const WORD_PATTERN = /[　-鿿＀-￯]\s*|[^\s　-鿿＀-￯]+\s*/g;
+// Opening brackets stay with what follows and closing punctuation with what precedes, so neither ends or starts a line.
+const WORD_PATTERN = /[（「『《【]*(?:[　-鿿＀-￯]|[^\s　-鿿＀-￯]+)[，。、；：）」』》】！？]*\s*/g;
 
-/** Breaks text into lines that fit `maxWidth`: CJK text between any two characters, Latin between words. */
+/** Breaks text into lines that fit `maxWidth`: CJK text between characters, Latin between words; an opening bracket never ends a line and closing punctuation never starts one. */
 export function wrapText(
   measure: (text: string) => number,
   text: string,

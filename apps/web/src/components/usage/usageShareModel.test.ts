@@ -78,6 +78,7 @@ describe("buildShareData", () => {
     expect(data.rows[1]?.thin).toBe(true);
     expect(data.vendors.map((vendor) => vendor.name)).toEqual(["Anthropic", "OpenAI", "DeepSeek"]);
     expect(data.strings.subtitle).toContain("2026-08-19 至 2026-11-17");
+    expect(data.strings.subtitle).toContain("未列出 1 个模型");
     expect(data.strings.brand).toBe("由 T3 Code 生成");
     expect(data.axis.ticks).toEqual([0, 50, 100, 150, 200]);
   });
@@ -197,6 +198,8 @@ describe("share row choices", () => {
     ]);
     expect(trimmed.vendors.map((vendor) => vendor.name)).toEqual(["Anthropic", "DeepSeek"]);
     expect(trimmed.strings.thinKey).toBeNull();
+    expect(trimmed.strings.subtitle).toContain("1 low-sample model not shown");
+    expect(all.strings.subtitle).not.toContain("not shown");
     expect(trimmed.showDispatch).toBe(false);
     expect(trimmed.axis.max).toBeLessThan(all.axis.max);
   });

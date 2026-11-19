@@ -21,6 +21,17 @@ describe("wrapText", () => {
     ]);
   });
 
+  it("keeps an opening bracket off a line end and closing punctuation off a line start", () => {
+    expect(wrapText(measure, "名称为调用通道（客户端），颜色", 8)).toEqual([
+      "名称为调用通道",
+      "（客户端），颜色",
+    ]);
+    expect(wrapText(measure, "名称为调用通道（客户端），颜色", 11)).toEqual([
+      "名称为调用通道（客户",
+      "端），颜色",
+    ]);
+  });
+
   it("keeps the spaces between CJK text and Latin words", () => {
     expect(wrapText(measure, "速率 = 输出 token 之比", 40)).toEqual(["速率 = 输出 token 之比"]);
   });
