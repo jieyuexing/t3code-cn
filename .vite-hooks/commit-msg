@@ -1,0 +1,5 @@
+#!/bin/sh
+# universe-commit-msg：转发到总仓的提交说明检查（相对总仓定位，找不到脚本就放行）
+hook="$(git rev-parse --show-toplevel)/../../host/bin/git-hooks/commit-msg"
+[ -x "$hook" ] || exit 0
+exec "$hook" "$@"
