@@ -1424,8 +1424,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                               onClick={handleAcknowledgeWokeClick}
                               className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-xs font-medium text-warning-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                             >
-                              <AlarmClockIcon aria-hidden className="size-3" />
-                              <span role="status">
+                              <AlarmClockIcon
+                                aria-hidden
+                                className={inFolder ? "size-3.5" : "size-3"}
+                              />
+                              <span role="status" className={cn(inFolder && "sr-only")}>
                                 <T context="thread status: woke from snooze">Woke</T>
                               </span>
                             </button>
@@ -1437,14 +1440,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       </Tooltip>
                     ) : inFolder && topStatus ? (
                       // Folder rows have no status line, so the status takes the time slot.
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 text-xs font-medium",
-                          topStatus.className,
-                        )}
-                      >
-                        <TopStatusIcon icon={topStatus.icon} className="size-3" />
-                        {topStatus.label}
+                      // fork：只显示图标，给标题让宽度；文字已在行的 aria-label 里。
+                      <span className={cn("inline-flex items-center", topStatus.className)}>
+                        <TopStatusIcon icon={topStatus.icon} className="size-3.5" />
                       </span>
                     ) : (
                       <span className="text-xs">
