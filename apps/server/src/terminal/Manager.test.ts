@@ -1581,6 +1581,43 @@ it.layer(
     }),
   );
 
+  it.effect("keeps the Windows PowerShell fallback when native monitoring is unavailable", () =>
+    Effect.gen(function* () {
+      const commands: string[] = [];
+      const processRunner: ProcessRunner.ProcessRunner["Service"] = {
+        run: (input) =>
+          Effect.sync(() => {
+            commands.push(input.command);
+            return {
+              stdout: "100|9000|ping.exe",
+              stderr: "",
+              code: ChildProcessSpawner.ExitCode(0),
+              timedOut: false,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+              stdoutInvalidUtf8: false,
+              stderrInvalidUtf8: false,
+            };
+          }),
+      };
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        subprocessPollIntervalMs: 60_000,
+        processTable: Effect.fail("native monitoring disabled").pipe(
+          Effect.mapError((cause) => cause as never),
+        ),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+        Effect.provide(layerWithHostPlatform("win32")),
+      );
+      yield* manager.closeIdle({ threadId: "thread-1" });
+      expect(commands).toEqual([]);
+      yield* manager.open(openInput());
+      yield* manager.closeIdle({ threadId: "thread-1" });
+      expect(commands).toContain("powershell.exe");
+      expect(ptyAdapter.processes[0]?.killed).toBe(false);
+    }),
+  );
+
   it.effect("strips replayable CSI and DCS traffic while preserving setters", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager();
