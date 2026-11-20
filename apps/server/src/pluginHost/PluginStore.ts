@@ -2,6 +2,7 @@
 import { PluginId, RailConfig } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
@@ -95,13 +96,49 @@ export const makePluginStore = Effect.fn("PluginStore.make")(function* (stateDir
     ),
   );
 
-  const readData = (id: string) =>
-    readJson(dataPath(id)).pipe(
-      Effect.map((value) => {
-        const decoded = value === undefined ? undefined : decodeData(value);
-        return decoded?._tag === "Some" ? decoded.value : emptyData;
-      }),
+  /**
+   * Plugin data files are re-read and re-validated whole, and a view fires dozens of reads at once, so the last
+   * result per plugin is kept. A cached value is valid only while the file's stat still matches, so a file
+   * deleted or edited outside the store is seen on the next read. The cached object is shared; callers copy it.
+   */
+  const dataCache = new Map<string, { readonly stamp: string; readonly value: PluginDataFile }>();
+
+  /** Undefined when the file is missing or unreadable, or the platform gives no mtime: nothing is cached then. */
+  const statStamp = (file: string) =>
+    fs.stat(file).pipe(
+      Effect.map((info) =>
+        Option.isSome(info.mtime)
+          ? `${info.mtime.value.getTime()}:${info.size}:${Option.getOrElse(info.ino, () => 0)}`
+          : undefined,
+      ),
+      Effect.orElseSucceed((): string | undefined => undefined),
     );
+
+  const readData = Effect.fn("PluginStore.readData")(function* (id: string) {
+    const file = dataPath(id);
+    // The stat comes first: a write racing the read can then only leave an older stamp, which misses next time.
+    const stamp = yield* statStamp(file);
+    const cached = dataCache.get(id);
+    if (stamp !== undefined && cached?.stamp === stamp) return cached.value;
+    dataCache.delete(id);
+    const value = yield* readJson(file);
+    const decoded = value === undefined ? undefined : decodeData(value);
+    if (decoded?._tag !== "Some") return emptyData;
+    if (stamp !== undefined) dataCache.set(id, { stamp, value: decoded.value });
+    return decoded.value;
+  });
+
+  const writeData = Effect.fn("PluginStore.writeData")(function* (
+    id: string,
+    data: PluginDataFile,
+  ) {
+    // Dropped first so a failed or interrupted write never leaves the old value behind.
+    dataCache.delete(id);
+    const file = dataPath(id);
+    yield* writeJson(file, data);
+    const stamp = yield* statStamp(file);
+    if (stamp !== undefined) dataCache.set(id, { stamp, value: data });
+  });
 
   return {
     readRegistry,
@@ -114,7 +151,7 @@ export const makePluginStore = Effect.fn("PluginStore.make")(function* (stateDir
     readConsent,
     writeConsent: (consent: Readonly<Record<string, string>>) => writeJson(consentPath, consent),
     readData,
-    writeData: (id: string, data: PluginDataFile) => writeJson(dataPath(id), data),
+    writeData,
   };
 });
 export type PluginStore = Effect.Success<ReturnType<typeof makePluginStore>>;
