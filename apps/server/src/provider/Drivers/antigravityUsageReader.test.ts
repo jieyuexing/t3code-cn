@@ -587,6 +587,52 @@ describe("readAntigravityUsage", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("times a step's request only when its start and end are recorded once", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const dir = yield* tempDir;
+      const instant = (field: number, seconds: number) =>
+        protoBytes(field, protoNumber(1, seconds));
+      const usage = (output: number) => [
+        ...protoNumber(1, 246),
+        ...protoNumber(2, 10),
+        ...protoNumber(3, output),
+      ];
+      const step = (id: string, output: number, start: number, end: number, retryOutput?: number) =>
+        new Uint8Array([
+          ...protoBytes(9, [...usage(output), ...protoText(11, id)]),
+          ...instant(1, start),
+          ...instant(7, end),
+          ...instant(8, end),
+          ...(retryOutput === undefined
+            ? []
+            : protoBytes(
+                28,
+                protoBytes(2, [...usage(retryOutput), ...protoText(11, `${id}-retry`)]),
+              )),
+        ]);
+      yield* seedDatabase(path.join(dir, "timed.db"), (db) =>
+        Effect.gen(function* () {
+          yield* db.exec("CREATE TABLE steps (idx INTEGER, metadata BLOB)");
+          for (const [idx, metadata] of [
+            step("timed", 2000, 1780000000, 1780000020),
+            step("retried", 2000, 1780000100, 1780000120, 500),
+            step("backwards", 2000, 1780000220, 1780000200),
+          ].entries()) {
+            yield* db.run("INSERT INTO steps VALUES (?, ?)", [idx, metadata]);
+          }
+        }),
+      );
+      const timed = records(yield* readAntigravityUsage(dir, 0)).filter(
+        (record) => record.totals.outputTokens === 2000,
+      );
+      assert.deepStrictEqual(
+        timed.map((record) => record.request),
+        [{ startMs: 1780000000_000, endMs: 1780000020_000 }, undefined, undefined],
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("reads Antigravity step-only stores and reports malformed databases", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

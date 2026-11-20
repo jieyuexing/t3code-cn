@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import { ForwardCompatibleArray, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { UsageDispatchScore, UsageSpeedRow } from "./usageSpeed.ts";
 
 /** Bump for incompatible UsageSummary changes; skipped unknown array variants need no bump. */
 export const USAGE_CONTRACT_VERSION = 6 as const;
@@ -158,6 +159,10 @@ export const UsageSummary = Schema.Struct({
   sources: ForwardCompatibleArray(UsageSource),
   pricing: UsagePricing,
   scanDurationMs: NonNegativeInt,
+  /** Absent from older servers, which report no request speeds. */
+  requestSpeed: Schema.optional(ForwardCompatibleArray(UsageSpeedRow)),
+  /** Present when the server has a dispatch score file configured and could read it. */
+  dispatchScores: Schema.optional(ForwardCompatibleArray(UsageDispatchScore)),
   /** The filter the server applied; absent means unfiltered, including servers that predate filters. */
   modelFilter: Schema.optional(UsageModelFilter),
 });

@@ -82,6 +82,7 @@ import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart } from "./UsageProviderChart";
 import { SpeedPremium, UsageModelDialog } from "./UsageModelDialog";
 import { UsageShareBar } from "./UsageShareBar";
+import { UsageSpeed } from "./UsageSpeed";
 import {
   costTypeSegments,
   modelShare,
@@ -552,6 +553,16 @@ export function UsagePage() {
                   </p>
                 ))}
               </div>
+            ) : metric === "speed" ? (
+              <UsageSpeed
+                ranking={merged.requestSpeed}
+                timeZone={shownWindow.timeZone}
+                period={{ sinceDay: shownWindow.sinceDay, untilDay: shownWindow.untilDay }}
+                loading={
+                  usageLoading(showingKept, selectedEnvironments, refreshingUsage, hiddenProviders)
+                    .partial
+                }
+              />
             ) : (
               <UsageOverview
                 merged={merged}

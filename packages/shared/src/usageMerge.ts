@@ -5,9 +5,11 @@ import {
   type UsageProviderKind,
   type UsageSource,
   type UsageSourceFingerprint,
+  type UsageSpeedRow,
   type UsageSummary,
   type UsageTokenTotals,
 } from "@t3tools/contracts";
+import { mergeDispatchScores, rankSpeedRows, type SpeedRanking } from "./usageSpeed.ts";
 
 export interface EnvironmentUsage {
   readonly environmentId: EnvironmentId;
@@ -103,6 +105,7 @@ export interface MergedUsage {
   readonly costQuality: CostQuality;
   readonly categoryCost: CategoryCost;
   readonly speedCost: SpeedCost;
+  readonly requestSpeed: readonly SpeedRanking[];
   readonly duplicateSources: readonly string[];
   readonly contributingEnvironments: readonly EnvironmentId[];
   readonly contractMismatches: readonly UsageContractMismatch[];
@@ -254,6 +257,7 @@ function ownedContribution(
 ): {
   readonly buckets: readonly UsageBucket[];
   readonly sessionsByProvider: ReadonlyMap<UsageProviderKind, number>;
+  readonly speedRows: readonly UsageSpeedRow[];
 } {
   const ownedProviders = new Set<UsageProviderKind>();
   const ownedSources = new Set<string>();
@@ -284,6 +288,11 @@ function ownedContribution(
           : ownedSources.has(`${bucket.provider}\u0000${bucket.sourcePath}`)),
     ),
     sessionsByProvider,
+    speedRows: (environment.summary.requestSpeed ?? []).filter((row) =>
+      row.sourcePath === undefined
+        ? ownedProviders.has(row.provider as UsageProviderKind)
+        : ownedSources.has(`${row.provider}\u0000${row.sourcePath}`),
+    ),
   };
 }
 
@@ -323,6 +332,7 @@ const EMPTY_MERGED: MergedUsage = {
   },
   categoryCost: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, unsplit: 0 },
   speedCost: { standard: 0, fast: 0, ultrafast: 0, premium: 0 },
+  requestSpeed: [],
   duplicateSources: [],
   contributingEnvironments: [],
   contractMismatches: [],
@@ -410,9 +420,14 @@ export function mergeUsage(
     }
   >();
   const contributingEnvironments: EnvironmentId[] = [];
+  const speedRows: UsageSpeedRow[] = [];
 
   for (const environment of current) {
-    const { buckets, sessionsByProvider } = ownedContribution(
+    const {
+      buckets,
+      sessionsByProvider,
+      speedRows: ownedSpeedRows,
+    } = ownedContribution(
       environment,
       ownerScanByFingerprint,
       supplementalBucketsByEnvironment.get(environment.environmentId) ?? new Set(),
@@ -420,6 +435,7 @@ export function mergeUsage(
       sourceKey,
     );
     if (buckets.length > 0) contributingEnvironments.push(environment.environmentId);
+    speedRows.push(...ownedSpeedRows);
 
     for (const [providerKind, providerSessions] of sessionsByProvider) {
       sessions += providerSessions;
@@ -615,6 +631,10 @@ export function mergeUsage(
       ...speedCost,
       standard: Math.max(0, costUsd - speedCost.fast - speedCost.ultrafast),
     },
+    requestSpeed: rankSpeedRows(
+      speedRows,
+      mergeDispatchScores(current.map((environment) => environment.summary.dispatchScores ?? [])),
+    ),
     duplicateSources: duplicates,
     contributingEnvironments,
     contractMismatches,

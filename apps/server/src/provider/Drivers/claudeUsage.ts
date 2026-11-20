@@ -1,6 +1,7 @@
 import type { ClaudeSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import {
@@ -20,14 +21,53 @@ export const CLAUDE_SYNTHETIC_MODEL = "<synthetic>";
  * Subagent blocks can progress from stream-start to final usage, so callers
  * must count each key once using the maximum of each token channel.
  */
-export function parseClaudeLine(line: string): readonly UsageRecord[] {
+/**
+ * A request starts at the last `user` entry before its message (the prompt or a tool result);
+ * attachments and other entries sit between and would shorten it.
+ */
+export const ClaudeScanState = Schema.Struct({
+  lastUserMs: Schema.mutableKey(Schema.NullOr(Schema.Finite)),
+});
+export type ClaudeScanState = typeof ClaudeScanState.Type;
+
+export const initialClaudeScanState = (): ClaudeScanState => ({ lastUserMs: null });
+
+export function parseClaudeLine(
+  line: string,
+  state: ClaudeScanState = initialClaudeScanState(),
+): readonly UsageRecord[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
   } catch {
     return [];
   }
-  return parseClaudeRecord(parsed);
+  return parseClaudeRecord(parsed, state);
+}
+
+// Claude Code writes `type` near the start of a line and the entry's own `timestamp` right after its
+// `uuid`; the large tool results of a user line sit between and after them.
+const TYPE_SCAN_LENGTH = 400;
+const USER_TYPE = Buffer.from('"type":"user"');
+const TIMESTAMP_KEY = Buffer.from('"timestamp":"');
+const UUID_BEFORE_TIMESTAMP = /"uuid":"[0-9a-f-]{36}",$/;
+const QUOTE = 0x22;
+
+/** Dates a `user` line from its bytes without decoding it; undefined sends the line to the parser. */
+function parseClaudeBytes(
+  line: Buffer,
+  state: ClaudeScanState,
+): readonly UsageRecord[] | undefined {
+  if (!line.subarray(0, TYPE_SCAN_LENGTH).includes(USER_TYPE)) return undefined;
+  const key = line.indexOf(TIMESTAMP_KEY);
+  if (key < 60 || !UUID_BEFORE_TIMESTAMP.test(line.toString("latin1", key - 60, key)))
+    return undefined;
+  const start = key + TIMESTAMP_KEY.length;
+  const end = line.indexOf(QUOTE, start);
+  const timestampMs = end === -1 ? null : parseTimestampMs(line.toString("latin1", start, end));
+  if (timestampMs === null) return undefined;
+  state.lastUserMs = timestampMs;
+  return [];
 }
 
 function cacheCreation1h(usage: Record<string, unknown>): { cacheCreation1hTokens?: number } {
@@ -37,10 +77,14 @@ function cacheCreation1h(usage: Record<string, unknown>): { cacheCreation1hToken
   return tokens > 0 ? { cacheCreation1hTokens: tokens } : {};
 }
 
-function parseClaudeRecord(parsed: unknown): readonly UsageRecord[] {
+function parseClaudeRecord(parsed: unknown, state: ClaudeScanState): readonly UsageRecord[] {
   if (typeof parsed !== "object" || parsed === null) return [];
 
   const record = parsed as Record<string, unknown>;
+  if (record["type"] === "user") {
+    state.lastUserMs = parseTimestampMs(record["timestamp"]) ?? state.lastUserMs;
+    return [];
+  }
   if (record["type"] !== "assistant") return [];
 
   const message = record["message"];
@@ -81,6 +125,9 @@ function parseClaudeRecord(parsed: unknown): readonly UsageRecord[] {
     reportedCostUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
     speed: usageRecord["speed"] === "fast" ? "fast" : "standard",
     dedupeKey,
+    ...(state.lastUserMs !== null && state.lastUserMs <= timestampMs
+      ? { request: { startMs: state.lastUserMs, endMs: timestampMs } }
+      : {}),
   };
 
   // Top-level `usage` is the executor's alone. Advisor calls run on another model at its own rates
@@ -118,7 +165,7 @@ function parseClaudeRecord(parsed: unknown): readonly UsageRecord[] {
   return records;
 }
 
-export const claudeUsageFormat: TranscriptUsageFormat<void> = {
+export const claudeUsageFormat: TranscriptUsageFormat<ClaudeScanState> = {
   selectFields: {
     type: true,
     timestamp: true,
@@ -127,9 +174,12 @@ export const claudeUsageFormat: TranscriptUsageFormat<void> = {
     costUSD: true,
     message: { id: true, model: true, usage: true },
   },
-  usageMarkers: ['"usage"'],
-  parseLine: (line) => parseClaudeLine(line),
-  parseProjected: (projected) => parseClaudeRecord(projected),
+  // User entries carry no usage; they date the start of the next request.
+  usageMarkers: ['"usage"', '"type":"user"'],
+  parseLine: parseClaudeLine,
+  parseBytes: parseClaudeBytes,
+  parseProjected: parseClaudeRecord,
+  state: { initial: initialClaudeScanState, schema: ClaudeScanState },
 };
 
 export const claudeUsageReader: ProviderUsageReader<ClaudeSettings, Path.Path> = {

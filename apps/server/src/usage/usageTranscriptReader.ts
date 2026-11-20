@@ -385,6 +385,11 @@ export async function readTranscriptRecords<State>(
 
     const mightCarryUsage = transcriptLineGate(format.usageMarkers);
     const parseLine = (lineBuffer: Buffer, lineState: State, out: UsageRecord[]): void => {
+      const direct = format.parseBytes?.(lineBuffer, lineState);
+      if (direct !== undefined) {
+        for (const record of direct) out.push(record);
+        return;
+      }
       if (!mightCarryUsage(lineBuffer)) return;
       for (const record of format.parseLine(toLineString(lineBuffer), lineState)) out.push(record);
     };

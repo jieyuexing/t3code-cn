@@ -177,6 +177,9 @@ interface Metadata {
   model: string;
   modelId: number;
   timestampMs: number | null;
+  /** A planner step records when its request began and ended; generations carry neither. */
+  requestStartMs: number | null;
+  requestEndMs: number | null;
   usages: Fields[];
 }
 
@@ -205,6 +208,8 @@ function metadata(bytes: Uint8Array, step: boolean): Metadata {
     timestampMs: step
       ? (timestamp(nested(data, 8)) ?? timestamp(nested(data, 1)))
       : timestamp(nested(nested(data, 9), 4)),
+    requestStartMs: step ? timestamp(nested(data, 1)) : null,
+    requestEndMs: step ? timestamp(nested(data, 7)) : null,
     usages,
   };
 }
@@ -385,6 +390,14 @@ function usageCandidates(
           reportedCostUsd: null,
           speed: "standard",
           dedupeKey: keys[0] ?? `antigravity:${sessionId}:${source}:${index}:${usageIndex}`,
+          // Retries share one span, so it times a request only when the step has a single usage.
+          ...(source === "step" &&
+          entry.usages.length === 1 &&
+          entry.requestStartMs !== null &&
+          entry.requestEndMs !== null &&
+          entry.requestEndMs > entry.requestStartMs
+            ? { request: { startMs: entry.requestStartMs, endMs: entry.requestEndMs } }
+            : {}),
         };
         records.push({
           record,
@@ -458,8 +471,10 @@ export const readAntigravityUsage = Effect.fn("readAntigravityUsage")(function* 
         : target;
     const x = target.record.totals;
     const y = source.record.totals;
+    const request = first.record.request ?? (first === target ? source : target).record.request;
     target.record = {
       ...first.record,
+      ...(request === undefined ? {} : { request }),
       model: bestModel.record.model,
       timestampMs: bestTime.record.timestampMs,
       totals: {
