@@ -12,6 +12,7 @@ import {
   matchComposerEnvironmentItems,
   matchComposerThreadItems,
 } from "@t3tools/client-runtime/composerThreadItems";
+import { expandComposerThreadQuery } from "@t3tools/client-runtime/composer-thread-query-cn";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 
 const EMPTY_THREAD_SHELLS: ReadonlyArray<EnvironmentThreadShell> = [];
@@ -361,6 +362,17 @@ export function useComposerCommandMenu({
   useThreadSearch(
     trigger?.kind === "path" && environmentId ? [environmentId, ...linkedEnvironments.keys()] : [],
     trigger?.kind === "path" ? trigger.query : "",
+    { titlesOnly: true },
+  );
+  // Titles that skip a word only match the split query, so older settled ones need their own
+  // search; the client's own fallback then ranks both from the shells they mount.
+  const expandedThreadQuery =
+    trigger?.kind === "path" ? expandComposerThreadQuery(trigger.query) : null;
+  useThreadSearch(
+    trigger?.kind === "path" && environmentId && expandedThreadQuery !== null
+      ? [environmentId]
+      : [],
+    expandedThreadQuery ?? "",
     { titlesOnly: true },
   );
   const pullRequestSearch = useComposerPullRequestSearch({
