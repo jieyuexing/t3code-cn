@@ -106,6 +106,7 @@ const decodeServerConfig = Schema.decodeUnknownSync(ServerConfig);
 const makeServerConfig = (
   providers: ReadonlyArray<unknown>,
   supportsIssues = false,
+  settings: object = {},
 ): ServerConfig => ({
   ...decodeServerConfig({
     environment: {
@@ -125,7 +126,7 @@ const makeServerConfig = (
       otlpTracesEnabled: false,
       otlpMetricsEnabled: false,
     },
-    settings: {},
+    settings,
     threadSnapshotPagination: true,
     threadResumeCompletionMarker: true,
     shellResumeCompletionMarker: true,
@@ -603,6 +604,8 @@ export function installFakeEnvironment(
     /** Commands left unanswered even when accepting, until `rejectPendingCommand`. */
     readonly holdCommand?: (command: OrchestrationV2Command) => boolean;
     readonly providers?: ReadonlyArray<unknown>;
+    /** Server settings that differ from the defaults. */
+    readonly serverSettings?: object;
   },
 ): Disposable {
   threads = fixtures;
@@ -610,6 +613,7 @@ export function installFakeEnvironment(
     ...makeServerConfig(
       options?.providers ?? [CODEX_PROVIDER],
       fixtures.some((thread) => (thread.issues?.length ?? 0) > 0),
+      options?.serverSettings,
     ),
     keybindings: options?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS,
   };

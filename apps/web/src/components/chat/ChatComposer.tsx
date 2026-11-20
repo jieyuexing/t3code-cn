@@ -292,6 +292,8 @@ import {
 import { ComposerControlsBar } from "./ComposerControlsBar";
 import { composerCommandKeyHandler } from "./composerCommandKey";
 import { usePromptSuggestion } from "./usePromptSuggestion";
+import { ComposerChoiceStrip } from "~/pluginHost/needsYou/ComposerChoiceStrip";
+import { useComposerChoices } from "~/pluginHost/needsYou/useComposerChoices";
 import { useFreshSessionArmed } from "./freshSessionArms";
 
 function consumePasteAsTextShortcut(deadline: { current: number }): boolean {
@@ -2372,7 +2374,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // After /clear the next message starts a fresh session that cannot see what the suggestion refers to.
   const freshSessionArmed = useFreshSessionArmed(scopedThreadKey(routeThreadRef));
   // Offered only where the default placeholder would show, so it never hides a pending question.
-  const offeredPromptSuggestion =
+  const promptSuggestionSlot =
     phase !== "running" &&
     !isSendBusy &&
     !freshSessionArmed &&
@@ -2382,8 +2384,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     !activePendingProgress &&
     !projectSelectionRequired &&
     !showProviderUnavailable
-      ? promptSuggestion
+      ? { ghost: promptSuggestion }
       : null;
+  const composerChoices = useComposerChoices(
+    environmentId,
+    activeThread,
+    activeThreadRuns,
+    routeThreadRef,
+  );
+  const showComposerChoices =
+    promptSuggestionSlot !== null &&
+    composerChoices.choices.length > 0 &&
+    prompt.length === 0 &&
+    !isComposerCollapsedMobile;
+  const offeredPromptSuggestion = showComposerChoices
+    ? null
+    : (promptSuggestionSlot?.ghost ?? null);
 
   const onComposerCommandKey = (key: string, event: KeyboardEvent, isTaskItem?: boolean) =>
     composerCommandKeyHandler({
@@ -3602,6 +3618,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   </button>
                 </CollapsedComposerStopAction>
               </div>
+            ) : null}
+
+            {showComposerChoices ? (
+              <ComposerChoiceStrip
+                choices={composerChoices.choices}
+                onPick={(fill) => applyPromptReplacement(0, 0, fill)}
+                onSend={(text) => applyPromptReplacement(0, 0, text) && submitComposer()}
+                onDismiss={composerChoices.dismiss}
+              />
             ) : null}
 
             <div
