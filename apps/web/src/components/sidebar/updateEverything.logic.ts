@@ -434,35 +434,49 @@ function trackSwitchMove(
   return { selfUpdate };
 }
 
-export interface UpdateEverythingSteps<Providers, Servers> {
+export interface UpdateEverythingSteps<Provider, Servers> {
   readonly downloadLocal?: () => Promise<boolean>;
-  readonly updateProviders: () => Promise<Providers>;
+  /** Starts each machine's provider updates; a machine's entry settles when its own are done. */
+  readonly updateProviders: () => ReadonlyMap<EnvironmentId, Promise<Provider>>;
   readonly stageServers?: () => ReadonlyMap<EnvironmentId, Promise<unknown>>;
+  /** `providersDone` has an entry only for machines that update providers. */
   readonly updateServers: (
     staged: ReadonlyMap<EnvironmentId, Promise<unknown>>,
+    providersDone: ReadonlyMap<EnvironmentId, Promise<void>>,
   ) => Promise<Servers>;
 }
 
-/** Finish provider installs before server restarts; servers stage meanwhile and each server's
+/** Finish a machine's provider installs before its own server restarts, since the restart would
+ * interrupt them; machines do not wait on each other. Servers stage meanwhile and each server's
  * update waits only on its own stage. Install this app last when localReady; failed downloads skip
  * only that install. */
-export async function runUpdateEverything<Providers, Servers>(
-  steps: UpdateEverythingSteps<Providers, Servers>,
+export async function runUpdateEverything<Provider, Servers>(
+  steps: UpdateEverythingSteps<Provider, Servers>,
 ): Promise<{
   readonly localReady: boolean;
-  readonly providers: Providers;
+  readonly providers: ReadonlyArray<Provider>;
   readonly servers: Servers;
 }> {
   const staged = new Map(
     Array.from(steps.stageServers?.() ?? [], ([id, stage]) => [id, stage.catch(() => undefined)]),
   );
-  const [localReady, remote] = await Promise.all([
-    steps.downloadLocal?.() ?? Promise.resolve(true),
-    steps
-      .updateProviders()
-      .then(async (providers) => ({ providers, servers: await steps.updateServers(staged) })),
+  const download = steps.downloadLocal?.() ?? Promise.resolve(true);
+  const providerRuns = steps.updateProviders();
+  const providersDone = new Map(
+    Array.from(providerRuns, ([id, run]) => [
+      id,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    ]),
+  );
+  const [localReady, providers, servers] = await Promise.all([
+    download,
+    Promise.all(providerRuns.values()),
+    steps.updateServers(staged, providersDone),
   ]);
-  return { localReady, ...remote };
+  return { localReady, providers, servers };
 }
 
 export type UpdateRunMachineStatus =
@@ -476,7 +490,8 @@ export type UpdateRunMachineStatus =
 export interface UpdateRunMachine {
   readonly environmentId: EnvironmentId;
   readonly label: string;
-  readonly updatesProviders: boolean;
+  /** True until this machine's own provider updates finish. */
+  readonly updatingProviders: boolean;
   readonly server: ServerUpdateTarget | null;
   readonly handedOffVersion: string | null;
   readonly startedAt: number;
@@ -489,6 +504,7 @@ export interface UpdateEverythingRun {
   /** Track switches retry through their planner, which re-checks each database. */
   readonly trackSwitch?: boolean;
   readonly localVersion: string | null;
+  /** "providers" lasts until every machine has finished its provider updates. */
   readonly phase: "providers" | "servers" | "countdown" | "installing";
   readonly restartAt: number | null;
   readonly machines: ReadonlyArray<UpdateRunMachine>;
@@ -501,7 +517,7 @@ export function resolveUpdateRunMachineStatus(
 ): UpdateRunMachineStatus {
   if (machine.result !== null) return machine.result;
   if (machine.handedOffVersion !== null) return "restarting";
-  if (phase === "providers" && machine.updatesProviders) return "providers";
+  if (phase === "providers" && machine.updatingProviders) return "providers";
   if (machine.server !== null && serverState.status === "running") {
     return serverState.stage === "resuming" ? "restarting" : "downloading";
   }

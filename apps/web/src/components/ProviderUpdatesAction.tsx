@@ -94,21 +94,28 @@ export function useProviderUpdates() {
       : [];
   });
 
-  const updateAll = async ({ quiet = false }: { readonly quiet?: boolean } = {}) => {
-    const runs = await Promise.all(
-      machines.flatMap(({ environmentId, label, candidates }) =>
-        candidates.map(async (candidate): Promise<ProviderUpdateRun> => ({
-          environmentId,
-          machineLabel: label,
-          driver: candidate.driver,
-          instanceId: candidate.instanceId,
-          result: await updateProvider({
+  /** Each machine's entry settles once all of its own providers have. */
+  const updateMachines = () =>
+    new Map(
+      machines.map(({ environmentId, label, candidates }) => [
+        environmentId,
+        Promise.all(
+          candidates.map(async (candidate): Promise<ProviderUpdateRun> => ({
             environmentId,
-            input: { provider: candidate.driver, instanceId: candidate.instanceId },
-          }),
-        })),
-      ),
+            machineLabel: label,
+            driver: candidate.driver,
+            instanceId: candidate.instanceId,
+            result: await updateProvider({
+              environmentId,
+              input: { provider: candidate.driver, instanceId: candidate.instanceId },
+            }),
+          })),
+        ),
+      ]),
     );
+
+  const updateAll = async ({ quiet = false }: { readonly quiet?: boolean } = {}) => {
+    const runs = (await Promise.all(updateMachines().values())).flat();
     const view = quiet ? null : getProviderUpdateRunToastView(runs);
     if (view) {
       toastManager.add(
@@ -121,7 +128,7 @@ export function useProviderUpdates() {
     return runs;
   };
 
-  return { machines, updateAll };
+  return { machines, updateMachines, updateAll };
 }
 
 export function ProviderUpdatesAction() {

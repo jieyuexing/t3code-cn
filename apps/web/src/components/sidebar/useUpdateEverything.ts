@@ -1,6 +1,6 @@
 import { msg, useMessages } from "gt-react";
 import { useAtomValue } from "@effect/atom-react";
-import { PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
+import { type EnvironmentId, PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
 
 import { APP_VERSION } from "~/branding";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
@@ -26,6 +26,7 @@ import {
 } from "./updateEverything.logic";
 import {
   clearSavedUpdateEverythingResult,
+  finishUpdateRunProviders,
   saveUpdateEverythingResult,
   setUpdateEverythingRun,
   settleUpdateRunMachine,
@@ -77,7 +78,9 @@ export function useUpdateEverything(
   const restarts = collectRestartingMachines(machines, moving, localUpdateVersion !== null);
   const providerUpdates = useProviderUpdates();
   // A track switch moves app and servers only; provider updates stay a separate choice.
-  const providers = channelSwitch ? { machines: [], updateAll: async () => [] } : providerUpdates;
+  const providers: typeof providerUpdates = channelSwitch
+    ? { machines: [], updateMachines: () => new Map(), updateAll: async () => [] }
+    : providerUpdates;
   const updateServer = useServerUpdate();
   const stageServerUpdate = useAtomCommand(serverEnvironment.stageServerUpdate, {
     reportFailure: false,
@@ -121,7 +124,7 @@ export function useUpdateEverything(
         machinesById.set(machine.environmentId, {
           environmentId: machine.environmentId,
           label: machine.label,
-          updatesProviders: true,
+          updatingProviders: true,
           server: null,
           handedOffVersion: null,
           startedAt,
@@ -135,7 +138,7 @@ export function useUpdateEverything(
         machinesById.set(server.environmentId, {
           environmentId: server.environmentId,
           label: server.serverLabel,
-          updatesProviders: existing?.updatesProviders ?? false,
+          updatingProviders: existing?.updatingProviders ?? false,
           server,
           handedOffVersion: null,
           startedAt,
@@ -148,7 +151,7 @@ export function useUpdateEverything(
       setUpdateEverythingRun(() => ({
         ...(channelSwitch ? { trackSwitch: true } : {}),
         localVersion,
-        phase: "providers",
+        phase: providers.machines.length > 0 ? "providers" : "servers",
         restartAt: null,
         machines: Array.from(machinesById.values()),
       }));
@@ -157,41 +160,41 @@ export function useUpdateEverything(
       try {
         const outcome = await runUpdateEverything({
           ...(downloadLocal ? { downloadLocal: () => downloadLocal(reportLocalError) } : {}),
-          updateProviders: async () => {
-            const runs = await providers.updateAll({ quiet: true });
-            const outcomes = runs.map((run) => {
-              const runOutcome = getProviderUpdateRunOutcome(run);
-              if (runOutcome.status !== "updated") {
-                providerFailures.set(
-                  run.environmentId,
-                  runOutcome.status === "failed"
-                    ? runOutcome.line
-                    : resolve(msg("Provider update interrupted")),
-                );
-              }
-              return runOutcome;
-            });
-            for (const machine of machinesById.values()) {
-              if (machine.server === null) {
-                settleUpdateRunMachine(
-                  machine.environmentId,
-                  providerFailures.get(machine.environmentId) ?? null,
-                );
-              }
-            }
-            const serversStartedAt = Date.now();
-            setUpdateEverythingRun(
-              (run) =>
-                run && {
-                  ...run,
-                  phase: "servers",
-                  machines: run.machines.map((machine) =>
-                    machine.server === null ? machine : { ...machine, startedAt: serversStartedAt },
-                  ),
-                },
-            );
-            return outcomes;
-          },
+          updateProviders: (): ReadonlyMap<
+            EnvironmentId,
+            Promise<Array<ReturnType<typeof getProviderUpdateRunOutcome>>>
+          > =>
+            new Map(
+              Array.from(
+                providers.updateMachines(),
+                ([environmentId, update]) =>
+                  [
+                    environmentId,
+                    update.then((runs) => {
+                      const outcomes = runs.map((run) => {
+                        const runOutcome = getProviderUpdateRunOutcome(run);
+                        if (runOutcome.status !== "updated") {
+                          providerFailures.set(
+                            environmentId,
+                            runOutcome.status === "failed"
+                              ? runOutcome.line
+                              : resolve(msg("Provider update interrupted")),
+                          );
+                        }
+                        return runOutcome;
+                      });
+                      finishUpdateRunProviders(environmentId);
+                      if (machinesById.get(environmentId)?.server === null) {
+                        settleUpdateRunMachine(
+                          environmentId,
+                          providerFailures.get(environmentId) ?? null,
+                        );
+                      }
+                      return outcomes;
+                    }),
+                  ] as const,
+              ),
+            ),
           ...(providers.machines.length > 0
             ? {
                 stageServers: () =>
@@ -212,8 +215,9 @@ export function useUpdateEverything(
                   ),
               }
             : {}),
-          updateServers: async (staged) => {
+          updateServers: async (staged, providersDone) => {
             const runs = servers.map(async (server) => {
+              await providersDone.get(server.environmentId);
               await staged.get(server.environmentId);
               const serverOutcome = await updateServer(server, { quiet: true });
               settleUpdateRunMachine(
@@ -243,7 +247,7 @@ export function useUpdateEverything(
             localVersion: null,
             localFailures,
             servers: finished,
-            providers: outcome.providers,
+            providers: outcome.providers.flat(),
           });
         if (outcome.localReady && installLocal) {
           if (await waitForUpdateRestart(UPDATE_RESTART_DELAY_MS)) {

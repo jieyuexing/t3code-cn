@@ -51,6 +51,28 @@ function updateRunMachines(update: (machine: UpdateRunMachine) => UpdateRunMachi
   );
 }
 
+/** Marks one machine's provider updates finished and restarts its clock, so the capsule times
+ * the server stage on its own. The run leaves the provider phase with the last machine. */
+export function finishUpdateRunProviders(environmentId: EnvironmentId): void {
+  const startedAt = Date.now();
+  setUpdateEverythingRun((run) => {
+    if (!run) return run;
+    const machines = run.machines.map((machine) =>
+      machine.environmentId === environmentId
+        ? { ...machine, updatingProviders: false, startedAt }
+        : machine,
+    );
+    return {
+      ...run,
+      machines,
+      phase:
+        run.phase === "providers" && machines.every((machine) => !machine.updatingProviders)
+          ? "servers"
+          : run.phase,
+    };
+  });
+}
+
 export function settleUpdateRunMachine(
   environmentId: EnvironmentId,
   failure: string | null,
@@ -287,7 +309,7 @@ function followHandedOffServers(servers: ReadonlyArray<HandedOffServer>): void {
     machines: servers.map((server) => ({
       environmentId: server.environmentId,
       label: server.label,
-      updatesProviders: false,
+      updatingProviders: false,
       server: null,
       handedOffVersion: server.targetVersion,
       startedAt: server.startedAt,

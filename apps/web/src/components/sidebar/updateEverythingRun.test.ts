@@ -117,7 +117,7 @@ describe("retryFailedUpdateRunServers", () => {
     const failedMachine = (environmentId: EnvironmentId) => ({
       environmentId,
       label: environmentId,
-      updatesProviders: false,
+      updatingProviders: false,
       server: {
         environmentId,
         serverLabel: environmentId,
