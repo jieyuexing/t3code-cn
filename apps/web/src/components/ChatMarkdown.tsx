@@ -191,6 +191,8 @@ import {
   WORKSPACE_BASENAME_LOOKUP_LIMIT,
   workspaceLinkLookupQuery,
 } from "@t3tools/client-runtime/workspace-basename-lookup";
+import { confirmMissingInlineCodePaths } from "./inlineCodeMissing.cn";
+import { useMissingInlineCode } from "./useMissingInlineCode.cn";
 import { resolvePullRequestPreviewTarget } from "@t3tools/client-runtime/change-request-links";
 import {
   mayContainStandaloneIssueLink,
@@ -820,6 +822,34 @@ function useChatMarkdownState({
       openPreview,
     });
   };
+  const canReadFiles = useEnvironmentScope(environmentId, AuthFilesystemReadScope);
+  const missingInlineCodeTexts = useMissingInlineCode({
+    scope: JSON.stringify([environmentId, cwd]),
+    enabled: canReadFiles && !isStreaming && cwd !== undefined,
+    probes: [...inlineCodeFileLinkMetaByText].flatMap(([text, meta]) =>
+      meta.workspaceLookupPath === null ? [] : [{ text, path: meta.workspaceLookupPath }],
+    ),
+    confirm: (probes) =>
+      confirmMissingInlineCodePaths(probes, {
+        cwd: cwd!,
+        // Read on demand like a click does; a finished message's folders no longer change.
+        agentRoots: (agentDirectories?.() ?? []).filter((root) => root !== cwd),
+        stat: async (paths) => {
+          const result = await getFilesystemMetadata({
+            environmentId: environmentId!,
+            input: { paths },
+          });
+          return result._tag === "Success" ? result.value.entries : null;
+        },
+        search: async (root, query) => {
+          const result = await searchProjectEntries({
+            environmentId: environmentId!,
+            input: { cwd: root, query, limit: WORKSPACE_BASENAME_LOOKUP_LIMIT, kind: "file" },
+          });
+          return result._tag === "Success" ? result.value : null;
+        },
+      }),
+  });
   const findWorkspaceFileMatch = async (fileLinkMeta: MarkdownFileLinkMeta) => {
     const workspaceRelativePath = fileLinkMeta.workspaceLookupPath;
     if (
@@ -1032,6 +1062,7 @@ function useChatMarkdownState({
     imageBaseDir,
     workspaceMutationId,
     inlineCodeFileLinkMetaByText,
+    missingInlineCodeTexts,
     inline,
     mathEnabled,
     isStreaming,
@@ -1528,8 +1559,15 @@ const CHAT_MARKDOWN_COMPONENTS = {
     );
   },
   code: function MarkdownCode({ node, children, className, ...props }) {
-    const { cwd, imageBaseDir, inlineCodeFileLinkMetaByText, fileLinkChip, mathEnabled, inline } =
-      use(ChatMarkdownRendererContext);
+    const {
+      cwd,
+      imageBaseDir,
+      inlineCodeFileLinkMetaByText,
+      missingInlineCodeTexts,
+      fileLinkChip,
+      mathEnabled,
+      inline,
+    } = use(ChatMarkdownRendererContext);
     const math = mathEnabled ? mathKind(className) : null;
     if (math) {
       return (
@@ -1542,9 +1580,10 @@ const CHAT_MARKDOWN_COMPONENTS = {
     }
     if (node?.properties?.dataInlineCode != null) {
       const codeText = nodeToPlainText(children);
-      const fileLinkMeta =
-        inlineCodeFileLinkMetaByText.get(codeText.trim()) ??
-        resolveInlineCodeFileLinkMeta(codeText, cwd, imageBaseDir ?? cwd);
+      const fileLinkMeta = missingInlineCodeTexts.has(codeText.trim())
+        ? null
+        : (inlineCodeFileLinkMetaByText.get(codeText.trim()) ??
+          resolveInlineCodeFileLinkMeta(codeText, cwd, imageBaseDir ?? cwd));
       if (fileLinkMeta) {
         return fileLinkChip(
           fileLinkMeta,
