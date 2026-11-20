@@ -34,6 +34,7 @@ import {
   resolveProjectFileBackedSetting,
   resolveProjectSettings,
 } from "@t3tools/shared/projectSettings";
+import { resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -182,8 +183,8 @@ const access = Effect.gen(function* () {
   return yield* Project.ProjectService;
 });
 
-/** Settings, not the project record, hold the project default model that new threads use. */
-const withSavedDefaultModel = Effect.gen(function* () {
+/** Settings, not the project record, hold the default model and actions that new threads use. */
+const withSavedProjectSettings = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService.pipe(
     Effect.flatMap((service) => service.getSettings),
     Effect.mapError(unavailable),
@@ -196,9 +197,15 @@ const withSavedDefaultModel = Effect.gen(function* () {
         resolved.sources.defaultModelSelection === "project"
           ? resolved.settings.defaultModelSelection
           : null,
+      scripts: resolveProjectScripts(settings, project),
     };
   };
 });
+
+// The project is already committed, so a failed Settings read must not report the create as failed.
+const withSavedProjectSettingsAfterCreate = withSavedProjectSettings.pipe(
+  Effect.orElseSucceed(() => (project: ProjectRecord) => project),
+);
 
 export const layer = McpToolAccess.toLayer(ProjectToolkit, {
   t3_thread_launch: McpToolAccess.startsThreads(
@@ -483,7 +490,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
       const page = yield* projects
         .listPage({ cursor: input.cursor ?? 0, limit: input.limit ?? 20 })
         .pipe(Effect.mapError(unavailable));
-      return { ...page, projects: page.projects.map(yield* withSavedDefaultModel) };
+      return { ...page, projects: page.projects.map(yield* withSavedProjectSettings) };
     }),
   ),
   t3_project_read: McpToolAccess.reads((input) =>
@@ -495,7 +502,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           code: "invalid_request",
           message: "The project was not found.",
         });
-      const project = (yield* withSavedDefaultModel)(result.value);
+      const project = (yield* withSavedProjectSettings)(result.value);
       const checkout = yield* ProjectCheckout.ProjectCheckout;
       return { ...project, head: yield* checkout.head(project.workspaceRoot) };
     }),
@@ -535,7 +542,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
               ),
             );
           return {
-            ...project,
+            ...(yield* withSavedProjectSettingsAfterCreate)(project),
             ...(created.commitError === undefined ? {} : { commitError: created.commitError }),
           };
         }
@@ -546,9 +553,10 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
               "Creating a project does not set its default model; set defaultModelSelection afterwards with t3_project_update.",
           });
         const commandId = yield* newCommandId();
-        return yield* projects
+        const created = yield* projects
           .create({ ...input, workspaceRoot, commandId, projectId: ProjectId.make(commandId) })
           .pipe(Effect.mapError(projectFailure));
+        return (yield* withSavedProjectSettingsAfterCreate)(created);
       }),
     // Linked work may bring the repository it works in; an existing
     // registered workspace is still refused.
@@ -560,7 +568,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
       const updated = yield* projects
         .update({ ...input, commandId: yield* newCommandId() })
         .pipe(Effect.mapError(projectFailure));
-      return (yield* withSavedDefaultModel)(updated);
+      return (yield* withSavedProjectSettings)(updated);
     }),
   ),
   t3_project_delete: McpToolAccess.writesEnvironment((input) =>

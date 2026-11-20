@@ -9,6 +9,7 @@ import {
   type ServerProvider,
   type Project as ProjectRecord,
   type ModelSelection,
+  type ProjectScript,
   type RuntimeMode,
   type OrchestrationV2ThreadShell,
   ThreadId,
@@ -58,6 +59,7 @@ const clientLaunchHarness = (input: {
   readonly providers?: readonly ServerProvider[];
   /** Where Settings saves a project's model; the legacy project field stays null. */
   readonly overrideModel?: ModelSelection;
+  readonly overrideScripts?: readonly ProjectScript[];
   readonly launched: Array<ThreadLaunch.ThreadLaunchInput>;
   readonly workspaceRoot?: string;
   readonly checkWorktreeBase?: ThreadLaunch.ThreadLaunchService["Service"]["checkWorktreeBase"];
@@ -97,7 +99,12 @@ const clientLaunchHarness = (input: {
         : {
             projectSettingsFolded: true,
             projectSettingsOverrides: {
-              [projectId]: { defaultModelSelection: input.overrideModel },
+              [projectId]: {
+                defaultModelSelection: input.overrideModel,
+                ...(input.overrideScripts === undefined
+                  ? {}
+                  : { defaultProjectScripts: input.overrideScripts }),
+              },
             },
           }),
     }),
@@ -1173,15 +1180,19 @@ it.effect("an agent cannot delete the built-in scratch project, even with force"
   }),
 );
 
-it.effect("reading a project shows the default model saved in Settings", () =>
+it.effect("reading a project shows the default model and actions saved in Settings", () =>
   Effect.gen(function* () {
     const overrideModel = {
       instanceId: ProviderInstanceId.make("claudeAgent"),
       model: "claude-sonnet",
     };
+    const overrideScripts = [
+      { id: "test", name: "Test", command: "pnpm test", icon: "test", runOnWorktreeCreate: false },
+    ] satisfies ProjectScript[];
     const harness = clientLaunchHarness({
       runtimeModeCeiling: "full-access",
       overrideModel,
+      overrideScripts,
       launched: [],
     });
     const dependencies = Layer.mergeAll(
@@ -1194,7 +1205,15 @@ it.effect("reading a project shows the default model saved in Settings", () =>
             title: "Client target",
             workspaceRoot: "/projects/client-target",
             defaultModelSelection: null,
-            scripts: [],
+            scripts: [
+              {
+                id: "stale",
+                name: "Stale",
+                command: "true",
+                icon: "play",
+                runOnWorktreeCreate: false,
+              },
+            ],
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
             deletedAt: null,
@@ -1211,7 +1230,10 @@ it.effect("reading a project shows the default model saved in Settings", () =>
       .handle("t3_project_read", { projectId: harness.projectId })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
 
-    expect(read.at(-1)?.result).toMatchObject({ defaultModelSelection: overrideModel });
+    expect(read.at(-1)?.result).toMatchObject({
+      defaultModelSelection: overrideModel,
+      scripts: overrideScripts,
+    });
   }),
 );
 
