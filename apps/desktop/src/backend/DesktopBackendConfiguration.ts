@@ -83,9 +83,15 @@ const DESKTOP_BACKEND_ENV_NAMES = [
   "T3CODE_TAILSCALE_SERVE",
   "T3CODE_TAILSCALE_SERVE_PORT",
 ] as const;
+const NODE_ENV_PROXY_NAMES = ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"] as const;
+
+const shouldUseEnvironmentProxy = (): boolean =>
+  process.env.NODE_USE_ENV_PROXY !== "0" &&
+  NODE_ENV_PROXY_NAMES.some((name) => (process.env[name]?.trim().length ?? 0) > 0);
 
 // Windows forwards these variables into WSL only through WSLENV.
 const WSL_FORWARDED_ENV_NAMES = [
+  "T3CODE_RESOURCE_MONITOR_ENABLED",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "T3CODE_TELEMETRY_ENABLED",
@@ -559,6 +565,10 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       // Packaged builds have a separate cache; --require prevents cache settings leaking to provider subprocesses.
       args: [
         ...(environment.isPackaged ? ["--require", environment.compileCachePath] : []),
+        // Node does not read HTTP(S)_PROXY for fetch unless this opt-in is
+        // present. ALL_PROXY is intentionally excluded because Node's
+        // environment-proxy support does not consume it.
+        ...(shouldUseEnvironmentProxy() ? ["--use-env-proxy"] : []),
         environment.backendEntryPath,
         "--bootstrap-fd",
         "3",

@@ -100,6 +100,17 @@ function layerEnvironment(
   );
 }
 
+// Plain helpers keep process.env access out of Effect code.
+const readEnv = (name: string) => process.env[name];
+
+const setEnv = (name: string, value: string | undefined) => {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+};
+
 const withHarness = <A, E, R>(
   effect: Effect.Effect<
     A,
@@ -223,6 +234,42 @@ const withPackagedWslHarness = <A, E, R>(
   }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 describe("DesktopBackendConfiguration", () => {
+  it.effect("enables Node environment proxies only for HTTP(S) proxy variables", () =>
+    Effect.gen(function* () {
+      const names = [
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "NODE_USE_ENV_PROXY",
+      ] as const;
+      const previous = new Map(names.map((name) => [name, readEnv(name)]));
+      try {
+        for (const name of names) setEnv(name, undefined);
+
+        yield* withHarness(
+          Effect.gen(function* () {
+            const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+            assert.notInclude((yield* configuration.resolvePrimary).args, "--use-env-proxy");
+
+            setEnv("ALL_PROXY", "http://proxy.example.test:8080");
+            assert.notInclude((yield* configuration.resolvePrimary).args, "--use-env-proxy");
+
+            setEnv("HTTPS_PROXY", "http://proxy.example.test:8080");
+            assert.include((yield* configuration.resolvePrimary).args, "--use-env-proxy");
+
+            setEnv("NODE_USE_ENV_PROXY", "0");
+            assert.notInclude((yield* configuration.resolvePrimary).args, "--use-env-proxy");
+          }),
+        );
+      } finally {
+        for (const name of names) setEnv(name, previous.get(name));
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("resolvePrimary produces a stable scoped bootstrap token", () =>
     withHarness(
       Effect.gen(function* () {
@@ -233,11 +280,9 @@ describe("DesktopBackendConfiguration", () => {
         const second = yield* configuration.resolvePrimary;
 
         assert.equal(first.executablePath, process.execPath);
-        assert.deepEqual(first.args.slice(0, 3), [
-          "--require",
-          environment.compileCachePath,
-          environment.backendEntryPath,
-        ]);
+        assert.deepEqual(first.args.slice(0, 2), ["--require", environment.compileCachePath]);
+        assert.include(first.args, environment.backendEntryPath);
+        assert.deepEqual(first.args.slice(-2), ["--bootstrap-fd", "3"]);
         assert.equal(first.entryPath, environment.backendEntryPath);
         assert.equal(first.cwd, environment.backendCwd);
         assert.equal(first.captureOutput, true);
@@ -736,6 +781,8 @@ describe("DesktopBackendConfiguration", () => {
         const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
         const config = yield* configuration.resolveWsl({ port: 5050, distro: null });
 
+        assert.equal(config.env.T3CODE_RESOURCE_MONITOR_ENABLED, "false");
+        assert.include((config.env.WSLENV ?? "").split(":"), "T3CODE_RESOURCE_MONITOR_ENABLED");
         assert.equal(config.env.OTEL_SDK_DISABLED, "true");
         assert.include((config.env.WSLENV ?? "").split(":"), "OTEL_SDK_DISABLED");
         assert.equal(config.env.T3CODE_TELEMETRY_ENABLED, "false");
@@ -759,6 +806,7 @@ describe("DesktopBackendConfiguration", () => {
           ),
         ),
         Effect.provideService(HostProcess.Environment, {
+          T3CODE_RESOURCE_MONITOR_ENABLED: "false",
           OTEL_SDK_DISABLED: "true",
           T3CODE_TELEMETRY_ENABLED: "false",
           OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=staging",
