@@ -1,4 +1,5 @@
 import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { GitCommitHorizontalIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { T, useGT } from "gt-react";
 import { memo } from "react";
@@ -40,7 +41,6 @@ import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
-import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -244,7 +244,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     closeMobileSidebar();
     void navigate({
       to: "/pull-requests",
-      search: readPullRequestListPreferences(),
+      search: { ...readPullRequestListPreferences(), source: "git" },
     });
   };
   const handleIssuesClick = () => {
@@ -288,8 +288,8 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           />
           {pullRequestsSupported ? (
             <SidebarUtilityItem
-              icon={<PullRequestGlyph.pullRequest />}
-              label={gt("Pull requests")}
+              icon={<GitCommitHorizontalIcon />}
+              label={gt("Git")}
               onClick={handlePullRequestsClick}
             />
           ) : null}

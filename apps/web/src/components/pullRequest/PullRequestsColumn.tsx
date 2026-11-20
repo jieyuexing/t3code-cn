@@ -17,6 +17,7 @@ import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { workspaceAreaProps } from "../../lib/workspaceFocus";
 import { PullRequestCompactFilterMenu } from "./PullRequestCompactFilterMenu";
 import type { PullRequestFilterOption } from "./PullRequestListFilters";
+import { GitLogSourceSwitch } from "../../gitLog/GitLogSourceSwitch";
 import { INVOLVEMENT_TABS, resolveFilterOptions, STATE_TABS } from "./pullRequestListOptions";
 
 function ExpandableSearch({
@@ -221,6 +222,7 @@ export function PullRequestsColumn({
           </WorkspaceBreadcrumb>
         )}
         <div className="min-w-0 flex-1" />
+        <GitLogSourceSwitch active="pull-requests" />
         {condensed ? (
           <div ref={topbarSearchRef} className="flex shrink items-center gap-1.5">
             <ExpandableSearch

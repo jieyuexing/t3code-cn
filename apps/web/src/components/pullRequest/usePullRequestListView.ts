@@ -44,6 +44,7 @@ import { pullRequestFilterProjects } from "@t3tools/client-runtime/pull-request-
 import { pullRequestListEntryId } from "./pullRequestListGroups.logic";
 
 export interface PullRequestsSearch extends PullRequestListPreferences {
+  readonly source?: "git";
   readonly selectedUrl?: string;
   readonly environmentId?: EnvironmentId;
   readonly projectId?: ProjectId;

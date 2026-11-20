@@ -4,7 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { type PullRequestListSort } from "../components/pullRequest/pullRequestListPreferences";
 import { SORT_OPTIONS } from "../components/pullRequest/pullRequestListOptions";
 import { type PullRequestsSearch } from "../components/pullRequest/usePullRequestListView";
-import { PullRequestsPage } from "../components/pullRequest/PullRequestsPage";
+import { PullRequestsRoute } from "../gitLog/GitLogRoute";
 
 const MAX_SEARCH_LABEL_CANDIDATES = 100;
 
@@ -30,6 +30,7 @@ function pullRequestSearchLabels(raw: unknown): PullRequestsSearch["labels"] {
 export const Route = createFileRoute("/_chat/pull-requests")({
   validateSearch: (raw: Record<string, unknown>): PullRequestsSearch => ({
     ...(typeof raw.selectedUrl === "string" ? { selectedUrl: raw.selectedUrl.slice(0, 4096) } : {}),
+    ...(raw.source === "git" ? { source: "git" as const } : {}),
     involvement:
       raw.involvement === "reviewing" || raw.involvement === "authored" ? raw.involvement : "all",
     state:
@@ -75,5 +76,5 @@ export const Route = createFileRoute("/_chat/pull-requests")({
         : undefined,
     labels: pullRequestSearchLabels(raw.labels),
   }),
-  component: PullRequestsPage,
+  component: PullRequestsRoute,
 });
