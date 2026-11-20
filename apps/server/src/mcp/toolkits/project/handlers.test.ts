@@ -35,9 +35,11 @@ import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementSer
 import * as ServerConfig from "../../../config.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as Project from "../../../project/ProjectService.ts";
+import * as ProjectCheckout from "../../../project/ProjectCheckout.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
+import * as RemoteDelegation from "../../../peer/RemoteDelegation.ts";
 import * as SourceControlProviderRegistry from "../../../sourceControl/SourceControlProviderRegistry.ts";
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
@@ -62,6 +64,8 @@ const clientLaunchHarness = (input: {
   readonly hostedAppUrl?: string;
   /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
   readonly refusedByCeiling?: true;
+  readonly forwarding?: Partial<PeerForwarding.PeerForwarding["Service"]>;
+  readonly delegation?: Partial<RemoteDelegation.RemoteDelegation["Service"]>;
 }) => {
   const projectId = ProjectId.make("project:client-target");
   const modelSelection = {
@@ -175,9 +179,11 @@ const clientLaunchHarness = (input: {
         ),
       workspaceScanDirectory: Effect.succeed,
     }),
-    Layer.mock(PeerForwarding.PeerForwarding)({}),
+    Layer.mock(PeerForwarding.PeerForwarding)(input.forwarding ?? {}),
+    Layer.mock(RemoteDelegation.RemoteDelegation)(input.delegation ?? {}),
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
       namedProjectsRoot: "/projects",
+      ensureScratchProject: Effect.succeed({ projectId } as never),
       isScratchProject: () => Effect.succeed(false),
     }),
     DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer)),
@@ -1178,8 +1184,9 @@ it.effect("reading a project shows the default model saved in Settings", () =>
       overrideModel,
       launched: [],
     });
-    const dependencies = Layer.merge(
+    const dependencies = Layer.mergeAll(
       harness.dependencies,
+      Layer.mock(ProjectCheckout.ProjectCheckout)({ head: () => Effect.succeed(null) }),
       Layer.mock(Project.ProjectService)({
         getById: (projectId) =>
           Effect.succeedSome({
@@ -1233,5 +1240,147 @@ it.effect("an update the project refuses tells the agent why", () =>
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
 
     expect(refused.at(-1)?.result).toMatchObject({ code: "invalid_request", message: detail });
+  }),
+);
+
+it.effect("a launch to auto goes where the placement says, and says where it went", () =>
+  Effect.gen(function* () {
+    const box = EnvironmentId.make("environment-box");
+    const boxProject = ProjectId.make("project:box");
+    const asked: Array<RemoteDelegation.PlacementRequest> = [];
+    const sent: Array<{ environmentId: EnvironmentId; params: unknown }> = [];
+    const checked: Array<{
+      environmentId: EnvironmentId;
+      projectId: ProjectId;
+      hereProjectId?: ProjectId | undefined;
+    }> = [];
+    const drift = { here: "aaaaaaaa", there: "bbbbbbbb" };
+    const launchAuto = Effect.fn("test.launchAuto")(function* (
+      placedOn: EnvironmentId | undefined,
+      params: object,
+    ) {
+      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+      const { projectId, dependencies } = clientLaunchHarness({
+        runtimeModeCeiling: "full-access",
+        launched,
+        forwarding: {
+          call: (_scope, _tool, environmentId, forwarded) => {
+            sent.push({ environmentId, params: forwarded });
+            return Effect.succeed({
+              threadId: ThreadId.make("thread:there"),
+              projectId: boxProject,
+              modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt" },
+              runId: null,
+              status: null,
+            } as never);
+          },
+        },
+        delegation: {
+          checkout: (_scope, request) => {
+            checked.push(request);
+            return Effect.succeed(drift);
+          },
+          place: (_scope, request) => {
+            asked.push(request);
+            return Effect.succeed(
+              request.hereOnly || placedOn === undefined
+                ? { environmentId: undefined, projectId: undefined }
+                : { environmentId: placedOn, projectId: boxProject },
+            );
+          },
+        },
+      });
+      const toolkit = yield* ProjectToolkit.pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+            Layer.provide(dependencies),
+          ),
+        ),
+      );
+      const result = yield* toolkit
+        // An agent omits a key rather than sending undefined, which the tool's input schema now rejects.
+        .handle(
+          "t3_thread_launch",
+          Object.fromEntries(
+            Object.entries({ title: "Fix", environmentId: "auto", projectId, ...params }).filter(
+              ([, value]) => value !== undefined,
+            ),
+          ) as never,
+        )
+        .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+      return { result: result.at(-1)?.result, launched, projectId };
+    });
+
+    // There: the box's project replaces this one's id, and the result names the box.
+    const there = yield* launchAuto(box, {});
+    expect(sent).toMatchObject([{ environmentId: box, params: { projectId: boxProject } }]);
+    expect(there.launched).toHaveLength(0);
+    expect(there.result).toMatchObject({ environmentId: box, checkout: drift });
+    // Compared against the project asked for here, which is not always the thread's.
+    expect(checked).toEqual([
+      { environmentId: box, projectId: boxProject, hereProjectId: there.projectId },
+    ]);
+
+    // Here: launched in the project asked for, and the result names this environment.
+    const here = yield* launchAuto(undefined, {});
+    expect(here.launched).toMatchObject([{ projectId: here.projectId }]);
+    expect(here.result).toMatchObject({ environmentId: "environment" });
+    expect(here.result).not.toHaveProperty("checkout");
+
+    // The provider and model it names are what the box must be able to run.
+    const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" };
+    yield* launchAuto(box, { modelSelection });
+    expect(asked.at(-1)).toMatchObject({
+      providerInstanceId: modelSelection.instanceId,
+      model: "gpt-5.4",
+    });
+
+    // Without "auto", the id is taken as given and the project is not translated.
+    const named = yield* launchAuto(box, { environmentId: box });
+    expect(sent.at(-1)).toMatchObject({
+      environmentId: box,
+      params: { projectId: named.projectId },
+    });
+    expect(named.result).not.toHaveProperty("environmentId");
+    // The check names the project the caller gave, which is the box's, and rides along.
+    expect(named.result).toMatchObject({ checkout: drift });
+    expect(checked.at(-1)).toEqual({ environmentId: box, projectId: named.projectId });
+    const unnamed = yield* launchAuto(box, { environmentId: undefined });
+    expect(unnamed.launched).toHaveLength(1);
+    expect(unnamed.result).not.toHaveProperty("environmentId");
+
+    // A launch only this machine can run is never offered a choice.
+    yield* launchAuto(box, { scratch: true, projectId: undefined });
+    yield* launchAuto(box, {
+      workspaceStrategy: { type: "existing_worktree", worktreePath: "/w" },
+    });
+    yield* launchAuto(box, {
+      attachments: [
+        {
+          type: "file",
+          id: "attachment-1",
+          name: "notes.txt",
+          mimeType: "text/plain",
+          sizeBytes: 5,
+        },
+      ],
+    });
+    expect(asked.map((request) => request.hereOnly)).toEqual([
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+    ]);
+    // A worktree on a named machine is branched from a ref there, not the project's checkout.
+    const worktree = yield* launchAuto(box, {
+      environmentId: box,
+      workspaceStrategy: { type: "worktree", baseRef: "main" },
+    });
+    expect(worktree.result).not.toHaveProperty("checkout");
+    expect(sent).toHaveLength(4);
+    // Only a launch in the project's own checkout is checked: not the unnamed, scratch, worktree or attachment ones.
+    expect(checked).toHaveLength(3);
   }),
 );

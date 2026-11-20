@@ -20,6 +20,7 @@ import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "../../../orchestration-v2/ThreadMessageIntake.ts";
 import * as Claims from "../../../orchestration-v2/AttachmentClaims.ts";
 import * as Project from "../../../project/ProjectService.ts";
+import * as ProjectCheckout from "../../../project/ProjectCheckout.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import { mutateProjectWithClone } from "../../../project/ProjectMutation.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
@@ -464,6 +465,16 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
       }),
     // The launched thread carries the caller's link, if it has one.
     "stamped",
+    // Attachments are pending uploads here, and only a project's checkout is the same on every machine.
+    (input) => ({
+      projectId: input.projectId,
+      providerInstanceId: input.modelSelection?.instanceId,
+      model: input.modelSelection?.model,
+      hereOnly:
+        input.scratch === true ||
+        (input.attachments?.length ?? 0) > 0 ||
+        (input.workspaceStrategy !== undefined && input.workspaceStrategy.type !== "root"),
+    }),
   ),
   t3_project_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
@@ -484,7 +495,9 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           code: "invalid_request",
           message: "The project was not found.",
         });
-      return (yield* withSavedDefaultModel)(result.value);
+      const project = (yield* withSavedDefaultModel)(result.value);
+      const checkout = yield* ProjectCheckout.ProjectCheckout;
+      return { ...project, head: yield* checkout.head(project.workspaceRoot) };
     }),
   ),
   t3_project_create: McpToolAccess.writesEnvironment(

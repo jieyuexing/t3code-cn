@@ -5,6 +5,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   EventId,
+  type EnvironmentMachineKind,
+  type HostResourcesSnapshot,
   MessageId,
   type ModelSelection,
   NodeId,
@@ -16,8 +18,8 @@ import {
   ProviderThreadId,
   type Project,
   type RepositoryIdentity,
-  RunId,
   type ServerProvider,
+  RunId,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -56,10 +58,12 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ProjectCheckout from "../project/ProjectCheckout.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as HostResources from "../resourceTelemetry/HostResources.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -80,6 +84,9 @@ import * as PeerLinkRequests from "./PeerLinkRequests.ts";
 const laptop = descriptorOf("environment-laptop", "Laptop");
 const box = descriptorOf("environment-box", "Box");
 const boxProject = ProjectId.make("project:box");
+const boxOtherRepository = ProjectId.make("project:box-elsewhere");
+/** A project on the laptop whose repository the box does not have. */
+const laptopOtherProject = ProjectId.make("project:laptop-other");
 const instanceId = ProviderInstanceId.make("codex");
 const driver = ProviderDriverKind.make("codex");
 const modelSelection = { instanceId, model: "gpt-5.4" };
@@ -88,6 +95,32 @@ type LaunchedWith = Pick<
   ThreadLaunch.ThreadLaunchInput,
   "modelSelection" | "runtimeMode" | "interactionMode"
 >;
+
+const idle: HostResourcesSnapshot = {
+  sampledAt: 0,
+  cpuUtilization: 0.1,
+  cpuCount: 8,
+  availableMemoryBytes: 12 * 1024 ** 3,
+  totalMemoryBytes: 16 * 1024 ** 3,
+};
+const busy: HostResourcesSnapshot = { ...idle, cpuUtilization: 0.8 };
+const commit = "0123456789abcdef0123456789abcdef01234567";
+const otherCommit = "fedcba9876543210fedcba9876543210fedcba98";
+
+/** The provider the box lists: ready, signed in, with the model the tasks ask for. */
+const codexReady: ServerProvider = {
+  instanceId,
+  driver,
+  enabled: true,
+  installed: true,
+  version: "test",
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-09-13T00:00:00.000Z",
+  models: [{ slug: "gpt-5.4", name: "gpt-5.4", isCustom: false, capabilities: null }],
+  slashCommands: [],
+  skills: [],
+};
 
 /** The thread the box launches for the task, which the test finishes. */
 interface TimelineEntry {
@@ -154,6 +187,12 @@ interface BoxThread {
   readonly sent: Ref.Ref<ReadonlyArray<string>>;
   /** Runs as the launch there is answered, before the laptop hears back. */
   readonly afterLaunch: Ref.Ref<Effect.Effect<void>>;
+  /** What the box reports for its own load; `Effect.never` is a machine that does not answer. */
+  readonly load: Ref.Ref<Effect.Effect<HostResourcesSnapshot>>;
+  /** The providers the box lists. */
+  readonly providers: Ref.Ref<ReadonlyArray<ServerProvider>>;
+  /** The commit the box's checkout is at; null when it cannot say. */
+  readonly head: Ref.Ref<string | null>;
 }
 
 const makeBoxThread = Effect.gen(function* () {
@@ -196,6 +235,9 @@ const makeBoxThread = Effect.gen(function* () {
     releaseStop: yield* Deferred.make<void>(),
     sent: yield* Ref.make<ReadonlyArray<string>>([]),
     afterLaunch: yield* Ref.make<Effect.Effect<void>>(Effect.void),
+    load: yield* Ref.make<Effect.Effect<HostResourcesSnapshot>>(Effect.succeed(idle)),
+    providers: yield* Ref.make<ReadonlyArray<ServerProvider>>([codexReady]),
+    head: yield* Ref.make<string | null>(commit),
   } satisfies BoxThread;
 });
 
@@ -212,6 +254,24 @@ const boxProjects: ReadonlyArray<Project> = [
     updatedAt: "2026-10-01T00:00:00.000Z",
     deletedAt: null,
   })),
+  {
+    id: boxOtherRepository,
+    title: "elsewhere",
+    workspaceRoot: "/srv/elsewhere",
+    repositoryIdentity: {
+      canonicalKey: "github.com/acme/elsewhere",
+      locator: {
+        source: "git-remote",
+        remoteName: "origin",
+        remoteUrl: "git@github.com:acme/elsewhere.git",
+      },
+    },
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+    deletedAt: null,
+  },
   {
     id: boxProject,
     title: "app",
@@ -232,8 +292,8 @@ const boxProjects: ReadonlyArray<Project> = [
   },
 ];
 
-const serveBox = (thread: BoxThread) => {
-  return servePeer(box, boxToolkitLayer(thread));
+const serveBox = (thread: BoxThread, descriptor = box) => {
+  return servePeer(descriptor, boxToolkitLayer(thread));
 };
 
 const boxRunId = RunId.make("run:box");
@@ -569,9 +629,10 @@ const boxToolkitLayer = (thread: BoxThread) => {
         ),
       ),
   });
-  return Layer.merge(
+  return Layer.mergeAll(
     McpHttpServer.layerOrchestratorToolkit,
     McpHttpServer.layerProjectRegistration,
+    McpHttpServer.layerEnvironmentToolkit,
   ).pipe(
     Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
     Layer.provide(NodeCrypto.layer),
@@ -593,12 +654,14 @@ const boxToolkitLayer = (thread: BoxThread) => {
     ),
     Layer.provide(
       Layer.mock(ProviderRegistry.ProviderRegistry)({
-        getProviders: Effect.succeed([boxClaude]),
+        getProviders: Ref.get(thread.providers).pipe(
+          Effect.map((providers) => [...providers, boxClaude]),
+        ),
       }),
     ),
     Layer.provide(
       Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
-        list: () => Effect.succeed([boxClaude.instanceId]),
+        list: () => Effect.succeed([instanceId, boxClaude.instanceId]),
       }),
     ),
     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
@@ -614,9 +677,19 @@ const boxToolkitLayer = (thread: BoxThread) => {
           }),
       }),
     ),
-    Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
+        Layer.mock(ProjectCheckout.ProjectCheckout)({ head: () => Ref.get(thread.head) }),
+      ),
+    ),
     Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
-    Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(
+      Layer.mergeAll(
+        ServerSettings.layerTest(),
+        Layer.mock(HostResources.HostResources)({ read: Effect.flatten(Ref.get(thread.load)) }),
+      ),
+    ),
     Layer.provide(NodeServices.layer),
   );
 };
@@ -674,9 +747,35 @@ const makeLaptop = (
   kept?: Context.Context<Layer.Success<ReturnType<typeof layerLinkingEnvironment>>>,
   /** Runs as each follow attempt here starts, on its follower's fiber. */
   beforeFollow: Effect.Effect<void, Orchestrator.OrchestratorV2Error> = Effect.void,
+  load: HostResourcesSnapshot = idle,
+  descriptor = laptop,
 ) =>
   Effect.gen(function* () {
-    const linking = kept ?? (yield* layerLinkingEnvironment(laptop).pipe(Layer.build));
+    const checkout = yield* Ref.make<{ head: string | null; uncommitted: boolean }>({
+      head: commit,
+      uncommitted: false,
+    });
+    // A box on an older version does not send `head`.
+    const olderBox = yield* Ref.make(false);
+    const layerForwarding = Layer.effect(
+      PeerForwarding.PeerForwarding,
+      Effect.map(PeerForwarding.PeerForwarding, (forwarding) => ({
+        ...forwarding,
+        call: ((scope, tool, environmentId, params) =>
+          forwarding.call(scope, tool, environmentId, params).pipe(
+            Effect.flatMap((result) =>
+              Ref.get(olderBox).pipe(
+                Effect.map((older) => {
+                  if (!older || tool.name !== "t3_project_read") return result;
+                  const { head: _head, ...rest } = result as { head?: unknown };
+                  return rest as typeof result;
+                }),
+              ),
+            ),
+          )) as typeof forwarding.call,
+      })),
+    ).pipe(Layer.provide(PeerForwarding.layer));
+    const linking = kept ?? (yield* layerLinkingEnvironment(descriptor).pipe(Layer.build));
     const layerDatabase = Layer.succeedContext(database);
     const layerOrchestrator = Layer.mergeAll(
       layerDatabase,
@@ -715,13 +814,13 @@ const makeLaptop = (
               }),
             ),
           ),
-          Layer.provideMerge(PeerForwarding.layer),
+          Layer.provideMerge(layerForwarding),
           Layer.provide(
             Layer.mock(ProjectService.ProjectService)({
               // A cold enrichment cache: the project itself reports no identity yet.
-              getById: () =>
+              getById: (id) =>
                 Effect.succeedSome({
-                  workspaceRoot: "/home/me/app",
+                  workspaceRoot: id === laptopOtherProject ? "/home/me/other" : "/home/me/app",
                   repositoryIdentity: null,
                 } as never),
             }),
@@ -732,8 +831,18 @@ const makeLaptop = (
                 Effect.succeed(
                   cwd === "/home/me/app"
                     ? ({ canonicalKey: "github.com/acme/app" } as RepositoryIdentity)
-                    : null,
+                    : cwd === "/home/me/other"
+                      ? ({ canonicalKey: "github.com/acme/other" } as RepositoryIdentity)
+                      : null,
                 ),
+            }),
+          ),
+          Layer.provide(Layer.mock(HostResources.HostResources)({ read: Effect.succeed(load) })),
+          Layer.provide(
+            Layer.mock(ProjectCheckout.ProjectCheckout)({
+              head: () => Ref.get(checkout).pipe(Effect.map((state) => state.head)),
+              hasTrackedChanges: () =>
+                Ref.get(checkout).pipe(Effect.map((state) => state.uncommitted)),
             }),
           ),
         ),
@@ -742,7 +851,9 @@ const makeLaptop = (
       Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
       Layer.provide(NodeCrypto.layer),
       Layer.provideMerge(layerThreads),
-      Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
+      Layer.provide(
+        Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      ),
       Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
@@ -755,6 +866,9 @@ const makeLaptop = (
     const here = yield* Layer.build(layerHere);
     const server = Context.get(here, McpServer.McpServer);
     return {
+      /** What this machine's checkout of the project is at. */
+      checkout,
+      olderBox,
       links: Context.get(linking, PeerLinks.PeerLinks),
       settings: Context.get(linking, ServerSettings.ServerSettingsService),
       orchestrator: Context.get(here, Orchestrator.OrchestratorV2),
@@ -1089,8 +1203,9 @@ it.effect("a task delegated to the box wakes the laptop's parent when it ends th
         summary: "All 412 tests pass on the box.",
       });
       // Delivery validation still reads messages; choosing the observer does not need another read.
-      expect(messageReads).toHaveLength(2);
-      expect(messageReads.filter((query) => !/\bmessage_id\s+IN\b/i.test(query))).toHaveLength(1);
+      // The checkout comparison made now that the task ended reads the parent's project: two more thread reads.
+      expect(messageReads).toHaveLength(4);
+      expect(messageReads.filter((query) => !/\bmessage_id\s+IN\b/i.test(query))).toHaveLength(3);
       const acknowledged = yield* a.projections.getThreadRecords(parentThreadId, ["subagents"], {
         subagentIds: [delegated.taskId],
       });
@@ -2782,6 +2897,511 @@ it.effect("a local task runs in this thread's project", () =>
       });
       expect(result.isError).toBe(true);
       expect(JSON.stringify(result.content)).toContain("invalid_request");
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+const withMachine = (descriptor: typeof box, machine: EnvironmentMachineKind | undefined) =>
+  machine === undefined
+    ? descriptor
+    : { ...descriptor, platform: { ...descriptor.platform, machine } };
+
+/** The laptop (busy by default) linked to the box, whose load the test sets through `thread.load`. */
+const autoPlacement = (
+  access: Parameters<typeof linkTo>[2] = "full-access",
+  laptopLoad: HostResourcesSnapshot = busy,
+  machines: {
+    readonly laptop?: EnvironmentMachineKind;
+    readonly box?: EnvironmentMachineKind;
+    readonly boxWeight?: number;
+  } = {},
+) =>
+  Effect.gen(function* () {
+    const thread = yield* makeBoxThread;
+    const b = yield* serveBox(thread, withMachine(box, machines.box));
+    const offers = yield* SubscriptionRef.make<
+      ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+    >([]);
+    const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+    const a = yield* makeLaptop(
+      database,
+      offers,
+      undefined,
+      undefined,
+      laptopLoad,
+      withMachine(laptop, machines.laptop),
+    );
+    yield* linkTo(a.links, b, access);
+    if (machines.boxWeight !== undefined) {
+      yield* b.settings.updateSettings({ loadBalancingWeight: machines.boxWeight });
+    }
+    yield* seedParent(a);
+    return { thread, a };
+  });
+
+const here = { environmentId: undefined, projectId: undefined };
+
+it.effect("auto places a task on the less loaded machine, and ties stay here", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual({
+        environmentId: box.environmentId,
+        projectId: boxProject,
+      });
+
+      yield* Ref.set(thread.load, Effect.succeed(busy));
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+
+      // The task itself goes where the placement said.
+      yield* Ref.set(thread.load, Effect.succeed(idle));
+      const result = yield* a.call("delegate_task", {
+        task: "Run the suite wherever it is quiet.",
+        target: { environmentId: "auto", providerInstanceId: instanceId, model: "gpt-5.4" },
+      });
+      expect(result.isError, JSON.stringify(result.content)).toBe(false);
+      expect(result.structuredContent).toMatchObject({
+        remoteChild: { environmentId: box.environmentId },
+      });
+      expect(yield* Ref.get(thread.launched)).not.toBeNull();
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+// The laptop here starts busy and the box quiet, unless a row says otherwise.
+it.effect.each([
+  { name: "a quiet box that declares nothing, like an older version, wins", placed: "box" },
+  {
+    name: "an always-on box outweighs a laptop here when both are quiet",
+    kinds: { laptop: "laptop", box: "server" },
+    laptopLoad: idle,
+    placed: "box",
+  },
+  {
+    name: "a laptop box does not outweigh an always-on machine here",
+    kinds: { laptop: "server", box: "laptop" },
+    laptopLoad: idle,
+    placed: "here",
+  },
+  {
+    name: "a weight the box declares outweighs the same quiet machine without one",
+    kinds: {},
+    laptopLoad: idle,
+    boxWeight: 100,
+    placed: "box",
+  },
+  {
+    name: "a weight the box declares beats its kind",
+    kinds: { box: "server" },
+    laptopLoad: idle,
+    boxWeight: 10,
+    placed: "here",
+  },
+  {
+    name: "a box that declares zero is never chosen",
+    kinds: { box: "server" },
+    boxWeight: 0,
+    placed: "here",
+  },
+  {
+    name: "a weight declared here can outweigh a quieter box",
+    kinds: {},
+    boxWeight: 20,
+    localWeight: 100,
+    placed: "here",
+  },
+  {
+    name: "this machine declaring zero leaves it out",
+    kinds: {},
+    laptopLoad: idle,
+    boxLoad: busy,
+    localWeight: 0,
+    placed: "box",
+  },
+] as const satisfies ReadonlyArray<{
+  readonly name: string;
+  readonly kinds?: { laptop?: EnvironmentMachineKind; box?: EnvironmentMachineKind };
+  readonly laptopLoad?: HostResourcesSnapshot;
+  readonly boxLoad?: HostResourcesSnapshot;
+  readonly boxWeight?: number;
+  readonly localWeight?: number;
+  readonly placed: "box" | "here";
+}>)("auto weighs machines: $name", (row) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement("full-access", row.laptopLoad ?? busy, {
+        ...row.kinds,
+        ...("boxWeight" in row ? { boxWeight: row.boxWeight } : {}),
+      });
+      if ("boxLoad" in row) yield* Ref.set(thread.load, Effect.succeed(row.boxLoad));
+      if ("localWeight" in row) {
+        yield* a.settings.updateSettings({ loadBalancingWeight: row.localWeight });
+      }
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(
+        row.placed === "box" ? { environmentId: box.environmentId, projectId: boxProject } : here,
+      );
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("auto leaves out a machine that is not a candidate", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const placed = a.remote.place(parentScope, { hereOnly: false });
+
+      // Without this repository there, or when only this machine can run it.
+      expect(
+        yield* a.remote.place(parentScope, { hereOnly: false, projectId: laptopOtherProject }),
+      ).toEqual(here);
+      expect(yield* a.remote.place(parentScope, { hereOnly: true })).toEqual(here);
+
+      // Another commit there, or one it cannot say, is not the code this machine has.
+      const there = { environmentId: box.environmentId, projectId: boxProject };
+      yield* Ref.set(thread.head, otherCommit);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      yield* Ref.set(thread.head, null);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      // Nor is any machine a match for a checkout here that cannot say.
+      yield* Ref.set(thread.head, commit);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(there);
+      yield* Ref.set(a.checkout, { head: null, uncommitted: false });
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      // Two commits that cannot be read are not the same commit.
+      yield* Ref.set(thread.head, null);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      yield* Ref.set(thread.head, commit);
+      // A box on an older version sends no commit to match.
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
+      yield* Ref.set(a.olderBox, true);
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      yield* Ref.set(a.olderBox, false);
+      // Edits here do not rule the other machine out.
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: true });
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(there);
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
+
+      // With linked environments off, nothing is asked of the box.
+      yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: false });
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
+      yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: true });
+
+      // A silent box is given up on, not waited for.
+      const asked = yield* Deferred.make<void>();
+      yield* Ref.set(
+        thread.load,
+        Deferred.succeed(asked, undefined).pipe(Effect.andThen(Effect.never)),
+      );
+      const waiting = yield* Effect.forkChild(placed);
+      yield* Deferred.await(asked);
+      yield* TestClock.adjust("3 seconds");
+      expect(yield* Fiber.join(waiting)).toEqual(here);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a task says whether the checkout it runs on is at the code here", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const delegate = Effect.fn("test.delegate")(function* (
+        environmentId: string,
+        projectId?: ProjectId,
+      ) {
+        const result = yield* a.call("delegate_task", {
+          task: "Run the suite.",
+          target: {
+            environmentId,
+            ...(projectId === undefined ? {} : { projectId }),
+            providerInstanceId: instanceId,
+            model: "gpt-5.4",
+          },
+          mode: "async",
+        });
+        expect(result.isError, JSON.stringify(result.content)).toBe(false);
+        return result.structuredContent as { checkout?: unknown };
+      });
+      const short = (sha: string) => sha.slice(0, 8);
+
+      // The same commit and nothing edited: nothing to say.
+      expect(yield* delegate(box.environmentId)).not.toHaveProperty("checkout");
+
+      // Another commit there: the task still runs, and both commits are named.
+      yield* Ref.set(thread.head, otherCommit);
+      expect(yield* delegate(box.environmentId)).toMatchObject({
+        checkout: { here: short(commit), there: short(otherCommit) },
+      });
+      expect(yield* Ref.get(thread.launched)).not.toBeNull();
+
+      // A project there with another repository has no commit to compare.
+      expect(yield* delegate(box.environmentId, boxOtherRepository)).not.toHaveProperty("checkout");
+
+      // An older box has nothing to compare: the task runs and the result says nothing.
+      yield* Ref.set(a.olderBox, true);
+      expect(yield* delegate(box.environmentId)).not.toHaveProperty("checkout");
+      yield* Ref.set(a.olderBox, false);
+
+      // A commit it cannot read, on either side, is said so.
+      yield* Ref.set(thread.head, null);
+      expect(yield* delegate(box.environmentId)).toMatchObject({
+        checkout: { here: short(commit), there: null },
+      });
+      yield* Ref.set(thread.head, commit);
+      yield* Ref.set(a.checkout, { head: null, uncommitted: false });
+      expect(yield* delegate(box.environmentId)).toMatchObject({
+        checkout: { here: null, there: short(commit) },
+      });
+
+      // Edits here never reach the box, at the same commit or when auto picks it.
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: true });
+      const edited = { here: short(commit), there: short(commit), uncommittedHere: true };
+      expect(yield* delegate(box.environmentId)).toMatchObject({ checkout: edited });
+      expect(yield* delegate("auto")).toMatchObject({ checkout: edited });
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
+      expect(yield* delegate("auto")).not.toHaveProperty("checkout");
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a task that ends says where the checkout stood when it ended", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const short = (sha: string) => sha.slice(0, 8);
+      const launched = yield* Deferred.make<void>();
+      yield* Ref.set(thread.afterLaunch, Deferred.succeed(launched, undefined));
+
+      // At the launch both are at the same commit; the box moves on while the task runs.
+      const waiting = yield* a
+        .call("delegate_task", {
+          task: "Run the suite.",
+          target: {
+            environmentId: box.environmentId,
+            providerInstanceId: instanceId,
+            model: "gpt-5.4",
+          },
+          mode: "wait",
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(launched);
+      yield* Ref.set(thread.head, otherCommit);
+      yield* Ref.set(thread.reply, "Done there.");
+      yield* Ref.set(thread.status, "completed");
+      yield* Deferred.succeed(thread.finished, undefined);
+      const ended = yield* Fiber.join(waiting);
+      expect(ended.isError, JSON.stringify(ended.content)).toBe(false);
+      expect(ended.structuredContent).toMatchObject({
+        status: "completed",
+        checkout: { here: short(commit), there: short(otherCommit) },
+      });
+
+      // A later read of the same task compares again.
+      const status = (taskId: unknown) => a.call("task_status", { taskId });
+      const { taskId } = ended.structuredContent as { taskId: NodeId };
+      expect((yield* status(taskId)).structuredContent).toMatchObject({
+        checkout: { here: short(commit), there: short(otherCommit) },
+      });
+      yield* Ref.set(thread.head, commit);
+      expect((yield* status(taskId)).structuredContent).not.toHaveProperty("checkout");
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: true });
+      expect((yield* status(taskId)).structuredContent).toMatchObject({
+        checkout: { here: short(commit), there: short(commit), uncommittedHere: true },
+      });
+      yield* Ref.set(a.checkout, { head: commit, uncommitted: false });
+
+      // A commit the box cannot say, or a box that does not answer in time, leaves `there` empty.
+      yield* Ref.set(thread.head, null);
+      expect((yield* status(taskId)).structuredContent).toMatchObject({
+        checkout: { here: short(commit), there: null },
+      });
+      yield* Ref.set(thread.head, commit);
+      yield* Ref.set(thread.holdRead, true);
+      const silent = yield* Effect.forkChild(status(taskId));
+      yield* Deferred.await(thread.readStarted);
+      yield* TestClock.adjust("3 seconds");
+      expect((yield* Fiber.join(silent)).structuredContent).toMatchObject({
+        checkout: { here: short(commit), there: null },
+      });
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("an ended task is not blamed for a difference that was gone by then", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const launched = yield* Deferred.make<void>();
+      yield* Ref.set(thread.afterLaunch, Deferred.succeed(launched, undefined));
+      yield* Ref.set(thread.head, otherCommit);
+
+      const waiting = yield* a
+        .call("delegate_task", {
+          task: "Run the suite.",
+          target: {
+            environmentId: box.environmentId,
+            providerInstanceId: instanceId,
+            model: "gpt-5.4",
+          },
+          mode: "wait",
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(launched);
+      // The box was behind at the launch and has caught up by the time it ends.
+      yield* Ref.set(thread.head, commit);
+      yield* Ref.set(thread.reply, "Done there.");
+      yield* Ref.set(thread.status, "completed");
+      yield* Deferred.succeed(thread.finished, undefined);
+      const ended = yield* Fiber.join(waiting);
+      expect(ended.structuredContent).toMatchObject({ status: "completed" });
+      expect(ended.structuredContent).not.toHaveProperty("checkout");
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect(
+  "auto runs a task naming a driver where an instance of it can run, not on the parent's",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // The box has the parent's codex instance and a claude one; the parent runs codex.
+        const { a } = yield* autoPlacement();
+        const there = { environmentId: box.environmentId, projectId: boxProject };
+        const claude = {
+          hereOnly: false,
+          providerInstanceId: "inherit",
+          driverKind: boxClaude.driver,
+          model: "claude-sonnet-4-6",
+        } as const;
+
+        // Without the driver, the parent's instance is asked for a model it does not have.
+        expect(yield* a.remote.place(parentScope, { ...claude, driverKind: undefined })).toEqual(
+          here,
+        );
+        expect(yield* a.remote.place(parentScope, claude)).toEqual(there);
+        expect(yield* a.remote.place(parentScope, { ...claude, model: "claude-opus-9" })).toEqual(
+          here,
+        );
+
+        // A driver the box has no instance of, and an instance named of another driver.
+        expect(
+          yield* a.remote.place(parentScope, {
+            ...claude,
+            driverKind: ProviderDriverKind.make("grok"),
+          }),
+        ).toEqual(here);
+        expect(
+          yield* a.remote.place(parentScope, { ...claude, providerInstanceId: instanceId }),
+        ).toEqual(here);
+        expect(
+          yield* a.remote.place(parentScope, {
+            ...claude,
+            providerInstanceId: boxClaude.instanceId,
+          }),
+        ).toEqual(there);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a follow-up task says where the checkout stood when it ended, like the first", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      yield* a.remote.start();
+      const delegated = yield* delegateToBox(a);
+      yield* Ref.set(thread.reply, "All green.");
+      yield* Ref.set(thread.status, "completed");
+      yield* Deferred.succeed(thread.finished, undefined);
+      yield* taskResult(a, delegated.taskId);
+
+      const sent = yield* a.call("t3_thread_send", {
+        environmentId: box.environmentId,
+        threadId: delegated.remoteChild.threadId,
+        message: "Now run the slow suite too.",
+      });
+      expect(sent.isError, JSON.stringify(sent.content)).toBe(false);
+      const followUpId = (sent.structuredContent as { taskId: NodeId }).taskId;
+
+      // The box moves on while the follow-up runs, then it ends.
+      yield* Ref.set(thread.head, otherCommit);
+      yield* Ref.set(thread.laterReply, "The slow suite passes too.");
+      yield* Deferred.succeed(thread.laterFinished, undefined);
+      yield* taskResult(a, followUpId);
+      const status = yield* a.call("task_status", { taskId: followUpId });
+      expect(status.structuredContent).toMatchObject({
+        status: "completed",
+        checkout: { here: commit.slice(0, 8), there: otherCommit.slice(0, 8) },
+      });
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("auto leaves out a machine whose provider cannot run the task", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const request = { hereOnly: false, providerInstanceId: instanceId, model: "gpt-5.4" };
+      const there = { environmentId: box.environmentId, projectId: boxProject };
+      expect(yield* a.remote.place(parentScope, request)).toEqual(there);
+
+      // The model asked for is not in its catalog.
+      expect(yield* a.remote.place(parentScope, { ...request, model: "gpt-9" })).toEqual(here);
+      yield* a.call("delegate_task", {
+        task: "Run the suite wherever it is quiet.",
+        target: { environmentId: "auto", providerInstanceId: instanceId, model: "gpt-9" },
+      });
+      expect(yield* Ref.get(thread.launched)).toBeNull();
+
+      // The provider is signed out there, whether named or inherited from the thread.
+      yield* Ref.set(thread.providers, [{ ...codexReady, auth: { status: "unauthenticated" } }]);
+      expect(yield* a.remote.place(parentScope, request)).toEqual(here);
+      expect(
+        yield* a.remote.place(parentScope, { hereOnly: false, providerInstanceId: "inherit" }),
+      ).toEqual(here);
+
+      // A task that names only a model uses the thread's provider, which the box cannot run.
+      yield* a.call("delegate_task", {
+        task: "Run the suite wherever it is quiet.",
+        target: { environmentId: "auto", model: "gpt-5.4" },
+      });
+      expect(yield* Ref.get(thread.launched)).toBeNull();
+
+      // No provider named: nothing to check, as for a launch that leaves its model to the box.
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(there);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("auto keeps a task here when a worktree or a project is asked for", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { thread, a } = yield* autoPlacement();
+      const target = { environmentId: "auto", providerInstanceId: instanceId, model: "gpt-5.4" };
+
+      const worktree = yield* a.call("delegate_task", {
+        task: "Branch it.",
+        target,
+        isolation: "worktree",
+      });
+      // It stays on the local path, which this fixture has no provider for;
+      // a placement there would have been refused as unsupported.
+      expect(JSON.stringify(worktree.content)).not.toContain("not supported there");
+
+      const named = yield* a.call("delegate_task", {
+        task: "Run it.",
+        target: { ...target, projectId: boxProject },
+      });
+      expect(named.isError).toBe(true);
+      expect(JSON.stringify(named.content)).toContain("omit target.projectId");
+      expect(yield* Ref.get(thread.launched)).toBeNull();
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("auto does not pick a read-only link", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { a } = yield* autoPlacement("read-only");
+      expect(yield* a.remote.place(parentScope, { hereOnly: false })).toEqual(here);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

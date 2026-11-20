@@ -3333,7 +3333,7 @@ describe("OrchestratorMcpService provider resolution", () => {
                     completionWake: "settled_only",
                   });
                   const parent = yield* orchestrator.getThreadProjection(parentThreadId);
-                  return { taskId: parent.subagents[0]!.id };
+                  return { taskId: parent.subagents[0]!.id, checkout: undefined };
                 }).pipe(Effect.orDie),
               runStatus: () => Effect.succeed(null),
             });

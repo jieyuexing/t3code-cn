@@ -16,7 +16,9 @@ import {
   ProjectUpdatePayload,
   ProjectId,
   OrchestratorMcpClientRequestId,
+  OrchestratorMcpCheckout,
   OrchestratorMcpEnvironmentTarget,
+  EnvironmentId,
   OrchestratorMcpFailure,
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
@@ -32,6 +34,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as ProjectService from "../../../project/ProjectService.ts";
+import * as ProjectCheckout from "../../../project/ProjectCheckout.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -73,6 +76,12 @@ const ProjectReadTool = Tool.make("t3_project_read", {
     environmentId: OrchestratorMcpEnvironmentTarget,
     projectId: ProjectId,
   }),
+  // Null when the checkout cannot be read; left out by linked environments on older versions.
+  success: Schema.Struct({
+    ...Project.fields,
+    head: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+  dependencies: [...shared.dependencies, ProjectCheckout.ProjectCheckout],
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
@@ -162,6 +171,10 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
   }),
   success: Schema.Struct({
     threadId: ThreadId,
+    /** Set when `environmentId` was "auto": the environment that ran it. */
+    environmentId: Schema.optional(EnvironmentId),
+    /** Set for a launch in a linked environment's project checkout; see `OrchestratorMcpCheckout`. */
+    checkout: Schema.optional(OrchestratorMcpCheckout),
     link: Schema.optional(Schema.String),
     projectId: ProjectId,
     modelSelection: ModelSelection,

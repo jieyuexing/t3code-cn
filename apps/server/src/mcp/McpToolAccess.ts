@@ -1,6 +1,8 @@
 import {
   type EnvironmentId,
   type OrchestrationV2LinkOrigin,
+  OrchestratorMcpAutoEnvironment,
+  type OrchestratorMcpCheckout,
   OrchestratorMcpEnvironmentTarget,
   OrchestratorMcpFailure,
   type ProviderInteractionMode,
@@ -23,6 +25,7 @@ import {
   type DispatchModeRefusal,
 } from "../orchestration-v2/DispatchModeLimit.ts";
 import * as PeerForwarding from "../peer/PeerForwarding.ts";
+import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
 import {
   assertFullAccessNamingLink,
   assertNotLinked,
@@ -53,6 +56,7 @@ const refuseOutsideConstruction = (token: symbol) => {
 let declare: <P, A, E, R>(
   handle: (params: P) => Effect.Effect<A, E, R>,
   remote: RemoteCheck<P> | undefined,
+  placement?: (params: P) => RemoteDelegation.PlacementRequest,
   forwarded?: Forwarded<P, A, E, R>,
 ) => Declaration<(params: P) => Effect.Effect<A, E, R>>;
 
@@ -65,6 +69,9 @@ type RemoteCheck<P> = (
   params: P,
 ) => Effect.Effect<unknown, OrchestratorMcpFailure, Effect.Services<typeof writingCaller>>;
 let remoteCheckOf: <Handler>(declaration: Declaration<Handler>) => RemoteCheck<never> | undefined;
+let placementOf: <Handler>(
+  declaration: Declaration<Handler>,
+) => ((params: never) => RemoteDelegation.PlacementRequest) | undefined;
 
 /** What a call answered in a linked environment does here before it returns. */
 type Forwarded<P, A, E, R> = (
@@ -92,28 +99,33 @@ let handlersLayer: <Tools extends Record<string, Tool.Any>, EX, RX>(
 export class Declaration<out Handler> {
   readonly #handle: Handler;
   readonly #remote: RemoteCheck<never> | undefined;
+  readonly #placement: ((params: never) => RemoteDelegation.PlacementRequest) | undefined;
   readonly #forwarded: Forwarded<never, unknown, unknown, unknown> | undefined;
   private constructor(
     token: typeof builtHere,
     handle: Handler,
     remote: RemoteCheck<never> | undefined,
+    placement: ((params: never) => RemoteDelegation.PlacementRequest) | undefined,
     forwarded: Forwarded<never, unknown, unknown, unknown> | undefined,
   ) {
     refuseOutsideConstruction(token);
     this.#handle = handle;
     this.#remote = remote;
+    this.#placement = placement;
     this.#forwarded = forwarded;
   }
   static {
-    declare = (handle, remote, forwarded) =>
+    declare = (handle, remote, placement, forwarded) =>
       new Declaration(
         builtHere,
         handle,
         remote,
+        placement,
         forwarded as Forwarded<never, unknown, unknown, unknown> | undefined,
       );
     checkedHandler = Struct.lambda<CheckedHandler>((declaration) => declaration.#handle);
     remoteCheckOf = (declaration) => declaration.#remote;
+    placementOf = (declaration) => declaration.#placement;
     forwardedOf = (declaration) => declaration.#forwarded;
   }
 }
@@ -263,6 +275,8 @@ export const startsThreads = <P, A, E, R>(
   },
   handle: (params: P, modes: StartedModes) => Effect.Effect<A, E, R>,
   linked: "stamped" | { readonly refused: string },
+  /** Where `environmentId: "auto"` may run this tool; unset, the tool takes no "auto". */
+  placement?: (params: P) => RemoteDelegation.PlacementRequest,
 ) => {
   const started = Effect.fn("McpToolAccess.started")(function* (caller: Caller, params: P) {
     const requested = modes(params);
@@ -283,6 +297,7 @@ export const startsThreads = <P, A, E, R>(
         return yield* handle(params, yield* started(caller, params));
       }),
     (params: P) => Effect.flatMap(writingCaller, (caller) => started(caller, params)),
+    placement,
   );
 };
 
@@ -320,6 +335,7 @@ export const afterForwarding = <P, A, E, R, E2, R2>(
   declare(
     checkedHandler(declaration) as (params: P) => Effect.Effect<A, E | E2, R | R2>,
     remoteCheckOf(declaration) as RemoteCheck<P> | undefined,
+    placementOf(declaration) as ((params: P) => RemoteDelegation.PlacementRequest) | undefined,
     forwarded,
   );
 
@@ -427,6 +443,7 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
 ) {
   // Optional so toolkits that never leave this environment build without it.
   const forwarding = yield* Effect.serviceOption(PeerForwarding.PeerForwarding);
+  const delegation = yield* Effect.serviceOption(RemoteDelegation.RemoteDelegation);
   const handlers: Record<string, unknown> = { ...checked };
   for (const [name, declaration] of Object.entries<Declaration<unknown>>(declarations)) {
     const tool = toolkit.tools[name];
@@ -451,19 +468,59 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
     const here = handlers[name] as (
       params: object,
     ) => Effect.Effect<unknown, Tool.Failure<Tools[keyof Tools]>>;
+    const placement = placementOf(declaration) as
+      | ((params: object) => RemoteDelegation.PlacementRequest)
+      | undefined;
     handlers[name] = ({ environmentId, ...params }: { readonly environmentId?: EnvironmentId }) =>
       Effect.gen(function* () {
         const scope = yield* McpInvocationContext.McpInvocationContext;
-        const target = PeerForwarding.remoteTarget(scope, environmentId);
-        if (target === undefined) return yield* here(params);
+        // "auto" is ours to resolve, and the choice is reported back with the result.
+        const placed =
+          environmentId === OrchestratorMcpAutoEnvironment && placement !== undefined
+            ? Option.isSome(delegation)
+              ? yield* delegation.value.place(scope, placement(params))
+              : { environmentId: undefined, projectId: undefined }
+            : undefined;
+        const chosen = placed === undefined ? environmentId : placed.environmentId;
+        const reported = <A>(result: A, checkout?: OrchestratorMcpCheckout) =>
+          placed === undefined && checkout === undefined
+            ? result
+            : {
+                ...result,
+                ...(placed === undefined ? {} : { environmentId: chosen ?? scope.environmentId }),
+                ...(checkout === undefined ? {} : { checkout }),
+              };
+        const target = PeerForwarding.remoteTarget(scope, chosen);
+        if (target === undefined) return reported(yield* here(params));
         if (scope.linkedEnvironments === false) return yield* PeerForwarding.linkedEnvironmentsOff;
         yield* (remote as RemoteCheck<typeof params>)(params);
         if (Option.isNone(forwarding)) return yield* linksUnavailable;
-        const result = yield* forwarding.value.call(scope, tool, target, {
+        // A launch in the project's own checkout runs on the code that is there.
+        const request = placement?.(params);
+        const thereProjectId = placed?.projectId ?? request?.projectId;
+        const forwardedCall = forwarding.value.call(scope, tool, target, {
           ...params,
-          environmentId,
+          // The project there that has the repository, not the id here.
+          ...(placed?.projectId === undefined ? {} : { projectId: placed.projectId }),
+          environmentId: target,
         });
-        return forwarded === undefined ? result : yield* forwarded(params, target, result);
+        const [result, checkout] = yield* Effect.all(
+          [
+            forwarded === undefined
+              ? forwardedCall
+              : forwardedCall.pipe(Effect.flatMap((result) => forwarded(params, target, result))),
+            Option.isSome(delegation) && request?.hereOnly === false && thereProjectId !== undefined
+              ? delegation.value.checkout(scope, {
+                  environmentId: target,
+                  projectId: thereProjectId,
+                  // With "auto" the project here is the one asked for, not the thread's; a named one is the other machine's.
+                  hereProjectId: placed === undefined ? undefined : request.projectId,
+                })
+              : Effect.undefined,
+          ],
+          { concurrency: 2 },
+        );
+        return reported(result, checkout);
       });
   }
   return handlers as Toolkit.HandlersFrom<Tools>;

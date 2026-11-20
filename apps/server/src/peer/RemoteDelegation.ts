@@ -5,6 +5,7 @@ import {
   OrchestratorMcpCapabilitiesInput,
   OrchestratorMcpCapabilitiesResult,
   OrchestratorMcpFailure,
+  type OrchestratorMcpCheckout,
   type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpTaskCancelResult,
   type OrchestratorMcpThreadRun,
@@ -32,8 +33,13 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as Tool from "effect/ai/Tool";
 import { withExecutedModelNote } from "@t3tools/provider-core/server/subagentProjection";
+import {
+  chooseLoadBalancedEnvironment,
+  resolveLoadBalancingWeight,
+} from "@t3tools/shared/loadBalancing";
 
 import type * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
+import { EnvironmentToolkit } from "../mcp/toolkits/environment/tools.ts";
 import { ProjectToolkit } from "../mcp/toolkits/project/tools.ts";
 import {
   resolveInteractionMode,
@@ -44,8 +50,11 @@ import { followUpOwnerRun } from "../orchestration-v2/CommandPolicy.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ProjectCheckout from "../project/ProjectCheckout.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as HostResources from "../resourceTelemetry/HostResources.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as PeerForwarding from "./PeerForwarding.ts";
 import * as PeerLinks from "./PeerLinks.ts";
@@ -69,7 +78,40 @@ export const FollowRetrySchedule = Context.Reference<Schedule.Schedule<unknown>>
   },
 );
 
+/** Reading a linked machine's load, projects and checkout, so a sleeping one cannot hold up a placement. */
+const PLACEMENT_READ_TIMEOUT = Duration.seconds(3);
+
 type ThreadScope = McpInvocationContext.McpThreadInvocationScope;
+
+const shortCommit = (commit: string | null) => commit?.slice(0, 8) ?? null;
+
+interface HereCheckout {
+  readonly head: string | null;
+  readonly uncommitted: boolean;
+  /** The repository's canonical key, to tell a project there with another repository. */
+  readonly key: string | undefined;
+}
+const unreadableHere: HereCheckout = { head: null, uncommitted: false, key: undefined };
+
+export interface PlacementRequest {
+  /** The project here whose repository the other machine must have. Default: the calling thread's. */
+  readonly projectId?: ProjectId | undefined;
+  /** The request has a form only this machine runs, such as attachments or a worktree. */
+  readonly hereOnly: boolean;
+  /** The provider instance the work runs on; "inherit" is the calling thread's own. */
+  readonly providerInstanceId?: ProviderInstanceId | "inherit" | undefined;
+  /** Run on an instance of this driver there, as `target.driverKind` does; `providerInstanceId` then only names the one to prefer. */
+  readonly driverKind?: ProviderDriverKind | undefined;
+  /** A model that must be in that provider's catalog there. */
+  readonly model?: string | undefined;
+}
+
+/** Where an `"auto"` request runs. `environmentId` is undefined for this machine. */
+export interface Placement {
+  readonly environmentId: EnvironmentId | undefined;
+  /** The project there that has this project's repository. */
+  readonly projectId: ProjectId | undefined;
+}
 
 /** `orchestrator_capabilities` there. Its toolkit imports this module, so it is described here. */
 const RemoteCapabilitiesTool = Tool.make("orchestrator_capabilities", {
@@ -78,6 +120,40 @@ const RemoteCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   failure: OrchestratorMcpFailure,
   failureMode: "return",
 });
+
+type RemoteProvider = OrchestratorMcpCapabilitiesResult["providers"][number];
+
+/**
+ * The instance there of the driver the caller named, preferring the one this thread runs on, as a
+ * task here does. A named instance is taken as given unless it belongs to another driver.
+ */
+const chooseRemoteInstance = (
+  providers: ReadonlyArray<RemoteProvider>,
+  requested: {
+    readonly driverKind: ProviderDriverKind;
+    readonly providerInstanceId: ProviderInstanceId | undefined;
+    readonly inheritedInstanceId: ProviderInstanceId | undefined;
+  },
+):
+  | { readonly found: ProviderInstanceId }
+  | { readonly otherDriver: RemoteProvider }
+  | { readonly none: true } => {
+  if (requested.providerInstanceId !== undefined) {
+    const named = providers.find(
+      (provider) => provider.providerInstanceId === requested.providerInstanceId,
+    );
+    return named !== undefined && named.driverKind !== requested.driverKind
+      ? { otherDriver: named }
+      : { found: requested.providerInstanceId };
+  }
+  const candidates = providers.filter(
+    (provider) => provider.driverKind === requested.driverKind && provider.canRunChildTask,
+  );
+  const chosen =
+    candidates.find((provider) => provider.providerInstanceId === requested.inheritedInstanceId) ??
+    candidates[0];
+  return chosen === undefined ? { none: true } : { found: chosen.providerInstanceId };
+};
 
 /**
  * `delegate_task` to a linked environment. The task's child is an ordinary
@@ -95,7 +171,43 @@ export class RemoteDelegation extends Context.Service<
           readonly environmentId: EnvironmentId;
         };
       },
-    ) => Effect.Effect<{ readonly taskId: NodeId }, OrchestratorMcpFailure>;
+    ) => Effect.Effect<
+      { readonly taskId: NodeId; readonly checkout: OrchestratorMcpCheckout | undefined },
+      OrchestratorMcpFailure
+    >;
+    /**
+     * Where the project's checkout there stands against this machine's, or
+     * undefined when the commits match and nothing is edited here. Unreadable
+     * in time counts as unreadable.
+     */
+    readonly checkout: (
+      scope: McpInvocationContext.McpInvocationScope,
+      request: {
+        /** The project there. */
+        readonly projectId: ProjectId;
+        readonly environmentId: EnvironmentId;
+        /** The project here. Default: the calling thread's. */
+        readonly hereProjectId?: ProjectId | undefined;
+      },
+    ) => Effect.Effect<OrchestratorMcpCheckout | undefined>;
+    /**
+     * `checkout` for a task whose thread there has ended: the project there is the
+     * thread's, and a commit that moved or edits made while it ran show up here.
+     */
+    readonly finishedCheckout: (
+      scope: ThreadScope,
+      task: OrchestrationV2Subagent,
+    ) => Effect.Effect<OrchestratorMcpCheckout | undefined>;
+    /**
+     * The least loaded of this machine and the linked ones that answer, have
+     * the project's repository once at this machine's commit, and report their load. This machine when
+     * none of them qualifies, including itself, or when the request is
+     * `hereOnly`.
+     */
+    readonly place: (
+      scope: McpInvocationContext.McpInvocationScope,
+      request: PlacementRequest,
+    ) => Effect.Effect<Placement>;
     /**
      * A `t3_thread_send` there that started or queued a run on the thread of
      * one of this thread's tasks that has its result: like a follow-up to a
@@ -160,10 +272,12 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectService.ProjectService;
   const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+  const hostResources = yield* HostResources.HostResources;
+  const checkouts = yield* ProjectCheckout.ProjectCheckout;
   const random = yield* SecureRandom.SecureRandom;
-  const hereId = yield* ServerEnvironment.ServerEnvironment.pipe(
-    Effect.flatMap((environment) => environment.getEnvironmentId),
-  );
+  const settings = yield* ServerSettings.ServerSettingsService;
+  const hereEnvironment = yield* ServerEnvironment.ServerEnvironment;
+  const hereId = yield* hereEnvironment.getEnvironmentId;
   // Followers live as long as this service, so shutting down stops them.
   const followers = yield* Scope.Scope;
 
@@ -176,30 +290,29 @@ const make = Effect.gen(function* () {
       .getThreadRecords(parentThreadId, ["subagents"], { subagentIds: [taskId] })
       .pipe(Effect.map(({ thread, subagents }) => ({ thread, task: subagents[0] })));
 
-  /** The peer's project with this thread's repository, or the one the caller named. */
-  const resolveRemoteProject = Effect.fn("RemoteDelegation.resolveRemoteProject")(function* (
-    scope: ThreadScope,
-    environmentId: EnvironmentId,
-    parentProjectId: ProjectId,
-    requested: ProjectId | undefined,
-  ) {
-    if (requested !== undefined) return requested;
-    const here = yield* projects.getById(parentProjectId).pipe(
+  /**
+   * The project's repository identity. Its own is a one-minute cache that
+   * reads blank when cold, so resolve it here, as the other side's
+   * t3_project_list does.
+   */
+  const repositoryKeyOf = (projectId: ProjectId) =>
+    projects.getById(projectId).pipe(
       Effect.map(Option.getOrUndefined),
       Effect.orElseSucceed(() => undefined),
+      Effect.flatMap((here) =>
+        here === undefined
+          ? Effect.undefined
+          : repositoryIdentities
+              .resolve(here.workspaceRoot)
+              .pipe(Effect.map((identity) => identity?.canonicalKey)),
+      ),
     );
-    // The project's own identity is a one-minute cache that reads blank when
-    // cold, so resolve it here, as the other side's t3_project_list does.
-    const key =
-      here === undefined
-        ? undefined
-        : (yield* repositoryIdentities.resolve(here.workspaceRoot))?.canonicalKey;
-    if (key === undefined) {
-      return yield* new OrchestratorMcpFailure({
-        code: "target_required",
-        message: "Pass target.projectId: this thread's project has no repository to match there.",
-      });
-    }
+
+  const projectsWithRepository = Effect.fn("RemoteDelegation.projectsWithRepository")(function* (
+    scope: McpInvocationContext.McpInvocationScope,
+    environmentId: EnvironmentId,
+    key: string,
+  ) {
     const matches: Array<{ readonly id: ProjectId; readonly title: string }> = [];
     let cursor: number | null = 0;
     while (cursor !== null) {
@@ -213,6 +326,25 @@ const make = Effect.gen(function* () {
       );
       cursor = listed.nextCursor;
     }
+    return matches;
+  });
+
+  /** The peer's project with this thread's repository, or the one the caller named. */
+  const resolveRemoteProject = Effect.fn("RemoteDelegation.resolveRemoteProject")(function* (
+    scope: ThreadScope,
+    environmentId: EnvironmentId,
+    parentProjectId: ProjectId,
+    requested: ProjectId | undefined,
+  ) {
+    if (requested !== undefined) return requested;
+    const key = yield* repositoryKeyOf(parentProjectId);
+    if (key === undefined) {
+      return yield* new OrchestratorMcpFailure({
+        code: "target_required",
+        message: "Pass target.projectId: this thread's project has no repository to match there.",
+      });
+    }
+    const matches = yield* projectsWithRepository(scope, environmentId, key);
     if (matches.length === 1) return matches[0]!.id;
     return yield* new OrchestratorMcpFailure({
       code: "invalid_request",
@@ -222,6 +354,214 @@ const make = Effect.gen(function* () {
           : `Several projects there have this repository: ${matches.map((project) => `${project.title} (${project.id})`).join(", ")}. Pass target.projectId.`,
     });
   });
+
+  const workspaceRootOf = (projectId: ProjectId) =>
+    projects.getById(projectId).pipe(
+      Effect.map((project) => Option.getOrUndefined(project)?.workspaceRoot),
+      Effect.orElseSucceed(() => undefined),
+    );
+
+  const checkoutHere = Effect.fn("RemoteDelegation.checkoutHere")(function* (
+    projectId: ProjectId,
+  ): Effect.fn.Return<HereCheckout> {
+    const root = yield* workspaceRootOf(projectId);
+    if (root === undefined) return unreadableHere;
+    const [head, uncommitted, key] = yield* Effect.all(
+      [checkouts.head(root), checkouts.hasTrackedChanges(root), repositoryKeyOf(projectId)],
+      { concurrency: 3 },
+    );
+    return { head, uncommitted, key };
+  });
+
+  /** The peer's project and the commit it is at, which is missing when the peer cannot say. */
+  const projectThere = (
+    scope: McpInvocationContext.McpInvocationScope,
+    environmentId: EnvironmentId,
+    projectId: ProjectId,
+  ) => forwarding.call(scope, ProjectToolkit.tools.t3_project_read, environmentId, { projectId });
+
+  const checkout = Effect.fn("RemoteDelegation.checkout")(function* (
+    scope: McpInvocationContext.McpInvocationScope,
+    request: {
+      /** Unknown counts as unreadable there. */
+      readonly projectId: ProjectId | undefined;
+      readonly environmentId: EnvironmentId;
+      readonly hereProjectId?: ProjectId | undefined;
+    },
+  ) {
+    const hereProjectId =
+      request.hereProjectId ??
+      (scope.thread === undefined
+        ? undefined
+        : (yield* threads
+            .getThreadShell(scope.thread.threadId)
+            .pipe(Effect.orElseSucceed(() => null)))?.projectId);
+    if (hereProjectId === undefined) return undefined;
+    // A failed or late read is an unreadable checkout, never a failed call.
+    const [here, there] = yield* Effect.all(
+      [
+        checkoutHere(hereProjectId).pipe(
+          Effect.timeout(PLACEMENT_READ_TIMEOUT),
+          Effect.orElseSucceed(() => unreadableHere),
+        ),
+        request.projectId === undefined
+          ? Effect.succeed(null)
+          : projectThere(scope, request.environmentId, request.projectId).pipe(
+              Effect.timeout(PLACEMENT_READ_TIMEOUT),
+              Effect.orElseSucceed(() => null),
+            ),
+      ],
+      { concurrency: 2 },
+    );
+    // A machine on an older version sends no commit at all, which is not the same as one it cannot read.
+    if (there !== null && there.head === undefined) return undefined;
+    const thereKey = there?.repositoryIdentity?.canonicalKey;
+    // A project there with another repository has no commit to compare.
+    if (here.key !== undefined && thereKey !== undefined && here.key !== thereKey) {
+      return undefined;
+    }
+    const thereHead = there?.head ?? null;
+    if (here.head !== null && here.head === thereHead && !here.uncommitted) return undefined;
+    return {
+      here: shortCommit(here.head),
+      there: shortCommit(thereHead),
+      ...(here.uncommitted ? { uncommittedHere: true as const } : {}),
+    } satisfies OrchestratorMcpCheckout;
+  });
+
+  const place: RemoteDelegation["Service"]["place"] = Effect.fn("RemoteDelegation.place")(
+    function* (scope, request) {
+      const here: Placement = { environmentId: undefined, projectId: undefined };
+      if (request.hereOnly) return here;
+      const shell =
+        scope.thread === undefined
+          ? null
+          : yield* threads
+              .getThreadShell(scope.thread.threadId)
+              .pipe(Effect.orElseSucceed(() => null));
+      const projectId = request.projectId ?? shell?.projectId;
+      const providerInstanceId =
+        request.providerInstanceId === "inherit"
+          ? shell?.modelSelection.instanceId
+          : request.providerInstanceId;
+      if (projectId === undefined) return here;
+      const key = yield* repositoryKeyOf(projectId);
+      if (key === undefined) return here;
+      // Only a machine at this commit runs the task on the same code. Without one here, none matches:
+      // a commit there that cannot be read is null too.
+      const root = yield* workspaceRootOf(projectId);
+      const hereHead = root === undefined ? null : yield* checkouts.head(root);
+      if (hereHead === null) return here;
+      // Not `links.list`, which probes every address of every link before it returns.
+      // A link that is expired or does not answer fails its read below instead.
+      const writable = (yield* links.stored.pipe(Effect.orElseSucceed(() => []))).filter(
+        (link) => link.access !== "read-only",
+      );
+      const read = Effect.fn("RemoteDelegation.placementRead")(function* (
+        environmentId: EnvironmentId,
+      ) {
+        const [environment, matched, capabilities] = yield* Effect.all(
+          [
+            forwarding.call(scope, EnvironmentToolkit.tools.t3_environment_read, environmentId, {
+              environmentId,
+            }),
+            projectsWithRepository(scope, environmentId, key).pipe(
+              Effect.flatMap((matches) =>
+                matches.length === 1
+                  ? projectThere(scope, environmentId, matches[0]!.id).pipe(
+                      Effect.map((project) => ({ id: matches[0]!.id, head: project.head })),
+                    )
+                  : Effect.undefined,
+              ),
+            ),
+            // The default list is short; a model asked for is looked up by name.
+            providerInstanceId === undefined && request.driverKind === undefined
+              ? Effect.void
+              : forwarding.call(scope, RemoteCapabilitiesTool, environmentId, {
+                  environmentId,
+                  ...(request.model === undefined ? {} : { search: request.model }),
+                }),
+          ],
+          { concurrency: 3 },
+        );
+        // What the task would run on there: the instance asked for, or the driver's, as a delegation resolves it.
+        const instanceId =
+          capabilities === undefined || request.driverKind === undefined
+            ? providerInstanceId
+            : (() => {
+                const chosen = chooseRemoteInstance(capabilities.providers, {
+                  driverKind: request.driverKind,
+                  providerInstanceId:
+                    request.providerInstanceId === "inherit"
+                      ? undefined
+                      : request.providerInstanceId,
+                  inheritedInstanceId: providerInstanceId,
+                });
+                return "found" in chosen ? chosen.found : undefined;
+              })();
+        const providerUsable =
+          capabilities === undefined ||
+          capabilities.providers.some(
+            (provider) =>
+              provider.providerInstanceId === instanceId &&
+              provider.canRunChildTask &&
+              (request.model === undefined ||
+                provider.models.some((model) => model.id === request.model)),
+          );
+        return environment.hostResources === undefined ||
+          matched === undefined ||
+          matched.head !== hereHead ||
+          !providerUsable
+          ? undefined
+          : {
+              environmentId,
+              projectId: matched.id,
+              resources: environment.hostResources,
+              machine: environment.platform.machine,
+              declared: environment.preferences.loadBalancingWeight,
+            };
+      });
+      // Anything that keeps a machine from answering in time leaves it out.
+      const there = (yield* Effect.forEach(
+        writable,
+        (link) =>
+          read(link.environmentId).pipe(
+            Effect.timeout(PLACEMENT_READ_TIMEOUT),
+            Effect.orElseSucceed(() => undefined),
+          ),
+        { concurrency: "unbounded" },
+      )).filter((candidate) => candidate !== undefined);
+      const now = DateTime.toEpochMillis(yield* DateTime.now);
+      // This machine comes first, so a tie stays here.
+      const chosen = chooseLoadBalancedEnvironment(
+        [
+          {
+            environmentId: hereId,
+            resources: yield* hostResources.read,
+            receivedAt: now,
+            weight: resolveLoadBalancingWeight({
+              declared: yield* settings.getSettings.pipe(
+                Effect.map((current) => current.loadBalancingWeight ?? undefined),
+                Effect.orElseSucceed(() => undefined),
+              ),
+              machine: (yield* hereEnvironment.getDescriptor).platform.machine,
+            }),
+          },
+          ...there.map(({ environmentId, resources, machine, declared }) => ({
+            environmentId,
+            resources,
+            receivedAt: now,
+            weight: resolveLoadBalancingWeight({ declared, machine }),
+          })),
+        ],
+        now,
+      );
+      const picked = there.find((candidate) => candidate.environmentId === chosen);
+      return picked === undefined
+        ? here
+        : { environmentId: picked.environmentId, projectId: picked.projectId };
+    },
+  );
 
   /** The instance there of the driver the caller named, preferring the one this thread runs on, as a task here does. */
   const resolveRemoteInstance = Effect.fn("RemoteDelegation.resolveRemoteInstance")(function* (
@@ -234,32 +574,20 @@ const make = Effect.gen(function* () {
     },
   ) {
     const { providers } = yield* forwarding.call(scope, RemoteCapabilitiesTool, environmentId, {});
-    if (requested.providerInstanceId !== undefined) {
-      const named = providers.find(
-        (provider) => provider.providerInstanceId === requested.providerInstanceId,
-      );
-      if (named !== undefined && named.driverKind !== requested.driverKind) {
-        return yield* new OrchestratorMcpFailure({
-          code: "invalid_request",
-          message: `Provider instance ${named.providerInstanceId} there uses driver ${named.driverKind}, not ${requested.driverKind}.`,
-        });
-      }
-      return requested.providerInstanceId;
+    const chosen = chooseRemoteInstance(providers, requested);
+    if ("otherDriver" in chosen) {
+      return yield* new OrchestratorMcpFailure({
+        code: "invalid_request",
+        message: `Provider instance ${chosen.otherDriver.providerInstanceId} there uses driver ${chosen.otherDriver.driverKind}, not ${requested.driverKind}.`,
+      });
     }
-    const candidates = providers.filter(
-      (provider) => provider.driverKind === requested.driverKind && provider.canRunChildTask,
-    );
-    const chosen =
-      candidates.find(
-        (provider) => provider.providerInstanceId === requested.inheritedInstanceId,
-      ) ?? candidates[0];
-    if (chosen === undefined) {
+    if ("none" in chosen) {
       return yield* new OrchestratorMcpFailure({
         code: "provider_unavailable",
         message: `No instance of driver ${requested.driverKind} there can run a child task. orchestrator_capabilities with this environmentId lists its providers.`,
       });
     }
-    return chosen.providerInstanceId;
+    return chosen.found;
   });
 
   const delegate: RemoteDelegation["Service"]["delegate"] = Effect.fn("RemoteDelegation.delegate")(
@@ -344,25 +672,30 @@ const make = Effect.gen(function* () {
       const key = input.clientRequestId ?? (yield* random.uuidV4());
       const task = taskPrompt(input);
       const title = input.title ?? parent.thread.title;
-      const launched = yield* forwarding.call(
-        scope,
-        ProjectToolkit.tools.t3_thread_launch,
-        target.environmentId,
-        {
-          projectId,
-          title,
-          modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
-          ...(runtimeMode === undefined ? {} : { runtimeMode }),
-          ...(interactionMode === undefined ? {} : { interactionMode }),
-          message: task,
-          clientRequestId: `delegate:${scope.thread.threadId}:${key}`,
-          // The thread there shows it is this thread's subagent, with a way back.
-          delegatedFrom: {
-            environmentId: hereId,
-            threadId: parent.thread.id,
-            title: parent.thread.title,
-          },
-        },
+      const [launched, checkoutNote] = yield* Effect.all(
+        [
+          forwarding.call(scope, ProjectToolkit.tools.t3_thread_launch, target.environmentId, {
+            projectId,
+            title,
+            modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
+            ...(runtimeMode === undefined ? {} : { runtimeMode }),
+            ...(interactionMode === undefined ? {} : { interactionMode }),
+            message: task,
+            clientRequestId: `delegate:${scope.thread.threadId}:${key}`,
+            // The thread there shows it is this thread's subagent, with a way back.
+            delegatedFrom: {
+              environmentId: hereId,
+              threadId: parent.thread.id,
+              title: parent.thread.title,
+            },
+          }),
+          checkout(scope, {
+            environmentId: target.environmentId,
+            projectId,
+            hereProjectId: parent.thread.projectId,
+          }),
+        ],
+        { concurrency: 2 },
       );
       const link = yield* links.get(target.environmentId).pipe(
         Effect.map(Option.getOrUndefined),
@@ -438,7 +771,7 @@ const make = Effect.gen(function* () {
         });
       }
       yield* followOne(scope.thread.threadId, taskId).pipe(Effect.forkIn(followers));
-      return { taskId };
+      return { taskId, checkout: checkoutNote };
     },
   );
 
@@ -582,6 +915,31 @@ const make = Effect.gen(function* () {
     client: undefined,
     capabilities: new Set(["orchestration"]),
     issuedAt: 0,
+  });
+
+  const finishedCheckout: RemoteDelegation["Service"]["finishedCheckout"] = Effect.fn(
+    "RemoteDelegation.finishedCheckout",
+  )(function* (scope, task) {
+    const remote = task.remoteChild;
+    if (remote === undefined) return undefined;
+    const via = followScope(scope.thread, remote);
+    // The task keeps no project there, so the thread says which one it ran in.
+    const projectId = yield* forwarding
+      .readThread(via, remote.environmentId, {
+        threadId: remote.threadId,
+        limit: 1,
+        runLimit: 1,
+      })
+      .pipe(
+        Effect.map((read) => read.thread.projectId),
+        Effect.timeout(PLACEMENT_READ_TIMEOUT),
+        Effect.orElseSucceed(() => undefined),
+      );
+    const hereProjectId = yield* projections.getThread(scope.thread.threadId).pipe(
+      Effect.map((thread) => thread.projectId),
+      Effect.orElseSucceed(() => undefined),
+    );
+    return yield* checkout(via, { environmentId: remote.environmentId, projectId, hereProjectId });
   });
 
   /**
@@ -1066,7 +1424,16 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.ignoreCause({ log: true })),
     );
 
-  return RemoteDelegation.of({ delegate, followUp, cancel, runStatus, start });
+  return RemoteDelegation.of({
+    delegate,
+    followUp,
+    checkout,
+    finishedCheckout,
+    place,
+    cancel,
+    runStatus,
+    start,
+  });
 });
 
 /** A defect, logged, as a failure, so a retry covers it. */

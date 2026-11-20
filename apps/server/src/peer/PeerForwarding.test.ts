@@ -29,7 +29,9 @@ import * as ThreadSearch from "../orchestration-v2/ThreadSearch.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as SourceControlRepositoryService from "../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as HostResources from "../resourceTelemetry/HostResources.ts";
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
+import * as ProjectCheckout from "../project/ProjectCheckout.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
@@ -50,6 +52,14 @@ const box = descriptorOf("environment-box", "Box");
 const boxProject = ProjectId.make("project:box");
 const boxThread = ThreadId.make("thread:box-auto");
 const boxRun = RunId.make("run:box-auto");
+
+const hostResourcesOf = (cpuCount: number) => ({
+  sampledAt: 1_700_000_000_000,
+  cpuUtilization: 0.25,
+  cpuCount,
+  availableMemoryBytes: 8 * 1024 ** 3,
+  totalMemoryBytes: 16 * 1024 ** 3,
+});
 
 /** What B's thread service was asked to do. */
 interface Seen {
@@ -222,6 +232,7 @@ const serveBox = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) =>
       McpHttpServer.layerOrchestratorToolkit,
       McpHttpServer.layerProjectRegistration,
       McpHttpServer.layerThreadToolkit,
+      McpHttpServer.layerEnvironmentToolkit,
     ).pipe(
       Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
       Layer.provide(NodeCrypto.layer),
@@ -244,9 +255,19 @@ const serveBox = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) =>
       ),
       Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
-      Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
+          Layer.mock(ProjectCheckout.ProjectCheckout)({}),
+        ),
+      ),
       Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
-      Layer.provide(ServerSettings.layerTest()),
+      Layer.provide(
+        Layer.mergeAll(
+          ServerSettings.layerTest(),
+          Layer.mock(HostResources.HostResources)({ read: Effect.succeed(hostResourcesOf(8)) }),
+        ),
+      ),
       Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
       Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
       Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
@@ -277,6 +298,7 @@ const makeLaptop = Effect.gen(function* () {
     McpHttpServer.layerOrchestratorToolkit,
     McpHttpServer.layerProjectRegistration,
     McpHttpServer.layerThreadToolkit,
+    McpHttpServer.layerEnvironmentToolkit,
   ).pipe(
     Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
     Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
@@ -326,10 +348,13 @@ const makeLaptop = Effect.gen(function* () {
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
         Layer.mock(ProjectService.ProjectService)({}),
         Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
+        Layer.mock(ProjectCheckout.ProjectCheckout)({}),
         Layer.mock(SecretRequests.SecretRequests)({}),
         ServerSettings.layerTest(),
+        Layer.mock(HostResources.HostResources)({ read: Effect.succeed(hostResourcesOf(4)) }),
         // No thread here delegated to the box, so a send there is no follow-up.
         Layer.mock(RemoteDelegation.RemoteDelegation)({
+          checkout: () => Effect.undefined,
           followUp: (_scope, _environmentId, _request, sent) => Effect.succeed(sent),
         }),
         Layer.mock(PeerLinkRequests.PeerLinkRequests)({}),
@@ -627,6 +652,18 @@ it.effect("runs any tool that takes a linked environment there", () =>
       });
       expect(archived.isError).toBe(false);
       expect((yield* Ref.get(seen)).stops).toEqual([`thread.archive ${boxThread}`]);
+
+      const load = yield* a.call("thread:laptop-full", "t3_environment_read", {
+        environmentId: box.environmentId,
+      });
+      expect(load.structuredContent).toMatchObject({
+        environmentId: box.environmentId,
+        hostResources: hostResourcesOf(8),
+      });
+      const loadHere = yield* a.call("thread:laptop-full", "t3_environment_read", {
+        environmentId: laptop.environmentId,
+      });
+      expect(loadHere.structuredContent).toMatchObject({ hostResources: hostResourcesOf(4) });
 
       // This environment's own id keeps the call here.
       const own = yield* a.call("thread:laptop-full", "t3_thread_configure", {

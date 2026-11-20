@@ -95,6 +95,20 @@ export const OrchestratorMcpTargetOptions = Schema.Union([
 ]);
 export type OrchestratorMcpTargetOptions = typeof OrchestratorMcpTargetOptions.Type;
 
+/** `environmentId` that picks the machine itself: the least loaded one that has the project. */
+export const OrchestratorMcpAutoEnvironment = "auto";
+
+/**
+ * Where the project's checkout stands on each machine, short commits, null when unreadable. Sent
+ * only when the commits may differ or this machine has edits the other lacks; absent when they match.
+ */
+export const OrchestratorMcpCheckout = Schema.Struct({
+  here: Schema.NullOr(Schema.String),
+  there: Schema.NullOr(Schema.String),
+  uncommittedHere: Schema.optional(Schema.Literal(true)),
+});
+export type OrchestratorMcpCheckout = typeof OrchestratorMcpCheckout.Type;
+
 export const OrchestratorMcpTarget = Schema.Struct({
   providerInstanceId: Schema.optional(
     ProviderInstanceId.annotate({
@@ -116,7 +130,7 @@ export const OrchestratorMcpTarget = Schema.Struct({
   environmentId: Schema.optional(
     EnvironmentId.annotate({
       description:
-        "Linked environment to run in. Provider and model default to yours; others come from `orchestrator_capabilities` with this `environmentId`.",
+        'Linked environment to run in, or "auto" (`delegate_task` only). Provider and model default to yours; others come from `orchestrator_capabilities` with this `environmentId`.',
     }),
   ),
   projectId: Schema.optional(
@@ -223,6 +237,7 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
     Schema.Struct({ environmentId: EnvironmentId, threadId: ThreadId, label: Schema.String }),
   ),
   link: Schema.optional(Schema.String),
+  checkout: Schema.optional(OrchestratorMcpCheckout),
   childRunId: Schema.NullOr(RunId),
   childNodeId: NodeId,
   status: OrchestratorMcpDelegatedTaskStatus.annotate({

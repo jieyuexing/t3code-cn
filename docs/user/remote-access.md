@@ -184,7 +184,8 @@ Auto balance is off by default. On web and desktop, enable it in
 **Settings → Environments → Load balancing** to automatically choose a machine for
 new threads in projects grouped across connected environments. The section
 appears once two or more machines are switched on.
-Each machine starts at **Normal**. Choose **Prefer** to favor it when it has CPU and
+A laptop starts at **Normal** and an always-on machine at **Prefer**, unless the machine
+declares its own weight through the `t3_environment_preferences_update` agent tool. Choose **Prefer** to favor it when it has CPU and
 memory available, **Less often** to reduce its share, or **Manual only** to exclude
 it from automatic selection. These are preferences, not fixed traffic percentages.
 Preferences are saved separately in each client.
@@ -434,6 +435,25 @@ one `target.projectId` names), and this thread wakes with its result when it
 ends, as for any delegated task. It keeps following the task across restarts.
 If the other machine revokes the link, or the link is removed here, the task
 fails with that reason.
+
+To choose between machines, an agent can read each one's current CPU and memory
+load with `t3_environment_read`. Or it can pass `"auto"` as the environment of
+`delegate_task` or `t3_thread_launch`, and this machine picks the least loaded
+one, counting itself and the linked machines that answer, report their load, and
+have exactly one project with the same repository, at the same commit as this machine's checkout, and can run the provider (and the model, when one is named) the work uses. `"auto"` always means this
+thread's project (or `t3_thread_launch`'s `projectId`, which is then this
+machine's). If no machine qualifies, the work stays here, and so does work only
+this machine can do, such as a worktree or an attachment. `t3_thread_launch`
+returns the `environmentId` that took it; a `delegate_task` that ran elsewhere
+returns that machine's thread as `remoteChild`.
+
+T3 does not copy code between machines or update the other checkout: the work
+runs on whatever commit is checked out there, and uncommitted edits here are
+not sent. When a `delegate_task`, or a `t3_thread_launch` in the project's own
+checkout, runs on another machine, its result carries a `checkout` if the two
+are at different commits, one commit cannot be read, or this machine has
+uncommitted edits to tracked files. Commit and push here, and pull there,
+before you rely on the result.
 
 ## Manage or revoke access
 

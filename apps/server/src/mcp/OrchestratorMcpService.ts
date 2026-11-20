@@ -13,6 +13,7 @@ import {
   type OrchestrationV2ThreadShell,
   type OrchestrationV2ThreadLaunchWorkspaceStrategy,
   type OrchestrationV2TurnItem,
+  OrchestratorMcpAutoEnvironment,
   OrchestratorMcpFailure,
   type OrchestratorMcpCapabilitiesInput,
   type OrchestratorMcpCapabilitiesResult,
@@ -1746,6 +1747,37 @@ const make = Effect.gen(function* () {
   const requestKey = (clientRequestId: string | undefined): Effect.Effect<string> =>
     clientRequestId === undefined ? random.uuidV4() : Effect.succeed(clientRequestId);
 
+  /** A task whose target says "auto" gets the machine and project the placement picked, if not this one. */
+  const placeAutoTarget = Effect.fn("OrchestratorMcpService.placeAutoTarget")(function* (
+    scope: McpInvocationScope,
+    input: OrchestratorMcpDelegateTaskInput,
+  ): Effect.fn.Return<OrchestratorMcpDelegateTaskInput, OrchestratorMcpFailure> {
+    const { target } = input;
+    if (target === undefined || target.environmentId !== OrchestratorMcpAutoEnvironment) {
+      return input;
+    }
+    if (target.projectId !== undefined) {
+      return yield* failure(
+        "invalid_request",
+        'With environmentId "auto", omit target.projectId: the task runs in this thread\'s project.',
+      );
+    }
+    const { environmentId: _auto, ...rest } = target;
+    const placed = yield* remoteDelegation.place(scope, {
+      hereOnly: input.isolation === "worktree",
+      providerInstanceId: target.providerInstanceId ?? "inherit",
+      driverKind: target.driverKind,
+      model: target.model,
+    });
+    return {
+      ...input,
+      target:
+        placed.environmentId === undefined
+          ? rest
+          : { ...rest, environmentId: placed.environmentId, projectId: placed.projectId },
+    };
+  });
+
   const readTask = Effect.fn("OrchestratorMcpService.readTask")(function* (
     scope: McpThreadInvocationScope,
     taskId: NodeId,
@@ -2061,6 +2093,8 @@ const make = Effect.gen(function* () {
           ? task.status
           : "completed";
     const terminal = isTerminalTaskStatus(status);
+    // Compared again now that it ended: the commit there may have moved while it ran.
+    const checkout = terminal ? yield* remoteDelegation.finishedCheckout(scope, task) : undefined;
     if (
       acknowledgeTerminal &&
       terminal &&
@@ -2103,6 +2137,7 @@ const make = Effect.gen(function* () {
             remoteChild: task.remoteChild,
             link: formatThreadLink(task.remoteChild, task.remoteChild.title),
           }),
+      ...(checkout === undefined ? {} : { checkout }),
       childRunId: null,
       childNodeId: task.id,
       status,
@@ -2748,7 +2783,8 @@ const make = Effect.gen(function* () {
         },
       };
     }),
-    delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(function* (callerScope, input) {
+    delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(function* (callerScope, asked) {
+      const input = yield* placeAutoTarget(callerScope, asked);
       const environmentId =
         input.target === undefined
           ? undefined
@@ -2757,13 +2793,17 @@ const make = Effect.gen(function* () {
         yield* requireCapability(callerScope);
         const scope = yield* requireThreadScope(callerScope, "delegate_task");
         // The task's child runs as an ordinary thread there; this thread keeps the task.
-        const { taskId } = yield* remoteDelegation.delegate(scope, {
+        const { taskId, checkout } = yield* remoteDelegation.delegate(scope, {
           ...input,
           target: { ...input.target, environmentId },
         });
-        return yield* input.mode === "wait"
+        const task = yield* input.mode === "wait"
           ? awaitTask(scope, taskId, taskId, input.timeoutMs)
           : readTask(scope, taskId, false, true);
+        // An ended task carries the comparison made when it ended, not the one from the launch.
+        return checkout === undefined || isTerminalTaskStatus(task.status)
+          ? task
+          : { ...task, checkout };
       }
       const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
       if (
