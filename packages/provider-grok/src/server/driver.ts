@@ -1,5 +1,6 @@
 import { ProviderDriverKind } from "@t3tools/contracts";
 import { GrokSettings } from "../settings.ts";
+import { makeGrokLoggedOutHold } from "./loggedOutHold.cn.ts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -207,7 +208,9 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv, Path.Path> 
     );
     const textGeneration = yield* makeGrokTextGeneration(effectiveConfig, processEnv);
 
+    const holdLoggedOut = yield* makeGrokLoggedOutHold;
     const checkProvider = checkGrokProviderStatus(effectiveConfig, processEnv, cwd).pipe(
+      Effect.flatMap(holdLoggedOut),
       Effect.filterOrElse(
         (snapshot) =>
           !(

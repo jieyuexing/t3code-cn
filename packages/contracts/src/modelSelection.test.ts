@@ -84,3 +84,16 @@ it.effect(
       assert.deepStrictEqual(encoded.options, decoded.options);
     }),
 );
+
+it.effect("ModelSelection treats null options as omission and preserves valid options", () =>
+  Effect.gen(function* () {
+    const selection = { instanceId: "codex", model: "gpt-5" };
+    const omitted = yield* decodeModelSelection(selection);
+    const nullable = yield* decodeModelSelection({ ...selection, options: null });
+    assert.deepStrictEqual(nullable, omitted);
+    assert.strictEqual(Object.hasOwn(nullable, "options"), false);
+    const options = [{ id: "reasoningEffort", value: "high" }];
+    const valid = yield* decodeModelSelection({ ...selection, options });
+    assert.deepStrictEqual(valid.options, options);
+  }),
+);

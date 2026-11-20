@@ -34,6 +34,7 @@ import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textG
 import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
 import { openCodeUsageReader, type OpenCodeUsageReaderEnv } from "./usage.ts";
 import { readOpenCodeGoUsageLimits } from "./usageLimits.ts";
+import { readDeepseekBalanceUsageLimits } from "./deepseekBalance-cn.ts";
 import { loadOpenCode2Catalog, loadOpenCode2DirectoryCatalog } from "./openCode2Catalog.ts";
 import {
   checkOpenCodeProviderStatus,
@@ -466,11 +467,20 @@ export const OpenCodeDriver: ProviderDriver<
       ),
     );
 
+    // 只有实例自己配置了 DeepSeek key 才查余额，避免服务器环境里的同名变量串到其他实例。
+    const deepseekBalanceConfigured = environment.some(
+      (variable) =>
+        variable.name.toUpperCase() === "DEEPSEEK_API_KEY" && variable.value.trim().length > 0,
+    );
     const legacyUsageLimits = readOpenCodeGoUsageLimits({
       enabled: effectiveConfig.enabled,
       serverUrl: effectiveConfig.serverUrl,
       environment: processEnv,
     }).pipe(
+      Effect.filterOrElse(
+        (limits) => limits.unavailable?.reason !== "unsupported" || !deepseekBalanceConfigured,
+        () => readDeepseekBalanceUsageLimits({ environment: processEnv }),
+      ),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, pathService),
       Effect.provideService(HttpClient.HttpClient, httpClient),
