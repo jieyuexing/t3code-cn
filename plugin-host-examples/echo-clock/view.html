@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Echo Clock</title>
+    <style>
+      body {
+        font:
+          14px system-ui,
+          sans-serif;
+        margin: 16px;
+        color-scheme: light dark;
+      }
+      button {
+        font: inherit;
+      }
+      output {
+        display: block;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="time">Loading…</p>
+    <button id="echo" type="button" disabled>Echo "hello"</button>
+    <output id="reply"></output>
+    <script>
+      // The host bridge: announce `ready` to the parent, receive one MessagePort, then exchange JSON strings on it.
+      const parentWindow = window.parent;
+      const pending = new Map();
+      let port = null;
+      let nextId = 1;
+      const call = (handler, input) =>
+        new Promise((resolve, reject) => {
+          const id = nextId++;
+          pending.set(id, { resolve, reject });
+          port.postMessage(JSON.stringify({ _tag: "call", id, handler, input: input ?? null }));
+        });
+      window.addEventListener("message", (event) => {
+        const data = event.data;
+        if (event.source !== parentWindow || data?.type !== "t3-view:connect" || port) return;
+        port = event.ports[0];
+        port.onmessage = (message) => {
+          const body = JSON.parse(message.data);
+          if (body._tag === "ping") port.postMessage(JSON.stringify({ _tag: "pong", n: body.n }));
+          else if (body._tag === "result") pending.get(body.id)?.resolve(body.value);
+          else if (body._tag === "error") pending.get(body.id)?.reject(new Error(body.message));
+          if (body._tag === "result" || body._tag === "error") pending.delete(body.id);
+          if (body._tag === "init") start();
+        };
+      });
+      const start = async () => {
+        document.getElementById("echo").disabled = false;
+        const show = async () => {
+          document.getElementById("time").textContent = (await call("now")).text;
+        };
+        await show();
+        setInterval(show, 1000);
+      };
+      document.getElementById("echo").addEventListener("click", async () => {
+        const reply = await call("echo", { message: "hello" });
+        document.getElementById("reply").textContent = JSON.stringify(reply);
+      });
+      parentWindow.postMessage({ type: "t3-view:ready" }, "*");
+    </script>
+  </body>
+</html>

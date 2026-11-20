@@ -288,6 +288,34 @@ describe("provider projection", () => {
     expect(projected).toContain("diff:\n  @@ -3,1 +2,2 @@\n  +two\t\n   \n</context>");
   });
 
+  it("projects a plugin quote with its title, link, source and full selection", () => {
+    const projected = projectComposerContextForProvider({
+      text: "[Post](t3-context://v1/review-comment/ctx_q)",
+      records: [
+        {
+          version: 1,
+          contextId: ctx("ctx_q"),
+          kind: "review-comment",
+          label: "Post",
+          sectionId: "quote:q1",
+          sectionTitle: "Post",
+          filePath: "https://example.com/post",
+          startIndex: 0,
+          endIndex: 0,
+          rangeLabel: "订阅 · Example",
+          text: "",
+          diff: "first line\nsecond line\n",
+          fenceLanguage: "text",
+        },
+      ],
+    });
+    expect(projected).toContain(
+      '<context kind="web-quote" id="ctx_q">\ntitle: Post\nurl: https://example.com/post\nsource: 订阅 · Example\nquote:\n  first line\n  second line\n</context>',
+    );
+    expect(projected).not.toContain("file:");
+    expect(projected).toContain("[Web quote: Post; ref=ctx_q]");
+  });
+
   it("emits no terminal lines when the captured range is inverted", () => {
     const projected = projectComposerContextForProvider({
       text: "[log](t3-context://v1/terminal/ctx_t)",

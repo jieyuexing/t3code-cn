@@ -115,6 +115,7 @@ import { useReviewFilePatches } from "./diffs/useReviewFilePatches";
 import { DiffFileLoadingBoundary } from "./diffs/DiffFileLoadingBoundary";
 import { DiffFileStatus } from "./diffs/DiffFileStatus";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
+import { usePluginDiffReveal } from "../pluginHost/diffNavigation";
 import { projectCommitUrl } from "@t3tools/client-runtime/change-request-links";
 import { useOpenLink } from "../browser/useOpenLink";
 
@@ -333,9 +334,13 @@ export default function DiffPanel({
     diffSelection.kind === "branch" || diffSelection.kind === "commit"
       ? diffSelection.baseRef
       : null;
-  const selectedFilePath = diffSelection.kind === "turn" ? (diffSelection.filePath ?? null) : null;
+  const pluginReveal = usePluginDiffReveal(routeThreadRef);
+  const selectedFilePath =
+    diffSelection.kind === "turn"
+      ? (diffSelection.filePath ?? null)
+      : (pluginReveal?.filePath ?? null);
   const selectedFileRevealRequestId =
-    diffSelection.kind === "turn" ? diffSelection.revealRequestId : 0;
+    diffSelection.kind === "turn" ? diffSelection.revealRequestId : (pluginReveal?.requestId ?? 0);
   const selectedTurn =
     selectedRunId === null
       ? undefined

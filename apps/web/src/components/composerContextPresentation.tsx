@@ -1,3 +1,4 @@
+import { isQuoteComment } from "@t3tools/shared/composerQuote";
 import ChatMarkdown from "./ChatMarkdown";
 import { isSvgAttachment } from "@t3tools/shared/image";
 import { ReadOnlySourcePreview } from "./files/AttachmentFilePreview";
@@ -303,7 +304,9 @@ function ReviewCommentContextChip(props: {
       kindLabel={
         props.isPullRequest
           ? pullRequestContextKindLabel(props.record, messages)
-          : msg("Review comment")
+          : isQuoteComment(props.record)
+            ? msg("Quote")
+            : msg("Review comment")
       }
       details={<ComposerReviewCommentDetails comment={props.record} />}
       detailsMode={props.detailsMode}

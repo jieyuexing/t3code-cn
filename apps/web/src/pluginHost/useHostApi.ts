@@ -1,0 +1,148 @@
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+  type AtomCommandResult,
+} from "@t3tools/client-runtime/state/runtime";
+import { useNavigate } from "@tanstack/react-router";
+import { ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, PluginId, ScopedThreadRef } from "@t3tools/contracts";
+
+import { getBrowserDefaults } from "../browser/browserDefaults";
+import { readLocalApi } from "../localApi";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { orchestrationEnvironment } from "../state/orchestration";
+import { previewEnvironment } from "../state/preview";
+import { environmentProjects } from "../state/projects";
+import { environmentThreadShells, threadEnvironment } from "../state/threads";
+import { useAtomCommand } from "../state/use-atom-command";
+import { useOrchestrationCommand } from "../state/use-orchestration-command";
+import { rightPanelHostRef, useRightPanelStore } from "../rightPanelStore";
+import { buildThreadRouteParams } from "../threadRoutes";
+import { BridgeCallError } from "./bridge";
+import { openBrowserTab } from "./browserTab";
+import { addQuoteToComposer } from "./composerQuote";
+import { openThreadDiff } from "./diffNavigation";
+import { createHostApi } from "./hostApi";
+import { pendingThreads } from "./pendingThreads";
+import { pluginSettingsKey, requestPluginSettings } from "./pluginSettingsStore";
+import { pluginHostEnvironment } from "./state";
+
+function unwrap<A>(result: AtomCommandResult<A, unknown>): A {
+  if (result._tag === "Success") return result.value;
+  const error = squashAtomCommandFailure(result);
+  throw new BridgeCallError({
+    code: isAtomCommandInterrupted(result) ? "cancelled" : "call-failed",
+    message: error instanceof Error ? error.message : "The request failed.",
+  });
+}
+
+/** What a view's `callHost` runs: the environment's read-only Git calls, the thread's diff panel, the thread list, replies and snoozing, opening a web page, and the caller's own settings page. */
+export function useHostApi(options: {
+  readonly environmentId: EnvironmentId;
+  /** The plugin whose view calls; it is the only plugin whose settings the view can open. */
+  readonly pluginId: PluginId;
+  readonly capabilities: ReadonlyArray<string>;
+  readonly threadRef: ScopedThreadRef | null;
+  /** The thread's workspace root; `t3.openFile` stays inside it. */
+  readonly cwd: string | null;
+}) {
+  const { environmentId, pluginId, capabilities, threadRef, cwd } = options;
+  const navigate = useNavigate();
+  const quietly = { reportFailure: false };
+  const status = useAtomCommand(pluginHostEnvironment.vcsStatus, quietly);
+  const preview = useAtomCommand(pluginHostEnvironment.diffPreview, quietly);
+  const fileContents = useAtomCommand(pluginHostEnvironment.diffFileContents, quietly);
+  const transcript = useAtomCommand(orchestrationEnvironment.threadTranscript, quietly);
+  const snooze = useOrchestrationCommand(threadEnvironment.snooze, quietly);
+  const openPreview = useAtomCommand(previewEnvironment.open, quietly);
+  const readItems = async (threadId: string) =>
+    unwrap(
+      await transcript({ environmentId, input: { threadId: ThreadId.make(threadId) } }),
+    ).items.map(({ item }) => item);
+  return createHostApi({
+    capabilities,
+    // `localOnly` keeps this from fetching or reading the remote status.
+    status: async ({ cwd }) =>
+      unwrap(await status({ environmentId, input: { cwd, localOnly: true } })),
+    preview: async (input) => unwrap(await preview({ environmentId, input })),
+    fileContents: async (input) => unwrap(await fileContents({ environmentId, input })),
+    openDiff: (target) => {
+      if (threadRef === null) {
+        throw new BridgeCallError({ code: "call-failed", message: "No thread is open." });
+      }
+      openThreadDiff(threadRef, target);
+    },
+    openPluginSettings: () => {
+      requestPluginSettings(pluginSettingsKey(environmentId, pluginId));
+      void navigate({ to: "/settings/plugins", search: { machine: environmentId } });
+    },
+    // Read when called, so a view's polling does not re-render the panel on every thread update.
+    pendingThreads: () =>
+      pendingThreads({
+        shells: appAtomRegistry.get(environmentThreadShells.navigationThreadShellsAtom),
+        environmentId,
+        projectNames: new Map(
+          appAtomRegistry
+            .get(environmentProjects.projectsAtom)
+            .filter((project) => project.environmentId === environmentId)
+            .map((project) => [project.id, project.title]),
+        ),
+        // oxlint-disable-next-line react/purity -- runs when the view calls, not during render (oxc#27309)
+        now: new Date().toISOString(),
+      }),
+    lastReply: async (threadId) => {
+      for (const item of (await readItems(threadId)).toReversed()) {
+        if (item.type === "assistant_message") return item.text;
+      }
+      return "";
+    },
+    question: async (threadId) => {
+      for (const item of (await readItems(threadId)).toReversed()) {
+        if (item.type === "user_input_request") return item.questions[0]?.question ?? "";
+      }
+      return "";
+    },
+    openThread: (threadId) => {
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams({ environmentId, threadId: ThreadId.make(threadId) }),
+      });
+    },
+    snoozeThread: async (threadId, until) => {
+      unwrap(
+        await snooze({
+          environmentId,
+          input: { threadId: ThreadId.make(threadId), snoozedUntil: until },
+        }),
+      );
+    },
+    openUrl: async (url) => {
+      const api = readLocalApi();
+      if (api === undefined) {
+        throw new BridgeCallError({
+          code: "call-failed",
+          message: "Opening links is unavailable.",
+        });
+      }
+      await api.shell.openExternal(url);
+    },
+    openBrowser: async ({ url, profileId, background }) => {
+      await openBrowserTab({
+        threadRef,
+        url,
+        background,
+        openPreview,
+        ...(profileId === undefined ? {} : { profileId }),
+      });
+    },
+    browserProfiles: () => getBrowserDefaults().profiles,
+    workspaceRoot: threadRef === null ? null : cwd,
+    openFile: (relativePath, line) => {
+      if (threadRef === null) {
+        throw new BridgeCallError({ code: "call-failed", message: "There is no thread." });
+      }
+      useRightPanelStore.getState().openFile(rightPanelHostRef(threadRef), relativePath, line);
+    },
+    addToComposer: (quote) => addQuoteToComposer(threadRef, quote),
+  });
+}

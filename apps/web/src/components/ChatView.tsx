@@ -383,6 +383,11 @@ import { observeResize } from "~/lib/observeResize";
 import { ThreadVisitWatermark } from "./chat/ThreadVisitWatermark";
 import { ChatTerminalDrawers } from "./chat/ChatTerminalDrawers";
 import { ChatRightPanel } from "./chat/ChatRightPanel";
+import { AppRail } from "../pluginHost/rail/AppRail";
+import {
+  RAIL_TITLEBAR_OFFSET_CLASS,
+  useAppRailVisible,
+} from "../pluginHost/rail/useAppRailVisible";
 import { useDraftEnvironmentRouting } from "./chat/useDraftEnvironmentRouting";
 import { branchMismatchBannerItem, extensionStatusBannerItem } from "./chat/ThreadActivityBanners";
 import { ThreadNow } from "./chat/ThreadNow";
@@ -1137,6 +1142,7 @@ export default function ChatView(props: ChatViewProps) {
     !embedded && canMaximizeRightPanel && rightPanelState.maximized === true;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const [threadPanelPopoverHandle] = useState(PopoverCreateHandle);
+  const railVisible = useAppRailVisible(embedded ? null : activeThreadRef);
   const [chatCanvasStore] = useState(createChatCanvasStore);
 
   const latestRunSettled = isLatestRunSettled(activeLatestRun, activeRuntime);
@@ -3367,7 +3373,7 @@ export default function ChatView(props: ChatViewProps) {
       maximized={rightPanelMaximized}
       onToggleMaximized={toggleRightPanelMaximizedStable}
     >
-      {panelToggleControls}
+      {railVisible ? null : panelToggleControls}
     </WorkspaceTitlebarControls>
   );
   const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
@@ -3388,7 +3394,11 @@ export default function ChatView(props: ChatViewProps) {
           state={deviceState}
         />
       )}
-      {rightPanelControlsAtRoot && !embedded ? panelLayoutControls : null}
+      {rightPanelControlsAtRoot && !embedded ? (
+        <div className={railVisible ? RAIL_TITLEBAR_OFFSET_CLASS : "contents"}>
+          {panelLayoutControls}
+        </div>
+      ) : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
@@ -3423,7 +3433,7 @@ export default function ChatView(props: ChatViewProps) {
               />
             ) : null}
             {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
-            {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
+            {inlineRightPanelOwnsTitleBar && !railVisible ? threadPanelHeaderControl : null}
             <ChatHeader
               activeThreadEnvironmentId={activeThread.environmentId}
               activeThreadId={activeThread.id}
@@ -4107,6 +4117,39 @@ export default function ChatView(props: ChatViewProps) {
         >
           {rightPanelContent}
         </ChatRightPanel>
+      ) : null}
+      {activeThreadRef && !embedded ? (
+        <AppRail
+          threadRef={activeThreadRef}
+          controls={panelToggleControlProps}
+          onActivate={activateRightPanelSurfaceStable}
+          onCollapse={closePreviewPanelStable}
+          builtins={{
+            browser: {
+              available: canOperatePreview && browserAvailable,
+              open: createBrowserSurface,
+            },
+            terminal: {
+              available: activeProject !== null && canOperateTerminal,
+              open: addTerminalSurfaceStable,
+            },
+            files: { available: activeProject !== null, open: addFilesSurfaceStable },
+            diff: { available: isServerThread && isGitRepo, open: addDiffSurfaceStable },
+            pullRequest: {
+              available: pullRequestSurfaceAvailable,
+              open: addPullRequestSurfaceStable,
+            },
+            pullRequests: {
+              available: pullRequestsSurfaceAvailable,
+              open: addPullRequestsSurfaceStable,
+            },
+            device: { available: true, open: addDeviceSurfaceStable },
+            sideChat:
+              sideChatsOffered && !sideChatDisabledReason
+                ? { available: sideChat.available, open: openSideChatStable }
+                : undefined,
+          }}
+        />
       ) : null}
 
       <RevertConfirmHost

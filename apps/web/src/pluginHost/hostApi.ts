@@ -1,0 +1,288 @@
+import type {
+  ReviewDiffFileContentsInput,
+  ReviewDiffFileContentsResult,
+  ReviewDiffPreviewInput,
+  ReviewDiffPreviewResult,
+} from "@t3tools/contracts";
+
+import { QUOTE_TEXT_MAX_CHARS, QUOTE_TITLE_MAX_CHARS } from "@t3tools/shared/composerQuote";
+import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
+import { joinPath } from "@t3tools/shared/fileLinks";
+import { isAbsolutePath } from "@t3tools/shared/path";
+
+import { BridgeCallError } from "./bridge";
+import type { PluginQuote } from "./composerQuote";
+import { hostMethodDenial, type HostMethod } from "./hostMethods.ts";
+import { openableUrl } from "./openUrl";
+import { clipReply, type PendingThread } from "./pendingThreads";
+
+export interface DiffTarget {
+  readonly kind: "working-tree" | "commit";
+  readonly sha?: string;
+  readonly file?: string;
+}
+
+export interface HostApiDeps {
+  readonly capabilities: ReadonlyArray<string>;
+  /** The local Git status, read without fetching. */
+  readonly status: (input: { readonly cwd: string }) => Promise<unknown>;
+  readonly preview: (input: ReviewDiffPreviewInput) => Promise<ReviewDiffPreviewResult>;
+  readonly fileContents: (
+    input: ReviewDiffFileContentsInput,
+  ) => Promise<ReviewDiffFileContentsResult>;
+  readonly openDiff: (target: DiffTarget) => void;
+  /** Opens the plugin settings page on the calling plugin's own entry; nothing names another plugin. */
+  readonly openPluginSettings: () => void;
+  /** The environment's top-level threads still in play. */
+  readonly pendingThreads: () => ReadonlyArray<PendingThread>;
+  /** The text of the thread's last assistant message, in full. */
+  readonly lastReply: (threadId: string) => Promise<string>;
+  /** The first question of the thread's latest structured question, or an empty text. */
+  readonly question: (threadId: string) => Promise<string>;
+  readonly openThread: (threadId: string) => void;
+  readonly snoozeThread: (threadId: string, until: string) => Promise<void>;
+  /** Opens an absolute http(s) URL in the system browser. */
+  readonly openUrl: (url: string) => Promise<void>;
+  /** Opens an absolute http(s) URL as a tab of the current thread's T3 browser. */
+  readonly openBrowser: (input: {
+    readonly url: string;
+    readonly profileId?: string;
+    readonly background: boolean;
+  }) => Promise<void>;
+  /** The browser profiles a tab can open in. */
+  readonly browserProfiles: () => ReadonlyArray<BrowserProfileSummary>;
+  /** The thread's workspace root, which bounds `t3.openFile`; `null` without a thread. */
+  readonly workspaceRoot: string | null;
+  /** Opens a workspace file, by its `/` path relative to the root, as a tab of the thread's file panel. */
+  readonly openFile: (relativePath: string, line?: number) => void;
+  /** Puts a quote in the current thread's composer draft; never sends. */
+  readonly addToComposer: (quote: PluginQuote) => void;
+}
+
+export interface BrowserProfileSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: "persistent" | "incognito";
+}
+
+const denied = (message: string) => new BridgeCallError({ code: "denied", message });
+const invalid = (message: string) => new BridgeCallError({ code: "invalid", message });
+
+const readObject = (value: unknown): Readonly<Record<string, unknown>> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw invalid("The input must be an object.");
+  }
+  return value as Record<string, unknown>;
+};
+
+const readText = (input: Readonly<Record<string, unknown>>, key: string): string => {
+  const value = input[key];
+  if (typeof value !== "string" || value.trim() === "") throw invalid(`"${key}" must be text.`);
+  return value;
+};
+
+const readOptionalText = (input: Readonly<Record<string, unknown>>, key: string) =>
+  input[key] === undefined || input[key] === null ? undefined : readText(input, key);
+
+/** The comparison a call names: the working tree, or one commit that needs its sha. */
+function readSource(input: Readonly<Record<string, unknown>>, key: "sourceKind" | "kind") {
+  const kind = input[key];
+  if (kind === "working-tree") return { kind } as const;
+  if (kind === "commit")
+    return { kind, sha: readText(input, key === "kind" ? "sha" : "commitSha") } as const;
+  throw invalid(`"${key}" must be "working-tree" or "commit".`);
+}
+
+function readFile(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string")
+    return { path: readText({ file: value }, "file"), previousPath: null };
+  const file = readObject(value);
+  return {
+    path: readText(file, "path"),
+    previousPath: readOptionalText(file, "previousPath") ?? null,
+  };
+}
+
+function previewRequest(
+  cwd: string,
+  source: ReturnType<typeof readSource>,
+  file: ReturnType<typeof readFile>,
+): ReviewDiffPreviewInput {
+  const target =
+    source.kind === "commit" ? { commitSha: source.sha } : { sourceKind: "working-tree" as const };
+  // Without a file, the list of changed files is the answer; a patch is read per file.
+  return {
+    cwd,
+    ...target,
+    ...(file === undefined
+      ? { metadataOnly: true }
+      : { file: { ...file, sourceKind: source.kind === "commit" ? "commit" : "working-tree" } }),
+  };
+}
+
+/** What a file's patch says about how it changed, which the contents read needs. */
+function changeOf(diff: string, path: string) {
+  if (/^new file mode/m.test(diff)) return { changeType: "new", oldPath: path } as const;
+  if (/^deleted file mode/m.test(diff)) return { changeType: "deleted", oldPath: path } as const;
+  const renamedFrom = /^rename from (.+)$/m.exec(diff)?.[1];
+  if (renamedFrom === undefined) return { changeType: "change", oldPath: path } as const;
+  return {
+    changeType: /^@@/m.test(diff) ? "rename-changed" : "rename-pure",
+    oldPath: renamedFrom,
+  } as const;
+}
+
+type Handler = (deps: HostApiDeps, input: Readonly<Record<string, unknown>>) => Promise<unknown>;
+
+const HANDLERS: Readonly<Record<HostMethod, Handler>> = {
+  "vcs.status": (deps, input) => deps.status({ cwd: readText(input, "cwd") }),
+  "review.diffPreview": (deps, input) =>
+    deps.preview(
+      previewRequest(readText(input, "cwd"), readSource(input, "sourceKind"), readFile(input.file)),
+    ),
+  "review.diffFileContents": async (deps, input) => {
+    const cwd = readText(input, "cwd");
+    const source = readSource(input, "sourceKind");
+    const file = readFile(input.file);
+    if (file === undefined) throw invalid('"file" is required.');
+    const preview = await deps.preview(previewRequest(cwd, source, file));
+    const compared = preview.sources.find((candidate) => candidate.kind === source.kind);
+    if (compared === undefined) {
+      throw new BridgeCallError({
+        code: "call-failed",
+        message: "The comparison is no longer available.",
+      });
+    }
+    return deps.fileContents({
+      cwd,
+      sourceKind: compared.kind,
+      ...changeOf(compared.diff, file.path),
+      baseRef: compared.baseRef,
+      headRef: compared.headRef,
+      newPath: file.path,
+    });
+  },
+  "t3.openDiff": async (deps, input) => {
+    const source = readSource(input, "kind");
+    const file = readOptionalText(input, "file");
+    deps.openDiff({
+      kind: source.kind,
+      ...(source.kind === "commit" ? { sha: source.sha } : {}),
+      ...(file === undefined ? {} : { file }),
+    });
+    return null;
+  },
+  // Takes no input: the target is the caller, so a view cannot open another plugin's settings.
+  "t3.openPluginSettings": async (deps) => {
+    deps.openPluginSettings();
+    return null;
+  },
+  "threads.pending": async (deps) => deps.pendingThreads(),
+  "threads.lastReply": async (deps, input) => {
+    const threadId = readText(input, "threadId");
+    return { threadId, ...clipReply(await deps.lastReply(threadId)) };
+  },
+  "threads.question": async (deps, input) => {
+    const threadId = readText(input, "threadId");
+    return { threadId, question: (await deps.question(threadId)) || null };
+  },
+  "t3.openThread": async (deps, input) => {
+    deps.openThread(readText(input, "threadId"));
+    return null;
+  },
+  "threads.snooze": async (deps, input) => {
+    const until = new Date(readText(input, "until"));
+    if (Number.isNaN(until.getTime())) throw invalid('"until" must be a date and time.');
+    await deps.snoozeThread(readText(input, "threadId"), until.toISOString());
+    return null;
+  },
+  // Only http(s); the system browser is the only thing this reaches.
+  "t3.openUrl": async (deps, input) => {
+    let url: string;
+    try {
+      url = openableUrl(readText(input, "url"));
+    } catch (error) {
+      throw invalid(error instanceof Error ? error.message : "The URL is not valid.");
+    }
+    await deps.openUrl(url);
+    return null;
+  },
+  // A tab of the thread's own browser: its profile keeps the sign-ins, which the system browser cannot share.
+  "browser.open": async (deps, input) => {
+    let url: string;
+    try {
+      url = openableUrl(readText(input, "url"));
+    } catch (error) {
+      throw invalid(error instanceof Error ? error.message : "The URL is not valid.");
+    }
+    const profileId = readOptionalText(input, "profileId");
+    if (profileId !== undefined && !deps.browserProfiles().some(({ id }) => id === profileId)) {
+      throw invalid(`"${profileId}" is not a browser profile.`);
+    }
+    const background = input.background ?? false;
+    if (typeof background !== "boolean") throw invalid('"background" must be true or false.');
+    await deps.openBrowser({ url, ...(profileId === undefined ? {} : { profileId }), background });
+    return null;
+  },
+  // The file panel is the only reader: a path counts only if it stays inside the thread's workspace.
+  "t3.openFile": async (deps, input) => {
+    const path = readText(input, "path");
+    const line = input.line ?? undefined;
+    if (line !== undefined && (typeof line !== "number" || !Number.isInteger(line) || line < 1)) {
+      throw invalid('"line" must be a positive whole number.');
+    }
+    const root = deps.workspaceRoot;
+    if (root === null) {
+      throw new BridgeCallError({ code: "call-failed", message: "The thread has no workspace." });
+    }
+    const separator = root.includes("\\") || /^[A-Za-z]:/.test(root) ? "\\" : "/";
+    const absolute = isAbsolutePath(path) ? path : joinPath(root, path, separator);
+    const relativePath = mediaFileReference(absolute, root).relativePath;
+    if (relativePath === undefined) throw invalid("The file is outside the thread's workspace.");
+    deps.openFile(relativePath, line);
+    return null;
+  },
+  // Only inserts into the draft; nothing here sends, and over-long text is refused rather than clipped.
+  "t3.addToComposer": async (deps, input) => {
+    const title = readText(input, "title");
+    const text = readText(input, "text");
+    const source = readOptionalText(input, "source");
+    if (title.length > QUOTE_TITLE_MAX_CHARS || (source?.length ?? 0) > QUOTE_TITLE_MAX_CHARS) {
+      throw invalid(`"title" and "source" can be at most ${QUOTE_TITLE_MAX_CHARS} characters.`);
+    }
+    if (text.length > QUOTE_TEXT_MAX_CHARS) {
+      throw invalid(`"text" can be at most ${QUOTE_TEXT_MAX_CHARS} characters.`);
+    }
+    let url: string | undefined;
+    try {
+      const raw = readOptionalText(input, "url");
+      url = raw === undefined ? undefined : openableUrl(raw);
+    } catch (error) {
+      throw invalid(error instanceof Error ? error.message : "The URL is not valid.");
+    }
+    deps.addToComposer({
+      title,
+      text,
+      ...(url === undefined ? {} : { url }),
+      ...(source === undefined ? {} : { source }),
+    });
+    return null;
+  },
+  "browser.profiles": async (deps) =>
+    deps.browserProfiles().map(({ id, name, kind }) => ({ id, name, kind })),
+};
+
+/**
+ * What a view's `callHost` reaches: a read-only slice of T3's Git, the diff panel, the thread
+ * list and replies, snoozing, opening a web page in the system browser or the thread's T3 browser, opening a workspace file in the thread's file panel, adding a quote to the thread's composer, and the caller's own settings
+ * page. A plugin that did not declare the capability a method needs is denied it, as is any
+ * method not listed here.
+ */
+export function createHostApi(deps: HostApiDeps) {
+  return async (method: string, input: unknown): Promise<unknown> => {
+    const denial = hostMethodDenial(method, deps.capabilities);
+    if (denial !== null) throw denied(denial);
+    return HANDLERS[method as HostMethod](deps, readObject(input));
+  };
+}

@@ -307,6 +307,10 @@
       "types": "./src/composerContextReferences.ts",
       "import": "./src/composerContextReferences.ts"
     },
+    "./composerQuote": {
+      "types": "./src/composerQuote.ts",
+      "import": "./src/composerQuote.ts"
+    },
     "./composerContextLegacy": {
       "types": "./src/composerContextLegacy.ts",
       "import": "./src/composerContextLegacy.ts"
@@ -402,6 +406,10 @@
     "./devProxy": {
       "types": "./src/devProxy.ts",
       "import": "./src/devProxy.ts"
+    },
+    "./usageSpeed": {
+      "types": "./src/usageSpeed.ts",
+      "import": "./src/usageSpeed.ts"
     },
     "./usageMerge": {
       "types": "./src/usageMerge.ts",
@@ -586,6 +594,10 @@
     "./cloneUrl": {
       "types": "./src/cloneUrl.ts",
       "import": "./src/cloneUrl.ts"
+    },
+    "./loadBalancing": {
+      "types": "./src/loadBalancing.ts",
+      "import": "./src/loadBalancing.ts"
     },
     "./speech": {
       "types": "./src/speech.ts",

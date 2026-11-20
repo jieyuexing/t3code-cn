@@ -180,6 +180,7 @@ import {
   selectActiveRightPanel,
   useRightPanelStore,
 } from "../rightPanelStore";
+import { usePluginPaletteItems } from "../pluginHost/usePluginPalette";
 import { getLatestThreadForProject, sortThreads } from "@t3tools/client-runtime/state/thread-sort";
 import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import {
@@ -499,6 +500,7 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
+  const plugins = usePluginPaletteItems(activeThread, primaryEnvironmentId);
   const projects = useProjects();
   const referenceThreadRef =
     pathname === "/pull-requests"
@@ -1742,7 +1744,17 @@ function OpenCommandPaletteDialog(props: {
   actionItems.push({
     kind: "action",
     value: "action:usage",
-    searchTerms: ["usage", "use", "tokens", "cost", "spend", "limits", "stats", "analytics"],
+    searchTerms: [
+      "usage",
+      "use",
+      "tokens",
+      "cost",
+      "spend",
+      "limits",
+      "speed",
+      "stats",
+      "analytics",
+    ],
     title: gt("Open usage"),
     icon: <ChartNoAxesColumnIcon className={ITEM_ICON_CLASS} />,
     shortcutCommand: "usage.open",
@@ -1767,6 +1779,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  actionItems.push(plugins.settingsItem);
   actionItems.push({
     kind: "action",
     value: "action:settings",
@@ -1834,7 +1847,10 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const rootGroups = buildRootGroups({ actionItems, recentThreadItems }, messages);
+  const rootGroups = [
+    ...buildRootGroups({ actionItems, recentThreadItems }, messages),
+    ...plugins.groups,
+  ];
   // Every setting goes to the palette's own matcher, so settings get the same
   // word starts and typo tolerance as threads.
   const settingsSearchItems: CommandPaletteActionItem[] = settingsForThisPlatform(

@@ -1,3 +1,4 @@
+import { isQuoteComment } from "@t3tools/shared/composerQuote";
 import { msg, T, useGT, useMessages } from "gt-react";
 import type { MessageResolver } from "~/i18n/messages";
 import { useNativeFileDrag } from "../../useNativeFileDrag";
@@ -485,7 +486,9 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
         const label = reviewCommentContextLabel(record, context.m);
         const kindLabel = isPullRequest
           ? pullRequestContextKindLabel(record, context.m)
-          : context.m(msg("Review comment"));
+          : isQuoteComment(record)
+            ? context.m(msg("Quote"))
+            : context.m(msg("Review comment"));
         const pullRequestState = pullRequestContextDisplayState(record) ?? "unknown";
         if (isPullRequest && record.pullRequest !== undefined) {
           return (

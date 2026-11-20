@@ -1,0 +1,23 @@
+{
+  "name": "@t3-plugin-host/cordis",
+  "version": "0.1.0",
+  "description": "Write T3 Code plugins as Cordis 4 plugins.",
+  "license": "MIT",
+  "files": [
+    "index.mjs",
+    "index.d.ts"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.mjs"
+    }
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "cordis": "4.0.0-rc.12"
+  }
+}

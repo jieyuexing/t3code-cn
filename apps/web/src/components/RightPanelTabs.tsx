@@ -112,6 +112,8 @@ import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
 import { surfaceShortcutKey } from "~/lib/surfaceShortcutKey";
+import { PluginTabIcon } from "~/pluginHost/PluginTabIcon";
+import { PluginLauncherMenuItems, PluginLauncherRows } from "~/pluginHost/PluginLauncher";
 
 export interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -577,6 +579,7 @@ function RightPanelEmptyState(props: {
               />
             ),
           )}
+          <PluginLauncherRows />
         </div>
       </div>
     </div>
@@ -614,6 +617,8 @@ function surfaceTitle(
       return surface.title ?? surface.target?.name ?? resolve(msg("Device"));
     case "side-chat":
       return resolve(msg("Side chat"));
+    case "plugin":
+      return surface.title;
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return resolve(msg("Browser"));
@@ -706,6 +711,8 @@ function SurfaceIcon({
       return <IssueSurfaceIcon surface={surface} environmentId={environmentId} />;
     case "side-chat":
       return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
+    case "plugin":
+      return <PluginTabIcon className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -1566,6 +1573,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       </SurfaceMenuItem>
                     );
                   })}
+                  <PluginLauncherMenuItems />
                 </MenuPopup>
               </Menu>
             ) : null}

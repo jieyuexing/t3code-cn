@@ -29,6 +29,7 @@ import type {
 import { decodeMsg, msg } from "gt-react";
 import { upgradeLegacyContextMessage } from "@t3tools/shared/composerContextLegacy";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
+import { isQuoteComment } from "@t3tools/shared/composerQuote";
 import {
   collectComposerContextReferences,
   sanitizeComposerContextLabel,
@@ -101,6 +102,7 @@ export function reviewCommentContextLabel(
   comment: ReviewCommentPresentation,
   resolve?: MessageResolver,
 ): string {
+  if (isQuoteComment(comment)) return comment.sectionTitle;
   const pullRequestNumber = pullRequestContextNumber(comment);
   if (isPullRequestSummaryContext(comment) && pullRequestNumber !== null) {
     return `#${pullRequestNumber}`;
