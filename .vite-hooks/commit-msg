@@ -1,0 +1,8 @@
+#!/bin/sh
+# universe-commit-msg：转发到总仓的提交说明检查（向上找总仓的脚本，找不到就放行）
+dir="$(git rev-parse --show-toplevel)"
+while [ "$dir" != "/" ]; do
+  dir="$(dirname "$dir")"
+  [ -x "$dir/host/bin/git-hooks/commit-msg" ] && exec "$dir/host/bin/git-hooks/commit-msg" "$@"
+done
+exit 0
