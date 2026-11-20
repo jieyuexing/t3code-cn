@@ -2879,7 +2879,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           role: "Viewer",
         },
       ],
-      ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
+      sign: path.join(repoRoot, "scripts/sign-macos.ts"),
+      // Re-seal Electron's bundles so their signature identifiers follow Info.plist.
+      // Keep the default hardened runtime and entitlements, even without a certificate.
+      ...(!signed ? { identity: "-", timestamp: "none", notarize: false } : {}),
       ...(macPasskeySigning
         ? {
             entitlements: macPasskeySigning.entitlementsPath,
@@ -3061,7 +3064,12 @@ export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   // Unpack/sign only Windows PE addons; packages also carry foreign prebuilds that Authenticode cannot sign.
-  const unpackGlobs: string[] = [...WINDOWS_SERVER_ASAR_UNPACK_GLOBS];
+  // ASAR matches absolute paths without dot:true. Use basename globs for
+  // libraries and literal absolute paths for PE addons so hidden build roots
+  // work without also unpacking a foreign addon with the same basename.
+  const unpackGlobs: string[] = WINDOWS_SERVER_ASAR_UNPACK_GLOBS.map((glob) =>
+    glob.replaceAll("**/", ""),
+  );
   for (const entry of yield* fs.readDirectory(input.sourceDir, { recursive: true })) {
     if (!entry.endsWith(".node")) continue;
     const addonPath = path.join(input.sourceDir, entry);
@@ -3076,7 +3084,12 @@ export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function
         cause: new Error(`native addon path contains glob syntax: ${posixPath}`),
       });
     }
-    unpackGlobs.push(`**/${posixPath}`);
+    unpackGlobs.push(
+      addonPath
+        .split(path.sep)
+        .join("/")
+        .replace(/([*?[\]{}(),!+@])/g, "\\$1"),
+    );
   }
   yield* Effect.tryPromise({
     try: () =>

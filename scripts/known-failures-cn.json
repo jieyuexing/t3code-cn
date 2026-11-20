@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "failures": [
+    {
+      "id": "KF-1",
+      "file": "apps/server/src/peer/PeerLinks.test.ts",
+      "name": "resolves a link at its answering address without waiting out a sleeping first",
+      "firstSeen": "2026-11-17",
+      "source": "总仓 .local/tmp/t3code-cn-sync-20261118/RECORD.md:28-32；11-17 test-fork.log",
+      "reason": "间歇失败：同一文件在本机连跑，fork 检出 0/3 失败，纯上游 TAG 2 次中 1 次失败",
+      "upstream": "复现（v0.1.11-nightly.20261117.4851 单文件连跑 2 次，1 次失败）",
+      "closeWhen": "连续 5 次全绿后删本条；若持续间歇，留给上游修，上游修复合入后删",
+      "intermittent": true
+    },
+    {
+      "id": "KF-2",
+      "file": "packages/ssh/src/tunnel.test.ts",
+      "name": "ssh tunnel scripts names missing gzip after verifying with sha256sum",
+      "firstSeen": "2026-11-17",
+      "source": "总仓 .local/tmp/t3code-cn-sync-20261118/RECORD.md:28-32",
+      "reason": "断言按「没有 gzip」模拟，本机 macOS 的 bsdtar 不需要 gzip，退出码为 0",
+      "upstream": "复现（v0.1.11-nightly.20261117.4851 连跑 2 次均失败）",
+      "closeWhen": "上游修改该用例，或本机不再作为该测试的运行环境（Linux 上跑）后删本条"
+    },
+    {
+      "id": "KF-3",
+      "file": "packages/ssh/src/tunnel.test.ts",
+      "name": "ssh tunnel scripts names missing gzip after verifying with shasum",
+      "firstSeen": "2026-11-17",
+      "source": "总仓 .local/tmp/t3code-cn-sync-20261118/RECORD.md:28-32",
+      "reason": "同 KF-2，走 shasum 分支",
+      "upstream": "复现（v0.1.11-nightly.20261117.4851 连跑 2 次均失败）",
+      "closeWhen": "同 KF-2"
+    },
+    {
+      "id": "KF-4",
+      "file": "packages/ssh/src/tunnel.test.ts",
+      "name": "ssh tunnel scripts only downloads a release archive the host can run: Darwin arm64",
+      "firstSeen": "2026-11-17",
+      "source": "总仓 .local/tmp/t3code-cn-sync-20261118/RECORD.md:28-32",
+      "reason": "fork 把引导脚本的下载地址改成 jieyuexing/t3code-cn 的发布（packages/ssh/src/tunnel.ts），上游用例 tunnel.test.ts:333 仍断言 pingdotgg/t3code 的地址",
+      "upstream": "未复现（v0.1.11-nightly.20261117.4851 连跑 2 次通过；只在 fork 上失败，是 fork 自带的失败）",
+      "closeWhen": "把 tunnel.test.ts:333 的断言改成 fork 的发布地址（与 cliRelease.cn.test.ts 同口径，同步冲突时取上游后重套）后删本条"
+    },
+    {
+      "id": "KF-5",
+      "file": "packages/ssh/src/tunnel.test.ts",
+      "name": "archive launch script a reconnect from an older client keeps a newer managed server running",
+      "firstSeen": "2026-11-18",
+      "source": "总仓 .local/tmp/t3code-cn-sync-20261118/RECORD.md:28-32（上游 #29428 新增）",
+      "reason": "测试子进程只传 HOME、不传 PATH，本机 node 不在 sh 默认 PATH，报 exec: node: not found",
+      "upstream": "复现（v0.1.11-nightly.20261117.4851 连跑 2 次均失败）",
+      "closeWhen": "上游让测试子进程带上 node 的路径，或本机把 node 放进系统默认 PATH 后删本条"
+    },
+    {
+      "id": "KF-6",
+      "file": "packages/ssh/src/tunnel.test.ts",
+      "name": "archive launch script a newer client still replaces an older managed server",
+      "firstSeen": "2026-11-18",
+      "source": "总仓 .local/tmp/t3code-cn-sync-20261118/RECORD.md:28-32（上游 #29428 新增）",
+      "reason": "同 KF-5",
+      "upstream": "复现（v0.1.11-nightly.20261117.4851 连跑 2 次均失败）",
+      "closeWhen": "同 KF-5"
+    },
+    {
+      "id": "KF-7",
+      "file": "apps/web/src/components/ChatView.browser.test.tsx",
+      "name": "a shortcut conditioned on rightPanelOpen sees the thread's open right panel",
+      "firstSeen": "2026-11-17",
+      "source": "fork 提交 694c863357 说明；总仓 .local/tmp/t3code-cn-sync-20261118/RECORD.md:28-32",
+      "reason": "浏览器测试在本机超过 15 秒超时",
+      "upstream": "复现（v0.1.11-nightly.20261117.4851 整文件连跑 2 次均失败）",
+      "closeWhen": "上游修复该用例，或查清本机超时原因后删本条"
+    },
+    {
+      "id": "KF-8",
+      "file": "packages/ssh/src/tunnel.test.ts",
+      "name": "ssh tunnel scripts concurrent launches on one remote home record the server that owns it",
+      "firstSeen": "2026-11-19",
+      "source": "本轮（1119-known-failures）单文件复跑发现，RECORD 11-18 未列",
+      "reason": "超过 5000ms 默认超时",
+      "upstream": "复现（v0.1.11-nightly.20261117.4851 连跑 2 次均失败；fork 检出 1 次失败）",
+      "closeWhen": "上游放宽该用例超时，或查清本机慢的原因后删本条"
+    }
+  ]
+}

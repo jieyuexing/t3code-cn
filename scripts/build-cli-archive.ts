@@ -29,6 +29,12 @@ import {
 } from "./build-desktop-artifact.ts";
 import { assertLinuxArm64PageCompatibility } from "./lib/linux-arm64-sea.ts";
 import { selectCliRuntimeExternalDependencies } from "./lib/cli-external-packages.ts";
+import {
+  assertX64Binary,
+  stageOfficialTemplate,
+  templateReceipt,
+  verifyOfficialTemplate,
+} from "./cli-official-template-cn.ts";
 import { signWithJsign } from "./lib/windows-jsign.ts";
 import { windowsSystemTar } from "./lib/windows-tar.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
@@ -590,11 +596,47 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   readonly version: string;
   readonly outputDir: string;
   readonly resourceMonitorDir: Option.Option<string>;
+  readonly officialArchive: Option.Option<string>;
+  readonly releaseMetadata: Option.Option<string>;
+  readonly sha256sums: Option.Option<string>;
+  readonly verifyTemplateOnly: boolean;
   readonly notarySubmissionFile: Option.Option<string>;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const repoRoot = yield* RepoRoot;
+  const hostPlatform = yield* HostProcess.Platform;
+  const officialArchive = Option.getOrUndefined(input.officialArchive);
+  const metadata = Option.getOrUndefined(input.releaseMetadata);
+  const sums = Option.getOrUndefined(input.sha256sums);
+  if (
+    (officialArchive || metadata || sums || input.verifyTemplateOnly) &&
+    !(officialArchive && metadata && sums)
+  ) {
+    return yield* Effect.die(
+      new Error("Template reuse requires --official-archive, --release-metadata and --sha256sums"),
+    );
+  }
+  const template =
+    officialArchive && metadata && sums
+      ? {
+          repoRoot,
+          hostPlatform,
+          archive: path.resolve(officialArchive),
+          metadata: path.resolve(metadata),
+          sums: path.resolve(sums),
+          version: input.version,
+          platform: input.platform,
+          arch: input.arch,
+        }
+      : undefined;
+  if (template) {
+    yield* Effect.sync(() => verifyOfficialTemplate(template));
+    if (input.verifyTemplateOnly) {
+      yield* Effect.log("Official template verified.");
+      return;
+    }
+  }
   const serverDir = path.join(repoRoot, "apps/server");
   const executableName = input.platform === "win" ? "t3.exe" : "t3";
   // tsdown suffixes cross-built executables; prefer the exact target over the plain host build.
@@ -605,7 +647,6 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     `t3-${targetKey}${input.platform === "win" ? ".exe" : ""}`,
   );
   // The unsuffixed executable is valid only for the host platform and architecture.
-  const hostPlatform = yield* HostProcess.Platform;
   const hostKey = `${hostPlatform === "win32" ? "win" : hostPlatform}-${yield* HostProcess.Architecture}`;
   const builtExecutable = (yield* fs.exists(targetExecutable))
     ? targetExecutable
@@ -622,10 +663,11 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     `Run \`node apps/server/scripts/cli.ts build-exe${targetKey === hostKey ? "" : ` --target ${targetKey}`}\` first.`,
   );
   yield* requireInput(path.join(webClient, "index.html"), "Run `vp run --filter t3 build` first.");
-  yield* requireInput(
-    resourceMonitorDir,
-    "Build the resource monitor or pass --resource-monitor-dir.",
-  );
+  if (!template)
+    yield* requireInput(
+      resourceMonitorDir,
+      "Build the resource monitor or pass --resource-monitor-dir.",
+    );
 
   const stem = cliArchiveStem(input.version, input.platform, input.arch);
   const stageRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-archive-" });
@@ -635,17 +677,31 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   yield* Effect.log(`[cli-archive] Staging ${stem}...`);
   yield* fs.copyFile(builtExecutable, path.join(contentDir, executableName));
   yield* stageWebClient(webClient, path.join(contentDir, "client"));
-  yield* fs.copy(resourceMonitorDir, path.join(contentDir, "resource-monitor"));
-  yield* stageRuntimeExternals({
-    repoRoot,
-    stageDir: contentDir,
-    platform: input.platform,
-    arch: input.arch,
-    version: input.version,
-  });
-
+  const provenance = template
+    ? yield* stageOfficialTemplate({ ...template, stageRoot, contentDir })
+    : undefined;
+  if (!template) {
+    yield* fs.copy(resourceMonitorDir, path.join(contentDir, "resource-monitor"));
+    yield* stageRuntimeExternals({
+      repoRoot,
+      stageDir: contentDir,
+      platform: input.platform,
+      arch: input.arch,
+      version: input.version,
+    });
+  }
+  if (template)
+    yield* Effect.sync(() =>
+      assertX64Binary(path.join(contentDir, executableName), input.platform as "linux" | "win"),
+    );
   const executablePath = path.join(contentDir, executableName);
-  if (input.platform === "linux") {
+  // 模板模式复用官方包里已校验的 lib/libatomic.so.1 与许可证；macOS 上没有 ldd、dpkg-query。
+  if (input.platform === "linux" && template) {
+    yield* runCommand(
+      ChildProcess.make("patchelf", ["--set-rpath", "$ORIGIN/lib", executablePath]),
+      "patchelf --set-rpath",
+    );
+  } else if (input.platform === "linux") {
     yield* bundleLinuxLibatomic({ repoRoot, contentDir, executablePath });
   }
   // TEMPORARY one-time Node fix. Remove when fixed: https://github.com/nodejs/node/issues/67048
@@ -688,14 +744,22 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     // the Git Bash shell CI uses, a bare `tar` is GNU tar, which neither
     // writes zip nor accepts a drive-letter path.
     yield* runCommand(
-      ChildProcess.make(windowsSystemTar(), ["-a", "-c", "-f", archivePath, "-C", stageRoot, stem]),
+      ChildProcess.make(hostPlatform === "win32" ? windowsSystemTar() : "tar", [
+        "-a",
+        "-c",
+        "-f",
+        archivePath,
+        "-C",
+        stageRoot,
+        stem,
+      ]),
       "tar (zip)",
     );
   } else {
     // npm rejects Linux hardlink entries; macOS pnpm clones and bsdtar lacks this flag.
     yield* runCommand(
       ChildProcess.make("tar", [
-        ...(input.platform === "linux" ? ["--hard-dereference"] : []),
+        ...(hostPlatform === "linux" ? ["--hard-dereference"] : []),
         "-czf",
         archivePath,
         "-C",
@@ -703,6 +767,15 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
         stem,
       ]),
       "tar (gzip)",
+    );
+  }
+  if (provenance) {
+    const receipt = yield* Effect.sync(() =>
+      templateReceipt({ provenance, archivePath, builtExecutable, repoRoot }),
+    );
+    yield* fs.writeFileString(
+      `${archivePath}.provenance.json`,
+      `${yield* encodeJsonString(receipt)}\n`,
     );
   }
   const stat = yield* fs.stat(archivePath);
@@ -719,6 +792,10 @@ const command = Command.make(
       Flag.withDescription("Release version for the archive name."),
     ),
     outputDir: Flag.String("output-dir").pipe(Flag.withDefault("release-cli")),
+    officialArchive: Flag.String("official-archive").pipe(Flag.optional),
+    releaseMetadata: Flag.String("release-metadata").pipe(Flag.optional),
+    sha256sums: Flag.String("sha256sums").pipe(Flag.optional),
+    verifyTemplateOnly: Flag.Boolean("verify-template-only").pipe(Flag.withDefault(false)),
     resourceMonitorDir: Flag.String("resource-monitor-dir").pipe(
       Flag.withDescription(
         "Directory laid out like dist/resource-monitor (defaults to apps/server/dist/resource-monitor).",
