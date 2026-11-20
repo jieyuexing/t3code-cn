@@ -135,8 +135,7 @@ git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行�
 | `apps/server/src/auth/RpcAuthorization.ts`                     | 3                 | 方法鉴权                                                                                             |
 | `apps/server/src/observability/RpcInstrumentation.ts`          | 2                 | 观测表                                                                                               |
 | `apps/server/src/mcp/McpHttpServer.ts`                         | 3（含 1 处改行）  | Agent 工具集（改行是把工具集 `export` 出来）                                                         |
-| `apps/server/src/provider/AgentContextBudget.test.ts`          | 2                 | 预算测试                                                                                             |
-| `apps/server/src/provider/agentContextBudget.json`             | 改 1              | 工具描述字节数，按实测写                                                                             |
+| `apps/server/src/provider/AgentContextBudget.test.ts`          | 2                 | 预算测试的服务替身（预算比对另有 fork 增量，见「同步上游时」第 3 条）                                |
 | `apps/web/src/rightPanelStore.ts`                              | 11（含 2 处改行） | 面板种类 `plugin` 与打开动作                                                                         |
 | `apps/web/src/components/chat/RightPanelSurfaceContent.tsx`    | 3                 | 面板内容分支                                                                                         |
 | `apps/web/src/components/RightPanelTabs.tsx`                   | 8                 | 标签标题与图标；空状态与 “+” 菜单里的插件视图                                                        |
@@ -186,7 +185,7 @@ git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行�
 
 1. 冲突落在上表的文件里时，先取上游版本，再按上表把插件那几行插回去，不手工合并上游的改动。`rightPanelStore.ts` 与 `ChatView.tsx` 最容易冲突。
 2. `routeTree.gen.ts` 不要手合，重新生成。
-3. `agentContextBudget.json` 先取上游的三个数，再跑 `apps/server` 的 `vp test run src/provider/AgentContextBudget.test.ts`，把 `mcpToolListJsonBytes` 改成实测值（插件工具比上游多约 479 字节）。
+3. `agentContextBudget.json` 与上游一致、不再冲突；fork 工具多出的字节在 `agentContextBudget.cn.json`（11-20 为 626，含插件工具与多机增强）。合并后跑 `apps/server` 的 `vp test run src/provider/AgentContextBudget.test.ts`，失败时只改 `.cn.json` 的增量，不改上游快照。
 4. 合并后用 `rg -l pluginHost apps packages` 对照上表，缺一处就补一处。然后在 `apps/server` 跑 `vp test run src/pluginHost src/ws.test.ts src/auth/RpcAuthorization.test.ts src/mcp`，在 `apps/web` 跑 `vp test run src/pluginHost`。
 5. 合并后用上面“重算方法”的两条命令重算上表，把基线换成新同步的上游 nightly，行数变了就改表。
 
