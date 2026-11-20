@@ -20,6 +20,7 @@ import * as BuiltInDrivers from "../sourceControl/builtInDrivers.ts";
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "../assets/NativeAppIconResolver.ts";
+import * as WorkspacePreviewRevisions from "../assets/WorkspacePreviewRevisions.ts";
 import * as PluginHost from "./PluginHost.ts";
 import { CHILD } from "./testChild.ts";
 import { issueViewUrl } from "./PluginViewDelivery.ts";
@@ -46,6 +47,7 @@ const layerRoute = Layer.mergeAll(
   AssetSigner.layer.pipe(
     Layer.provideMerge(ServerSecretStore.layer.pipe(Layer.provide(layerConfig))),
   ),
+  WorkspacePreviewRevisions.layer,
 ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 it.live("a view page is served by the signed asset route with the MCP app CSP", () =>
@@ -83,6 +85,7 @@ it.live("a view page is served by the signed asset route with the MCP app CSP", 
       | ServerConfig.ServerConfig
       | BuiltInDrivers.SourceControlDrivers
       | WorkspacePaths.WorkspacePaths
+      | WorkspacePreviewRevisions.WorkspacePreviewRevisions
     >();
     const { handler, dispose } = HttpRouter.toWebHandler(
       layerAssetRoute.pipe(Layer.provide(Layer.succeedContext(context))),

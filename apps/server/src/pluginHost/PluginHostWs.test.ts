@@ -12,6 +12,7 @@ import * as Queue from "effect/Queue";
 import { Headers } from "effect/http";
 import { RpcMessage, RpcServer } from "effect/rpc";
 import * as AssetSigner from "../assets/AssetSigner.ts";
+import * as WorkspacePreviewRevisions from "../assets/WorkspacePreviewRevisions.ts";
 import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
 import * as ServerBrowser from "../preview/ServerBrowser.ts";
 import * as AcpRegistryRuntimeCoordinator from "@t3tools/provider-acp-registry/server/AcpRegistryRuntimeCoordinator";
@@ -84,6 +85,7 @@ import * as StorageCleanup from "../storageCleanup.ts";
 import * as DatabaseStorage from "../persistence/DatabaseStorage.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ThreadIssueService from "../orchestration-v2/ThreadIssueService.ts";
+import * as ThreadViewers from "../orchestration-v2/ThreadViewers.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadSearch from "../orchestration-v2/ThreadSearch.ts";
 import * as UsageLimitSources from "../usage/UsageLimitSources.ts";
@@ -189,6 +191,7 @@ const layerRpcServices = Layer.mergeAll(
   Layer.mock(DatabaseStorage.DatabaseStorage)({}),
   Layer.mock(TerminalManager.TerminalManager)({}),
   Layer.mock(ThreadIssueService.ThreadIssueService)({}),
+  ThreadViewers.layer,
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(ThreadManagement.ThreadManagementService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),
@@ -212,6 +215,7 @@ const layerRpcServices = Layer.mergeAll(
 const layerConfigSources = Layer.mergeAll(
   Keybindings.layer,
   AssetSigner.layer.pipe(Layer.provide(ServerSecretStore.layer)),
+  WorkspacePreviewRevisions.layer,
   ServerSettings.layer.pipe(
     Layer.provide(Layer.merge(ServerSecretStore.layer, ManagedPolicy.layerTest())),
   ),
