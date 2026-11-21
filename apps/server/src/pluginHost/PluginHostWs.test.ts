@@ -37,10 +37,13 @@ import * as EnvironmentTheme from "../environmentTheme.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as HostResources from "../resourceTelemetry/HostResources.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
 import * as ScratchThreadPromotion from "../project/ScratchThreadPromotion.ts";
 import * as IssueService from "../issue/IssueService.ts";
 import * as IssueTrackerConnections from "../issue/IssueTrackerConnections.ts";
 import * as McpAppRequests from "../mcpApps/McpAppRequests.ts";
+import * as McpSignIn from "../mcpApps/McpSignIn.ts";
 import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as OtlpEndpointCheck from "../observability/OtlpEndpointCheck.ts";
@@ -48,6 +51,8 @@ import * as PairingGrantStore from "../auth/PairingGrantStore.ts";
 import * as RpcAuthorization from "../auth/RpcAuthorization.ts";
 import * as PeerLinkRequests from "../peer/PeerLinkRequests.ts";
 import * as PeerLinks from "../peer/PeerLinks.ts";
+import * as PeerThreadRelay from "../peer/PeerThreadRelay.ts";
+import * as PeerClientPairing from "../peer/PeerClientPairing.ts";
 import * as PortScanner from "../preview/PortScanner.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as ProcessDiagnostics from "../diagnostics/ProcessDiagnostics.ts";
@@ -210,6 +215,11 @@ const layerRpcServices = Layer.mergeAll(
   Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
   Layer.mock(ServerEnvironment.ServerEnvironment)({}),
   Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+  Layer.mock(McpSignIn.McpSignIn)({}),
+  Layer.mock(PeerThreadRelay.PeerThreadRelay)({}),
+  Layer.mock(PeerClientPairing.PeerClientPairing)({}),
+  Layer.mock(WorkspaceFolders.WorkspaceFolders)({}),
+  Layer.mock(TaskFolders.TaskFolders)({}),
 );
 
 const layerConfigSources = Layer.mergeAll(

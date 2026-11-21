@@ -27,7 +27,7 @@ const SURFACE_KIND_OF_BUILTIN: Readonly<Record<RailBuiltinId, RightPanelSurface[
   pullRequest: "pull-request",
   pullRequests: "pull-requests",
   device: "device",
-  sideChat: "side-chat",
+  sideChat: "thread",
   needsYou: null,
 };
 
