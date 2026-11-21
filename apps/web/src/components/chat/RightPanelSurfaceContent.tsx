@@ -89,6 +89,8 @@ export function RightPanelSurfaceContent(props: {
   const gt = useGT();
   if (surface === null) return null;
   switch (surface.kind) {
+    case "plugin":
+      return <PluginViewPanel key={surface.id} {...props} surface={surface} />;
     case "preview":
       return (
         <Suspense fallback={null}>
@@ -224,8 +226,6 @@ export function RightPanelSurfaceContent(props: {
           onClose={() => onCloseSurface(surface)}
         />
       );
-    case "plugin":
-      return <PluginViewPanel key={surface.id} {...props} surface={surface} />;
     case "device":
       return (
         <Suspense fallback={null}>
