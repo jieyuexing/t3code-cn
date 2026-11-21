@@ -12,6 +12,7 @@ import {
   assertAllUploaded,
   releaseTag,
   suiteContents,
+  syncMergeNotes,
 } from "./release-desktop-cn.mjs";
 import { fileIdentity, artifactSpec, sourceIdentity } from "./release-source-cn.mjs";
 
@@ -532,3 +533,65 @@ NodeTest.test("publisher on GitHub Actions requires the injected token and adds 
   NodeAssert.equal(env.GH_TOKEN, "fixture-token");
   NodeAssert.ok(!("HTTPS_PROXY" in env));
 });
+NodeTest.test(
+  "release notes come from the merge of the released nightly, whatever its title",
+  () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "notes-fixture-"));
+    try {
+      const git = (...args) =>
+        NodeChildProcess.execFileSync(
+          "git",
+          [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "core.hooksPath=/dev/null",
+            ...args,
+          ],
+          { cwd: root, encoding: "utf8", stdio: "pipe" },
+        ).trim();
+      git("init", "-b", "main");
+      git("commit", "--allow-empty", "-m", "base");
+      git("checkout", "-b", "upstream");
+      git("commit", "--allow-empty", "-m", "upstream nightly");
+      const nightly = git("rev-parse", "HEAD");
+      git("checkout", "main");
+      git("commit", "--allow-empty", "-m", "fork change");
+      git(
+        "merge",
+        "--no-ff",
+        "upstream",
+        "-m",
+        "merge: 同步上游 v0.1.12-nightly.20261120.5009\n\n冲突处理\n\n更新说明（nightly 20261120.5009）\n桌面 / 网页\n- 新功能\n\nCo-Authored-By: Fixture <fixture@example.invalid>",
+      );
+      git("checkout", "-b", "feature");
+      git("commit", "--allow-empty", "-m", "feature");
+      git("checkout", "main");
+      git("merge", "--no-ff", "feature", "-m", "merge: 功能分支");
+      NodeAssert.equal(
+        syncMergeNotes(root, nightly),
+        "更新说明（nightly 20261120.5009）\n桌面 / 网页\n- 新功能",
+      );
+      NodeAssert.throws(
+        () => syncMergeNotes(root, "f".repeat(40)),
+        /No merge of the upstream nightly/,
+      );
+      git("checkout", "-b", "upstream2", nightly);
+      git("commit", "--allow-empty", "-m", "next nightly");
+      const next = git("rev-parse", "HEAD");
+      git("checkout", "main");
+      git(
+        "merge",
+        "--no-ff",
+        "upstream2",
+        "-m",
+        "merge: 同步上游 nightly v0.1.12-nightly.20261121.5050",
+      );
+      NodeAssert.throws(() => syncMergeNotes(root, next), /lacks release notes/);
+    } finally {
+      NodeFS.rmSync(root, { recursive: true });
+    }
+  },
+);

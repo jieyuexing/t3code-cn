@@ -174,6 +174,21 @@ export function assertAllUploaded(release, prepared) {
   }
 }
 // GitHub Actions（jieyuexing/t3code-cn-build）由工作流注入只授本仓发布权限的 GH_TOKEN，直连 GitHub。
+// 更新说明取自把本次上游 nightly 合进来的那个合并提交，按父提交认，不依赖合并标题的写法。
+export function syncMergeNotes(root, upstreamCommit) {
+  const merge = git(root, "log", "--first-parent", "--merges", "--format=%H %P", "HEAD")
+    .split("\n")
+    .map((line) => line.split(" "))
+    .find(([, ...parents]) => parents.includes(upstreamCommit))?.[0];
+  if (!merge) throw new Error("No merge of the upstream nightly on HEAD");
+  const body = git(root, "log", "-1", "--format=%B", merge);
+  const start = body.search(/^更新说明/m);
+  if (start < 0) throw new Error("Latest sync merge lacks release notes");
+  return body
+    .slice(start)
+    .split(/^Co-Authored-By:/m)[0]
+    .trim();
+}
 export const onGitHubActions = (base) => base.GITHUB_ACTIONS === "true";
 export function ghEnvironment(base) {
   if (onGitHubActions(base)) {
@@ -234,28 +249,14 @@ export async function main() {
   if (!process.env.TMPDIR)
     throw new Error("Set task-owned TMPDIR/TMP/TEMP before release preflight");
   const scratch = NodeFS.mkdtempSync(NodePath.join(process.env.TMPDIR, "cn-release-"));
-  const merge = git(
-    root,
-    "log",
-    "-1",
-    "--merges",
-    "--format=%H",
-    "--grep=^merge: 同步上游 nightly",
-    "HEAD",
-  );
-  const body = merge ? git(root, "log", "-1", "--format=%B", merge) : "";
-  const start = body.search(/^更新说明/m);
-  if (start < 0) throw new Error("Latest sync merge lacks release notes");
+  const releaseNotes = syncMergeNotes(root, prepared.artifacts[0].candidate.upstreamCommit);
   const notes = [
     `基于上游 v${version} 的个人维护版。`,
     "",
     `包含 ${suiteContents(prepared)}。产品版本和资产名沿用默认值。`,
     `${prepared.artifacts.some((a) => a.candidate.kind === "dmg") ? "macOS 为 ad-hoc 签名，未公证。" : ""}验证范围与 SHA-256 见 PROVENANCE.json / SHA256SUMS；不含安装、GUI、provider 或生产环境验收。`,
     "",
-    body
-      .slice(start)
-      .split(/^Co-Authored-By:/m)[0]
-      .trim(),
+    releaseNotes,
     "",
     `<!-- t3zh-source:${source.head}:${source.treeSha256} suite:${prepared.setSha256} -->`,
     "",
