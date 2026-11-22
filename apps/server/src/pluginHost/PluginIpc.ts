@@ -1,6 +1,6 @@
 // Message tags and state names follow pingdotgg/t3code#16053; the framing is Node's own IPC channel.
 // The child is trusted OS-user code, so these schemas guard against bugs, not attackers.
-import { PluginId, PluginSettingValue } from "@t3tools/contracts";
+import { PluginErrorCode, PluginId, PluginSettingValue } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 export type Json = Schema.Json;
@@ -49,7 +49,12 @@ const PluginChildMessage = Schema.Union([
   }),
   Schema.TaggedStruct("ActivationFailed", { message: Message }),
   Schema.TaggedStruct("Succeeded", { requestId: RequestId, value: Schema.Json }),
-  Schema.TaggedStruct("Failed", { requestId: RequestId, message: Message }),
+  Schema.TaggedStruct("Failed", {
+    requestId: RequestId,
+    message: Message,
+    /** The thrown error's own `code`, kept only when it qualifies. */
+    code: Schema.optionalKey(PluginErrorCode),
+  }),
   Schema.TaggedStruct("Log", {
     level: PluginLogLevel,
     message: Schema.String.check(Schema.isMaxLength(4000)),

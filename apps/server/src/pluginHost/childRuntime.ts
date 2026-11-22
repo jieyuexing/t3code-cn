@@ -2,6 +2,8 @@
 // Runs one plugin in its own process; the host starts it with the hidden `__plugin-host` command.
 import * as NodeURL from "node:url";
 
+import { pluginErrorCode, pluginErrorText } from "@t3tools/contracts";
+
 import type { Json, PluginChildMessage, PluginHostMessage } from "./PluginIpc.ts";
 
 interface PluginContext {
@@ -37,9 +39,6 @@ interface PluginModule {
   readonly default?: (context: PluginContext) => unknown;
   readonly deactivate?: () => unknown;
 }
-
-const messageText = (error: unknown) =>
-  (error instanceof Error ? error.message : String(error)).slice(0, 2000);
 
 export function runPluginChild() {
   const send = (message: PluginChildMessage) => process.send?.(message);
@@ -142,7 +141,7 @@ export function runPluginChild() {
         provided: [...provided].map(([name, methods]) => ({ name, methods })),
       });
     } catch (error) {
-      send({ _tag: "ActivationFailed", message: messageText(error) });
+      send({ _tag: "ActivationFailed", message: pluginErrorText(error) });
     }
   };
 
@@ -157,7 +156,13 @@ export function runPluginChild() {
       const value = (await fn(input)) as Json | undefined;
       send({ _tag: "Succeeded", requestId, value: value === undefined ? null : value });
     } catch (error) {
-      send({ _tag: "Failed", requestId, message: messageText(error) });
+      const code = pluginErrorCode(error);
+      send({
+        _tag: "Failed",
+        requestId,
+        message: pluginErrorText(error),
+        ...(code === undefined ? {} : { code }),
+      });
     }
   };
 

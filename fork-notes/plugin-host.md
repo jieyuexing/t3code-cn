@@ -28,6 +28,8 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 | 页面 → 宿主 | `call` `callService` `callHost` `cancel` `pong`                | 带 `id`（`cancel` 指向要取消的 `id`）；单条消息上限 64K 字符，嵌套不超过 32 层                      |
 | 宿主 → 页面 | `init` `context` `changed` `result` `error` `ping` `violation` | `init` 是 `{pluginId, viewId, title, context}`；`context` 是 `{context}`；`changed` 是 `{revision}` |
 
+`error` 是 `{id, code, message, pluginCode?}`：`code` 是宿主的拒绝原因（`call-failed`、`denied`、`invalid` 等）；插件处理器或服务方法抛出的错误带合格的 `code`（1–64 个 `[A-Za-z0-9_.-]`）时，`pluginCode` 带上它，没有或不合格就不出现这个键，页面不会看到堆栈或路径。抛 `{ code, message }` 这样的结构化对象同样认。链路：子进程 `childRuntime.ts` 按 `hostRules.ts` 的 `pluginErrorCode` 过滤后放进 `Failed.code` → `PluginProcess` 的 `PluginCallError.code` → `PluginHost.invoke` 与 `PluginServiceCall.forward` 写进 `PluginHostError.pluginCode`（`withOrigin` 保留）→ RPC → `PluginViewFrame.settle` → `BridgeCallError.pluginCode` → `bridge.ts` 的 `error` 消息。插件到插件的调用（`context.services`）走字符串通道，不带 `pluginCode`；Agent 与命令面板的入口随 `PluginHostError` 带着，不单独展示。
+
 - **`context`**：`{ cwd, focus, theme: { scheme, vars } }`。`cwd` 是当前线程的工作目录（有 worktree 取 worktree，否则取项目根，来自右面板收到的 `files.workspaceRoot`），没有线程时为 `null`。`scheme` 是 `light` 或 `dark`；`vars` 是 T3 页面根元素上各变量的计算值，缺的不发。`init` 带一份，之后 `cwd`、`focus` 或主题变了宿主再发一条 `{_tag:"context", context}`（内容没变不发）。主题靠监听根元素的 `class` 和 `style` 变化发现，主题编辑器的实时改色也会带来更新。宿主不用 `ui/notifications/host-context-changed`，那是页面服务路由给 `html_render` 页用的。
 - **`changed`**：插件数据变了，宿主推给该插件已挂载的视图，页面收到后重读，不轮询。触发点是“该插件提供的服务方法里没标 `readOnly` 的那些成功返回”（`PluginServiceCall.ts` 的 `forward`，不论调用方是 Agent 的 `plugin_call`、命令面板、别的插件还是视图自己的 `callService`），每次让快照里该插件条目的 `dataRevision` 加一；`PluginViewFrame` 记下挂载时的值，之后变了就发一条 `{_tag:"changed", revision}`，挂载时的那个值不发（页面自己会读最新的）。选这一点而不是“存储写入”：存储写入包括视图自己的抓取缓存分片、`reading` 之类的记录，一次刷新要连发几十条，视图每条都重读还会和自己的写入成环；写方法成功才算“用户或 Agent 改了数据”，条数少、含义清楚。代价是两处：插件的写方法必须如实不标 `readOnly`（漏标写方法就不会推，多标则只多推几次）；视图自己经处理器 `call` 做的写不推（它自己知道）。没有新增 RPC 与客户端权限项，搭在已有的快照订阅上，条目只在大于 0 时带这个字段。
 - **`focus`**：`{ path: "<绝对路径>", kind: "folder" | "file" } | null`，是本线程右侧面板里“最近一次激活的文件或目录标签”所指的位置，供版本控制类插件跟着文件面板走。取值在 `apps/web/src/pluginHost/focusSurface.ts` 与 `usePluginFocus.ts`，不动上游文件：
@@ -81,15 +83,15 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 
 ## 自有目录
 
-| 目录                                               | 内容                                                                                                                 |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `packages/contracts/src/pluginHost/`               | 清单、RPC 载荷与快照 schema、应用栏配置（`rail.ts`）、视图声明的 `icon`                                              |
-| `apps/server/src/pluginHost/`                      | 加载、对账、子进程、服务转发、Agent 工具、视图交付                                                                   |
-| `apps/web/src/pluginHost/`                         | 视图框与桥、命令面板项、右侧面板「打开视图」与 “+” 菜单里的视图入口、服务面板、设置页                                |
-| `apps/web/src/pluginHost/rail/`                    | 应用栏：组件、固定与点击的纯逻辑、图标表、「＋」弹层与「…」弹层、网页应用表单与标签记录、配置读写、栏是否可见的 hook |
-| `packages/client-runtime/src/state/pluginHost*.ts` | 网页端按环境的快照状态                                                                                               |
-| `plugin-host-examples/`                            | 示例 `echo-clock`（带 `icon`）、`greeter`、`git-status`                                                              |
-| `plugin-host-cordis/`                              | 可选的 Cordis 适配包与示例 `example.counter`                                                                         |
+| 目录                                               | 内容                                                                                                                    |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `packages/contracts/src/pluginHost/`               | 清单、RPC 载荷与快照 schema、应用栏配置（`rail.ts`）、视图声明的 `icon`、宿主与测试件共用的限制与校验（`hostRules.ts`） |
+| `apps/server/src/pluginHost/`                      | 加载、对账、子进程、服务转发、Agent 工具、视图交付                                                                      |
+| `apps/web/src/pluginHost/`                         | 视图框与桥、命令面板项、右侧面板「打开视图」与 “+” 菜单里的视图入口、服务面板、设置页                                   |
+| `apps/web/src/pluginHost/rail/`                    | 应用栏：组件、固定与点击的纯逻辑、图标表、「＋」弹层与「…」弹层、网页应用表单与标签记录、配置读写、栏是否可见的 hook    |
+| `packages/client-runtime/src/state/pluginHost*.ts` | 网页端按环境的快照状态                                                                                                  |
+| `plugin-host-examples/`                            | 示例 `echo-clock`（带 `icon`）、`greeter`、`git-status`                                                                 |
+| `plugin-host-cordis/`                              | 可选的 Cordis 适配包与示例 `example.counter`                                                                            |
 
 展示视频用的 `scripts/showcase-cn/` 与 `apps/server/scripts/dev-replay/showcase_*` 也是 fork 自有：`plugins` 剧本用插件仓的合成 IMAP、测试专用钥匙串条目和两份自写回放录音（提问、邮件审批）。两份录音在上游 `dev-replay-agent.ts` 的 `SCENARIOS` 里各插了一项，同步冲突时按插入点重挂。
 
@@ -104,7 +106,11 @@ t3code-cn 自建的通用插件系统，语义参照 Cordis：插件按清单声
 
 插件仓怎么用：设 `T3_FORK_DIR` 指向含本目录的 fork 检出（没设时按 `../../t3code-cn` 找），测试里用 `createRequire(import.meta.url)(<fork>/apps/web/src/pluginHost/testkit/index.ts)` 同步加载，Node 原生剥类型执行（需要 Node ≥ 22.18）；不要用 vitest 的 `import()`，它拦着不让加载仓外文件。找不到文件必须抛错，不能 `skipIf`。因为是 Node 原生加载，这几个文件只能用可擦除的 TypeScript、相对导入带 `.ts`、不导入 `effect` 与 `@t3tools/*`；`testkit/index.test.ts` 里有一条用裸 Node 加载它的测试守着这一点。
 
-还没做：存储单值 256 KiB（`PluginHost.ts`）和缓存单值 2 MiB（`PluginCache.ts`）的判断、`context.handle` 登记名在激活时的 `HandlerName` 检查（`PluginIpc.ts`）、`callService` 的 `inject`／方法声明检查与 `inputProblem`（`PluginServiceCall.ts`）、`readOnly` 与 `changed`。这几处在 Effect 文件里，要先抽成无导入的纯函数；上游文件 0 行。
+插件一侧的 `context`：`createPluginContext({ pluginId, capabilities, settings?, inject?, providers?, cacheLimits? })` 返回 `{ context, dataRevision(provider), storageKeys(), cacheKeys() }`。`context.cache` 始终有，`settings`、`storage` 只在 `capabilities` 含 `settings` 时有；`context.services` 只含 `inject` 里的服务（与子进程一致，没注入的服务不存在）。限制与报错句子来自 `packages/contracts/src/pluginHost/hostRules.ts`，宿主（`PluginHost.ts`、`PluginCache.ts`、`PluginServiceCall.ts`、`childRuntime.ts`）与测试件共用这一份无导入文件：存储单值 256 KiB（量值本身）、缓存单条 2 MiB（量 `{key,value}` 整条）与总量 50 MiB 的最近最少使用淘汰（`get` 刷新使用序，刚写入的不淘汰）、键截到 128 字符、未声明的设置项、缺 `key`、服务方法不存在，以及 `readOnly` 方法不推进 `dataRevision`（失败的调用也不推进）。`createViewHost` 可另传 `pluginId` 与 `inject`，视图的 `callService` 超出 `inject` 时回宿主同一句 `not-found`；插件抛出带合格 `code` 的错误时，`ViewCallError.pluginCode` 带上它（宿主的 `code` 仍是 `call-failed`）。`apps/server/src/pluginHost/PluginTestkitParity.test.ts` 对同一份插件源码同时跑真实宿主和测试件，逐句比对报错。
+
+还没做：`context.handle` 登记名在激活时的 `HandlerName` 检查（`PluginIpc.ts`）与 `callService` 的 `inputProblem`（Agent 入口用，仍在 `PluginServiceCall.ts`）。上游文件 0 行。
+
+插件仓怎么接：`const { createViewHost, createPluginContext, ViewCallError } = createRequire(import.meta.url)(<fork>/apps/web/src/pluginHost/testkit/index.ts)`；`createPluginContext(...).context` 当作 `activate(context)` 的参数（再补上 `handle`、`provide`、`log`）；视图的页面侧自己把 `error` 消息的 `code`、`pluginCode` 挂到抛出的 `Error` 上（示例 `plugin-host-examples/greeter/view.html`）。
 
 ## 上游挂载点
 

@@ -69,10 +69,11 @@ export const makeSlot = (record: RegistryRecord): Slot => ({
   views: [],
 });
 
-export const fail = (reason: PluginHostError["reason"], detail?: string) =>
+export const fail = (reason: PluginHostError["reason"], detail?: string, pluginCode?: string) =>
   new PluginHostError({
     reason,
     ...(detail === undefined ? {} : { detail: detail.slice(0, 1000) }),
+    ...(pluginCode === undefined ? {} : { pluginCode }),
   });
 
 const RESERVED_SERVICES = new Set<string>(PLUGIN_HOST_SERVICE_NAMES);

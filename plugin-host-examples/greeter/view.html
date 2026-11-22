@@ -38,7 +38,13 @@
           const body = JSON.parse(message.data);
           if (body._tag === "ping") port.postMessage(JSON.stringify({ _tag: "pong", n: body.n }));
           else if (body._tag === "result") pending.get(body.id)?.resolve(body.value);
-          else if (body._tag === "error") pending.get(body.id)?.reject(new Error(body.message));
+          else if (body._tag === "error")
+            pending.get(body.id)?.reject(
+              Object.assign(new Error(body.message), {
+                code: body.code,
+                pluginCode: body.pluginCode,
+              }),
+            );
           if (body._tag === "result" || body._tag === "error") pending.delete(body.id);
           if (body._tag === "init") start();
         };

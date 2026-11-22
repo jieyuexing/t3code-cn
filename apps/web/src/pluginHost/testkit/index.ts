@@ -3,14 +3,27 @@
 // with plain Node (see fork-notes/plugin-host.md), so everything it imports must stay import-free and erasable.
 import { createBridgeGate, viewHandlerName } from "../bridgeRules.ts";
 import { hostMethodDenial } from "../hostMethods.ts";
+import {
+  injectionProblem,
+  pluginErrorCode,
+  pluginErrorText,
+} from "../../../../../packages/contracts/src/pluginHost/hostRules.ts";
 
-/** A call the host refused or the plugin failed; `code` is what the page's call would have been rejected with. */
+export { createPluginContext } from "./pluginContext.ts";
+export type { PluginContextOptions, ServiceProvider } from "./pluginContext.ts";
+
+/**
+ * A call the host refused or the plugin failed; `code` is what the page's call would have been rejected with
+ * and `pluginCode` the `code` the plugin's own error carried, when it had a usable one.
+ */
 // @effect-diagnostics-next-line extendsNativeError:off - Plugin repos run this outside Effect and catch it as a plain Error with a `code`.
 export class ViewCallError extends Error {
   readonly code: string;
-  constructor(message: string, code: string) {
+  declare readonly pluginCode?: string;
+  constructor(message: string, code: string, pluginCode?: string) {
     super(message);
     this.code = code;
+    if (pluginCode !== undefined) this.pluginCode = pluginCode;
   }
 }
 
@@ -26,6 +39,9 @@ export interface ViewHostOptions {
   readonly host?: Readonly<Record<string, Run>>;
   /** A stand-in for the services the plugin injects. */
   readonly service?: (service: string, method: string, input: unknown) => unknown;
+  /** With `inject`, a service call outside it is refused the way the host refuses it; `pluginId` names the plugin in that sentence. */
+  readonly pluginId?: string;
+  readonly inject?: ReadonlyArray<string>;
 }
 
 export function createViewHost(options: ViewHostOptions) {
@@ -72,6 +88,14 @@ export function createViewHost(options: ViewHostOptions) {
           }
           return run(call.input);
         }
+        if (options.inject !== undefined) {
+          const notInjected = injectionProblem(
+            options.pluginId ?? "the plugin",
+            options.inject,
+            call.service,
+          );
+          if (notInjected !== undefined) throw new ViewCallError(notInjected, "not-found");
+        }
         if (options.service === undefined) {
           throw new ViewCallError(
             `The test gives no stand-in for service ${call.service}.`,
@@ -86,10 +110,7 @@ export function createViewHost(options: ViewHostOptions) {
     } catch (error) {
       gate.drop(id);
       if (error instanceof ViewCallError) throw error;
-      throw new ViewCallError(
-        error instanceof Error ? error.message : "The call failed.",
-        "call-failed",
-      );
+      throw new ViewCallError(pluginErrorText(error), "call-failed", pluginErrorCode(error));
     }
   };
 

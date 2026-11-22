@@ -30,13 +30,15 @@ export interface PluginViewContext {
   };
 }
 
-/** A failed page call, carrying the code the page receives. */
+/** A failed page call, carrying the code the page receives and, when the plugin threw one, its own. */
 export class BridgeCallError extends Schema.TaggedError<BridgeCallError>()("BridgeCallError", {
   code: Schema.String,
   message: Schema.String,
+  pluginCode: Schema.optionalKey(Schema.String),
 }) {}
 const isBridgeCallError = Schema.is(BridgeCallError);
 
+// oxlint-disable t3code/no-untranslated-copy -- error messages go to the plugin page for its developer, not into T3 Code's own UI
 const BRIDGE_PING_INTERVAL_MS = 5_000;
 
 export type BridgeTeardownReason = "unresponsive" | "violations";
@@ -163,6 +165,9 @@ export function attachPluginViewBridge(options: {
             id,
             code: isBridgeCallError(error) ? error.code : "call-failed",
             message: error instanceof Error ? error.message : "The call failed.",
+            ...(isBridgeCallError(error) && error.pluginCode !== undefined
+              ? { pluginCode: error.pluginCode }
+              : {}),
           });
         },
       );

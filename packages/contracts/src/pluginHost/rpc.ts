@@ -3,6 +3,7 @@ import * as Rpc from "effect/rpc/Rpc";
 
 import { EnvironmentAuthorizationError } from "../auth.ts";
 import { NonNegativeInt, TrimmedNonEmptyString } from "../baseSchemas.ts";
+import { PLUGIN_ERROR_CODE_PATTERN } from "./hostRules.ts";
 import { PluginId, PluginSettingValue } from "./manifest.ts";
 import { RailConfig } from "./rail.ts";
 import { PluginHostSnapshot } from "./snapshot.ts";
@@ -83,10 +84,15 @@ export const PluginHostErrorReason = Schema.Literals([
 ]);
 export type PluginHostErrorReason = typeof PluginHostErrorReason.Type;
 
+/** The `code` a plugin's own error carries: 1–64 characters of `[A-Za-z0-9_.-]`. */
+export const PluginErrorCode = Schema.String.check(Schema.isPattern(PLUGIN_ERROR_CODE_PATTERN));
+
 export class PluginHostError extends Schema.TaggedError<PluginHostError>()("PluginHostError", {
   reason: PluginHostErrorReason,
   /** Bounded text from the manifest check or the plugin; never a raw payload. */
   detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(1000))),
+  /** The `code` of the error a plugin handler threw, apart from the host's own `reason`. */
+  pluginCode: Schema.optionalKey(PluginErrorCode),
 }) {
   override get message(): string {
     return this.detail === undefined

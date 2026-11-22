@@ -13,22 +13,19 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
-import type { Json } from "./PluginIpc.ts";
+import {
+  cacheEvictions,
+  cacheValueProblem,
+  PLUGIN_CACHE_MAX_BYTES,
+  PLUGIN_CACHE_MAX_VALUE_BYTES,
+  type CacheUsed,
+} from "@t3tools/contracts";
 
-/** Total a plugin's cache may hold. */
-const CACHE_MAX_BYTES = 50 * 1024 * 1024;
-/** One cached value, serialized. Room for the translation of a long article several times over. */
-const CACHE_MAX_VALUE_BYTES = 2 * 1024 * 1024;
+import type { Json } from "./PluginIpc.ts";
 
 const Entry = Schema.Struct({ key: Schema.String, value: Schema.Json });
 const decodeEntry = Schema.decodeUnknownOption(Schema.fromJsonString(Entry));
 const encodeEntry = Schema.encodeSync(Schema.fromJsonString(Entry));
-
-interface Used {
-  readonly bytes: number;
-  /** Larger is more recent. */
-  readonly order: number;
-}
 
 export const makePluginCache = Effect.fn("PluginCache.make")(function* (
   stateDir: string,
@@ -36,11 +33,11 @@ export const makePluginCache = Effect.fn("PluginCache.make")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const maxBytes = limits.maxBytes ?? CACHE_MAX_BYTES;
-  const maxValueBytes = limits.maxValueBytes ?? CACHE_MAX_VALUE_BYTES;
+  const maxBytes = limits.maxBytes ?? PLUGIN_CACHE_MAX_BYTES;
+  const maxValueBytes = limits.maxValueBytes ?? PLUGIN_CACHE_MAX_VALUE_BYTES;
   const root = path.join(stateDir, "plugins", "cache");
   const lock = yield* Semaphore.make(1);
-  const indexes = new Map<string, Map<string, Used>>();
+  const indexes = new Map<string, Map<string, CacheUsed>>();
   let clock = 0;
 
   const directoryOf = (pluginId: string) => path.join(root, pluginId);
@@ -73,14 +70,14 @@ export const makePluginCache = Effect.fn("PluginCache.make")(function* (
           ),
         });
     }
-    const index = new Map<string, Used>();
+    const index = new Map<string, CacheUsed>();
     for (const { name, bytes } of found.toSorted((left, right) => left.modified - right.modified))
       index.set(name, { bytes, order: ++clock });
     indexes.set(pluginId, index);
     return index;
   });
 
-  const total = (index: ReadonlyMap<string, Used>) =>
+  const total = (index: ReadonlyMap<string, CacheUsed>) =>
     [...index.values()].reduce((sum, used) => sum + used.bytes, 0);
 
   const get = (pluginId: string, key: string) =>
@@ -107,7 +104,8 @@ export const makePluginCache = Effect.fn("PluginCache.make")(function* (
       Effect.gen(function* () {
         const text = encodeEntry({ key, value });
         const bytes = new TextEncoder().encode(text).length;
-        if (bytes > maxValueBytes) return yield* Effect.fail("The value is too large to cache.");
+        const tooLarge = cacheValueProblem(bytes, maxValueBytes);
+        if (tooLarge !== undefined) return yield* Effect.fail(tooLarge);
         const index = yield* indexOf(pluginId);
         const directory = directoryOf(pluginId);
         const name = fileOf(key);
@@ -120,10 +118,7 @@ export const makePluginCache = Effect.fn("PluginCache.make")(function* (
         if (Option.isNone(written)) return yield* Effect.fail("The value could not be cached.");
         index.set(name, { bytes, order: ++clock });
         // Over the total: the least recently used go first; the value just written stays.
-        for (const [oldest] of [...index].toSorted(
-          (left, right) => left[1].order - right[1].order,
-        )) {
-          if (total(index) <= maxBytes || oldest === name) break;
+        for (const oldest of cacheEvictions(index, name, maxBytes)) {
           yield* fs.remove(path.join(directory, oldest), { force: true }).pipe(Effect.ignore);
           index.delete(oldest);
         }

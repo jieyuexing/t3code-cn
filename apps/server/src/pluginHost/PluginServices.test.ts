@@ -517,6 +517,21 @@ const uiProvider = {
 `,
 };
 
+/** Methods that throw an error with a `code`, an unusable one or none at all. */
+const failingProvider = {
+  provides: [UI_SERVICE],
+  methods: ["coded", "badCode", "plain"].map((name) => ({ name, ui: true })),
+  source: `export function activate(context) {
+  const failing = (message, code) => () => { throw Object.assign(new Error(message), code === undefined ? {} : { code }); };
+  context.provide(${JSON.stringify(UI_SERVICE)}, {
+    coded: failing("no client", "missingClient"),
+    badCode: failing("odd code", "not a code"),
+    plain: failing("plain failure"),
+  });
+}
+`,
+};
+
 const callService = (service: string, method: string, input: unknown = {}) =>
   ({ _tag: "callService", service, method, input }) as PluginHostCallInput;
 const callViewService = (pluginId: string, service: string, method: string, input: unknown = {}) =>
@@ -660,5 +675,33 @@ describe("service calls from the interface and from views", () => {
         expect(hidden.value).toEqual({ caller: "ui.dependent" });
         expect(spawns.count).toBe(1);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("a failing method's own code reaches the caller apart from the host's reason", () =>
+    Effect.gen(function* () {
+      const { call, enable, addGenerated } = yield* setup();
+      yield* addGenerated(UI_PROVIDER, failingProvider);
+      yield* addGenerated("ui.dependent", { inject: [UI_SERVICE] });
+      yield* enable(UI_PROVIDER);
+      yield* enable("ui.dependent");
+
+      const coded = yield* call(callService(UI_SERVICE, "coded")).pipe(Effect.flip);
+      expect([coded.reason, coded.pluginCode]).toEqual(["call-failed", "missingClient"]);
+      expect(coded.detail).toContain(`${UI_SERVICE} (${UI_PROVIDER}): `);
+      expect(coded.detail).toContain("no client");
+
+      const fromView = yield* call(callViewService("ui.dependent", UI_SERVICE, "coded")).pipe(
+        Effect.flip,
+      );
+      expect([fromView.reason, fromView.pluginCode]).toEqual(["call-failed", "missingClient"]);
+
+      for (const method of ["badCode", "plain"]) {
+        const failed = yield* call(callService(UI_SERVICE, method)).pipe(Effect.flip);
+        expect(failed.reason).toBe("call-failed");
+        expect(failed).not.toHaveProperty("pluginCode");
+      }
+      const plain = yield* call(callService(UI_SERVICE, "plain")).pipe(Effect.flip);
+      expect(plain.detail).toBe(`${UI_SERVICE} (${UI_PROVIDER}): failed: plain failure`);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

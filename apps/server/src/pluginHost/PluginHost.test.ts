@@ -178,6 +178,55 @@ describe("PluginHost", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.live(
+    "a handler's error code reaches the caller; a code that does not qualify is dropped",
+    () =>
+      Effect.gen(function* () {
+        const { fs, path, host, copyExample, invoke } = yield* setup();
+        const directory = yield* copyExample("echo");
+        yield* fs.writeFileString(
+          path.join(directory, "index.mjs"),
+          `export function activate(context) {
+  const failWith = (code) => () => { throw Object.assign(new Error("boom"), code === undefined ? {} : { code }); };
+  context.provide("example.clock", { now: () => ({}), info: () => ({}) });
+  context.handle("coded", failWith("missingClient"));
+  context.handle("dotted", failWith("a.b_c-D9"));
+  context.handle("empty", failWith(""));
+  context.handle("long", failWith("x".repeat(65)));
+  context.handle("spaced", failWith("not a code"));
+  context.handle("numeric", failWith(404));
+  context.handle("plain", failWith(undefined));
+  context.handle("structured", () => { throw { code: "rateLimited", message: "slow down" }; });
+}
+`,
+        );
+        yield* call(host, { _tag: "add", path: directory });
+        yield* call(host, { _tag: "enable", pluginId, grantConsent: true });
+
+        const coded = yield* invoke("coded").pipe(Effect.flip);
+        expect([coded.reason, coded.detail, coded.pluginCode]).toEqual([
+          "call-failed",
+          "failed: boom",
+          "missingClient",
+        ]);
+        expect((yield* invoke("dotted").pipe(Effect.flip)).pluginCode).toBe("a.b_c-D9");
+        const structured = yield* invoke("structured").pipe(Effect.flip);
+        expect([structured.detail, structured.pluginCode]).toEqual([
+          "failed: slow down",
+          "rateLimited",
+        ]);
+        for (const handler of ["empty", "long", "spaced", "numeric", "plain"]) {
+          const error = yield* invoke(handler).pipe(Effect.flip);
+          expect([handler, error.reason, error.detail]).toEqual([
+            handler,
+            "call-failed",
+            "failed: boom",
+          ]);
+          expect(error).not.toHaveProperty("pluginCode");
+        }
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.live("a failed first start reaches the caller and follows backoff and quarantine", () =>
     Effect.gen(function* () {
       const { fs, path, host, copyExample, spawns, next, invoke } = yield* setup();

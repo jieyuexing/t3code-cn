@@ -33,6 +33,8 @@ export class PluginCallError extends Schema.TaggedError<PluginCallError>()("Plug
   handler: Schema.String,
   reason: Schema.Literals(["stopped", "timeout", "too-large", "failed"]),
   detail: Schema.optionalKey(Schema.String),
+  /** The `code` of the error the plugin threw. */
+  code: Schema.optionalKey(Schema.String),
 }) {
   override get message(): string {
     return `Plugin ${this.pluginId} ${this.reason} "${this.handler}"${this.detail === undefined ? "" : `: ${this.detail}`}`;
@@ -114,6 +116,7 @@ export function childEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.Pro
 interface CallFailure {
   readonly reason: PluginCallError["reason"];
   readonly detail?: string;
+  readonly code?: string;
 }
 
 /** Starts the child, waits until the plugin has activated, and stops it when the scope closes. */
@@ -196,7 +199,14 @@ export const spawnPluginProcess = Effect.fn("PluginProcess.spawn")(function* (
         pending.delete(message.requestId);
         if (deferred === undefined) break;
         if (message._tag === "Failed")
-          Deferred.doneUnsafe(deferred, Effect.fail({ reason: "failed", detail: message.message }));
+          Deferred.doneUnsafe(
+            deferred,
+            Effect.fail({
+              reason: "failed",
+              detail: message.message,
+              ...(message.code === undefined ? {} : { code: message.code }),
+            }),
+          );
         else if (jsonBytes(message.value) > options.maxPayloadBytes)
           Deferred.doneUnsafe(deferred, Effect.fail({ reason: "too-large" }));
         else Deferred.doneUnsafe(deferred, Effect.succeed(message.value));

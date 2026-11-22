@@ -1,5 +1,6 @@
 import { PluginId } from "@t3tools/contracts";
 import { EnvironmentId } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 
@@ -50,20 +51,39 @@ vi.mock("./useHostApi", async () => {
 });
 vi.mock("./usePluginHost", () => ({
   pluginHostFailureMessage: () => "failed",
-  usePluginHostCall: () => async (input: { _tag: string; handler?: string; input?: unknown }) => {
-    fixture.calls.push(input);
-    if (input._tag === "readView") {
-      return AsyncResult.success({ value: { generation: 1, url: fixture.pageUrl, expiresAt: 0 } });
-    }
-    if (input._tag === "callViewService")
-      return AsyncResult.success({ value: { text: "09:00:00" } });
-    if (input.handler === "view:clock:now")
-      return AsyncResult.success({ value: { text: "12:34:56" } });
-    fixture.echoes += 1;
-    return AsyncResult.success({
-      value: { echo: (input.input as { message: string }).message, n: fixture.echoes },
-    });
-  },
+  usePluginHostCall:
+    () => async (input: { _tag: string; handler?: string; method?: string; input?: unknown }) => {
+      fixture.calls.push(input);
+      if (input._tag === "readView") {
+        return AsyncResult.success({
+          value: { generation: 1, url: fixture.pageUrl, expiresAt: 0 },
+        });
+      }
+      const failing = (input._tag === "invoke" ? input.handler : input.method)?.replace(
+        /^view:[^:]+:/,
+        "",
+      );
+      if (failing === "failCoded" || failing === "failPlain") {
+        const { PluginHostError } = await import("@t3tools/contracts");
+        return AsyncResult.failure(
+          Cause.fail(
+            new PluginHostError({
+              reason: "call-failed",
+              detail: "failed: no client",
+              ...(failing === "failCoded" ? { pluginCode: "missingClient" } : {}),
+            }),
+          ),
+        );
+      }
+      if (input._tag === "callViewService")
+        return AsyncResult.success({ value: { text: "09:00:00" } });
+      if (input.handler === "view:clock:now")
+        return AsyncResult.success({ value: { text: "12:34:56" } });
+      fixture.echoes += 1;
+      return AsyncResult.success({
+        value: { echo: (input.input as { message: string }).message, n: fixture.echoes },
+      });
+    },
 }));
 
 const environmentId = EnvironmentId.make("environment-a");
@@ -234,6 +254,39 @@ it("takes the plugin from its own frame, never from the page, and refuses names 
       input: null,
     },
   ]);
+});
+
+// A page that makes a handler call and a service call that fail, once with and once without a plugin code.
+const FAILING_PAGE = `<!doctype html><title>failing</title><script>
+  window.addEventListener("message", (event) => {
+    if (event.source !== parent || event.data?.type !== "t3-view:connect") return;
+    const port = event.ports[0];
+    const send = (message) => port.postMessage(JSON.stringify(message));
+    port.onmessage = (message) => {
+      const body = JSON.parse(message.data);
+      if (body._tag === "ping") send({ _tag: "pong", n: body.n });
+      if (body._tag === "init") {
+        send({ _tag: "call", id: 1, handler: "failCoded", input: null });
+        send({ _tag: "call", id: 2, handler: "failPlain", input: null });
+        send({ _tag: "callService", id: 3, service: "example.clock", method: "failCoded", input: null });
+        send({ _tag: "callService", id: 4, service: "example.clock", method: "failPlain", input: null });
+      }
+      if (body._tag === "error")
+        parent.postMessage({ type: "test-observe", what: "error", text: [body.id, body.code, body.pluginCode, Object.keys(body).sort()].join(":") }, "*");
+    };
+  });
+  parent.postMessage({ type: "t3-view:ready" }, "*");
+</script>`;
+
+it("gives the page the plugin's own error code beside the host's, and omits it when there is none", async () => {
+  using observed = setup(FAILING_PAGE);
+  await using _screen = await render(frame, { router: false });
+  const keys = (extra: string[]) => ["_tag", "code", "id", "message", ...extra].join(",");
+  const coded = (id: number) => `error:${id}:call-failed:missingClient:${keys(["pluginCode"])}`;
+  const plain = (id: number) => `error:${id}:call-failed::${keys([])}`;
+  await vi.waitFor(() =>
+    expect(observed.seen).toEqual(expect.arrayContaining([coded(1), plain(2), coded(3), plain(4)])),
+  );
 });
 
 // A page that reports the context it was given and what the host answers to each `callHost`.

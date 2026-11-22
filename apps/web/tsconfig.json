@@ -31,6 +31,7 @@
     "vite.config.ts",
     "vercel.ts",
     "gt.config.json",
+    "../../packages/contracts/src/pluginHost/hostRules.ts",
     "test",
     "scripts/verify-built-boot.ts",
     "scripts/warm-dep-cache.ts",

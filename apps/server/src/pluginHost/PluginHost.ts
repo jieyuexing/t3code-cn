@@ -9,8 +9,10 @@ import {
   type PluginId,
   type PluginSettingValue,
   DEFAULT_RAIL_CONFIG,
+  pluginKey,
   RAIL_MAX_ITEMS,
   railItemKey,
+  storageValueProblem,
   type RailConfig,
   type RailItem,
 } from "@t3tools/contracts";
@@ -32,7 +34,7 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import { ServerConfig } from "../config.ts";
-import { HostCallInput, jsonBytes, type Json, type PluginDataFile } from "./PluginIpc.ts";
+import { HostCallInput, type Json, type PluginDataFile } from "./PluginIpc.ts";
 import { loadPluginDirectory, type PluginRegistration } from "./PluginManifestLoader.ts";
 import { spawnPluginProcess, type PluginProcess } from "./PluginProcess.ts";
 import {
@@ -80,7 +82,6 @@ export interface PluginHostOptions extends PluginViewDeliveryOptions {
 }
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
-const MAX_STORAGE_VALUE_BYTES = 256 * 1024;
 
 export class PluginHost extends Context.Service<
   PluginHost,
@@ -209,7 +210,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
       const request = yield* decodeHostCallInput(input).pipe(
         Effect.mapError(() => "The request needs a key."),
       );
-      const key = request.key.slice(0, 128);
+      const key = pluginKey(request.key);
       if (method === "settings.get") {
         const declared = slot.registration?.manifest.settings.some((field) => field.key === key);
         return declared
@@ -230,8 +231,8 @@ export const make = Effect.fn("PluginHost.make")(function* (
         return data.storage[key] ?? null;
       }
       const value = request.value ?? null;
-      if (jsonBytes(value) > MAX_STORAGE_VALUE_BYTES)
-        return yield* Effect.fail("The value is too large to store.");
+      const tooLarge = storageValueProblem(value);
+      if (tooLarge !== undefined) return yield* Effect.fail(tooLarge);
       yield* dataLock
         .withPermits(1)(
           Effect.gen(function* () {
@@ -503,6 +504,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
           fail(
             "call-failed",
             error.detail === undefined ? error.reason : `${error.reason}: ${error.detail}`,
+            error.code,
           ),
         ),
       );

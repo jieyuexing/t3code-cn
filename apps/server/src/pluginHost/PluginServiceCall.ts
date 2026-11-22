@@ -1,6 +1,13 @@
 // Calls into plugin services: from another plugin or one of its views, from the interface and from an agent.
 // Every source takes the same way to the provider and differs only in who the provider sees and what it may call.
-import type { PluginHostError, PluginId } from "@t3tools/contracts";
+import {
+  injectionProblem,
+  methodWrites,
+  missingMethodProblem,
+  serviceOrigin,
+  type PluginHostError,
+  type PluginId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -148,19 +155,20 @@ export const makeServiceCalls = (dependencies: ServiceCallDependencies) => {
           fail(
             "call-failed",
             error.detail === undefined ? error.reason : `${error.reason}: ${error.detail}`,
+            error.code,
           ),
         ),
       );
     const declared = provider.registration?.manifest.provides
       .find((candidate) => candidate.name === request.service)
       ?.methods.find((candidate) => candidate.name === request.method);
-    if (declared?.readOnly !== true) yield* onWrite(provider);
+    if (declared === undefined || methodWrites(declared)) yield* onWrite(provider);
     return result;
   });
 
   /** Names the service and its provider, so the caller can tell whose error it is. */
   const withOrigin = (service: string, provider: Slot) => (error: PluginHostError) =>
-    fail(error.reason, `${service} (${provider.id}): ${failureText(error)}`);
+    fail(error.reason, serviceOrigin(service, provider.id, failureText(error)), error.pluginCode);
 
   /** Forwards a call from `caller` to a service method, after checking everything the host can check. */
   const callFromPlugin = Effect.fn("PluginServiceCall.fromPlugin")(function* (
@@ -171,11 +179,10 @@ export const makeServiceCalls = (dependencies: ServiceCallDependencies) => {
       Effect.mapError(() => "The request needs a service, a method and an input."),
     );
     const { service, method } = request;
-    if (!injectedServices(caller).includes(service))
-      return yield* Effect.fail(`Plugin ${caller.id} does not declare a dependency on ${service}.`);
+    const notInjected = injectionProblem(caller.id, injectedServices(caller), service);
+    if (notInjected !== undefined) return yield* Effect.fail(notInjected);
     const { provider, declared } = yield* reach(service, method).pipe(Effect.mapError(failureText));
-    if (declared === undefined)
-      return yield* Effect.fail(`The service ${service} has no method ${method}.`);
+    if (declared === undefined) return yield* Effect.fail(missingMethodProblem(service, method));
     return yield* forward(provider, request, caller.id).pipe(
       Effect.mapError((error) => failureText(withOrigin(service, provider)(error))),
     );
@@ -189,14 +196,11 @@ export const makeServiceCalls = (dependencies: ServiceCallDependencies) => {
     if (caller.offer === undefined)
       return yield* fail("not-running", `${caller.id} does not offer views right now.`);
     const { service, method } = request;
-    if (!injectedServices(caller).includes(service))
-      return yield* fail(
-        "not-found",
-        `Plugin ${caller.id} does not declare a dependency on ${service}.`,
-      );
+    const notInjected = injectionProblem(caller.id, injectedServices(caller), service);
+    if (notInjected !== undefined) return yield* fail("not-found", notInjected);
     const { provider, declared } = yield* reach(service, method);
     if (declared === undefined)
-      return yield* fail("not-found", `The service ${service} has no method ${method}.`);
+      return yield* fail("not-found", missingMethodProblem(service, method));
     return yield* forward(provider, request, caller.id).pipe(
       Effect.mapError(withOrigin(service, provider)),
     );

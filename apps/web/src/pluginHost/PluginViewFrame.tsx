@@ -9,6 +9,7 @@ import {
 import * as Schema from "effect/Schema";
 import { useEffect, useRef, useState } from "react";
 
+/* oxlint-disable t3code/no-untranslated-copy -- the plugin host UI is English-only for now (fork-notes/plugin-host.md) */
 import { Button } from "../components/ui/button";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { usePreparedConnection } from "../state/session";
@@ -26,13 +27,19 @@ import { usePluginViewContext } from "./viewContext";
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const isPluginHostError = Schema.is(PluginHostError);
 
-/** The value of a successful call; a failure reaches the page with the host's reason as its code. */
+/** The value of a successful call; a failure reaches the page with the host's reason as its code and the plugin's own code beside it. */
 async function settle(pending: ReturnType<ReturnType<typeof usePluginHostCall>>) {
   const result = await pending;
   if (result._tag === "Success") return result.value.value;
   const error = squashAtomCommandFailure(result);
   const code: BridgeErrorCode = isPluginHostError(error) ? error.reason : "call-failed";
-  throw new BridgeCallError({ code, message: pluginHostFailureMessage(result) });
+  throw new BridgeCallError({
+    code,
+    message: pluginHostFailureMessage(result),
+    ...(isPluginHostError(error) && error.pluginCode !== undefined
+      ? { pluginCode: error.pluginCode }
+      : {}),
+  });
 }
 
 type FrameState =
