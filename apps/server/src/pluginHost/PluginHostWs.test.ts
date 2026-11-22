@@ -108,6 +108,7 @@ import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfigModule from "../config.ts";
 import * as Keybindings from "../keybindings.ts";
+import * as FeatureFlags from "@t3tools/shared/FeatureFlags";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -206,6 +207,7 @@ const layerRpcServices = Layer.mergeAll(
   Layer.mock(WorkspaceEntries.WorkspaceEntries)({}),
   Layer.mock(WorkspaceFileSystem.WorkspaceFileSystem)({}),
   Layer.mock(WorktreeSetupTracker.WorktreeSetupTracker)({}),
+  FeatureFlags.layerTest(),
   Layer.mock(ExternalLauncher.ExternalLauncher)({}),
   Layer.mock(ProviderRegistry.ProviderRegistry)({}),
   Layer.mock(UsageLimitSources.UsageLimitSources)({}),
