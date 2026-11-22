@@ -12469,5 +12469,7 @@
   "b7df38b7d8792d78": "Open guide",
   "9e91e9a77b664e4e": "Could not start a review guide",
   "d8aaf932f90429c4": "Move this command to the front of the queue ({shortcut})",
-  "425ab15036aec8a4": "Move this command to the front of the queue"
+  "425ab15036aec8a4": "Move this command to the front of the queue",
+  "3cca443a29598861": "Float browser on close",
+  "209a6b2e53a9ef43": "Keep a floating preview in the corner after closing the browser panel."
 }

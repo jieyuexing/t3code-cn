@@ -12460,5 +12460,7 @@
   "b7df38b7d8792d78": "Leitfaden öffnen",
   "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden",
   "d8aaf932f90429c4": "Diesen Befehl an den Anfang der Warteschlange verschieben ({shortcut})",
-  "425ab15036aec8a4": "Diesen Befehl an den Anfang der Warteschlange verschieben"
+  "425ab15036aec8a4": "Diesen Befehl an den Anfang der Warteschlange verschieben",
+  "3cca443a29598861": "Browser beim Schließen schweben lassen",
+  "209a6b2e53a9ef43": "Nach dem Schließen des Browser-Bereichs eine schwebende Vorschau in der Ecke behalten."
 }

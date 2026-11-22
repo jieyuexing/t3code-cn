@@ -12455,5 +12455,7 @@
   "b7df38b7d8792d78": "Abrir guía",
   "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión",
   "d8aaf932f90429c4": "Mover este comando al principio de la cola ({shortcut})",
-  "425ab15036aec8a4": "Mover este comando al principio de la cola"
+  "425ab15036aec8a4": "Mover este comando al principio de la cola",
+  "3cca443a29598861": "Flotar el navegador al cerrar",
+  "209a6b2e53a9ef43": "Mantén una vista previa flotante en la esquina tras cerrar el panel del navegador."
 }

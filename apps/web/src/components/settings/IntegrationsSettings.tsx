@@ -1,4 +1,5 @@
 import { managedCapabilityDenial } from "@t3tools/client-runtime/contract-labels";
+import { FloatBrowserOnCloseSetting } from "../../browser/FloatBrowserOnCloseSetting.cn";
 import { DeviceHostUpdates } from "../device/DeviceHostUpdates";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
@@ -1701,6 +1702,7 @@ export function BrowserSettingsPanel() {
           <BrowserProfilesSetting disabled={desktopOnly} />
           <BrowserLinkTargetSetting disabled={desktopOnly} />
           <BrowserAutoShowFloatingPreviewSetting disabled={desktopOnly} />
+          <FloatBrowserOnCloseSetting />
         </SettingsUnavailableGroup>
         {/* Not desktop-only: web clients search from server-run browser tabs too. */}
         <BrowserSearchEngineSetting />

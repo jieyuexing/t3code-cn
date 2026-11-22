@@ -12467,5 +12467,7 @@
   "b7df38b7d8792d78": "Öppna guiden",
   "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide",
   "d8aaf932f90429c4": "Flytta det här kommandot först i kön ({shortcut})",
-  "425ab15036aec8a4": "Flytta det här kommandot först i kön"
+  "425ab15036aec8a4": "Flytta det här kommandot först i kön",
+  "3cca443a29598861": "Flytande webbläsare vid stängning",
+  "209a6b2e53a9ef43": "Behåll en flytande förhandsvisning i hörnet efter att webbläsarpanelen stängts."
 }
