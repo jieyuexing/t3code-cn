@@ -71,8 +71,8 @@ export interface TranscriptUsageFormat<State> {
   /** Reads a line from its bytes alone, sparing the decode of large lines; undefined sends it on to the gate and `parseLine`. */
   parseBytes?(line: Buffer, state: State): readonly UsageRecord[] | undefined;
   parseProjected(projected: unknown, state: State): readonly UsageRecord[];
-  /** Cumulative malformed or inconsistent usage records, including skipped records. */
-  readMalformedRecords?(state: State): number;
+  /** Timestamps of malformed or inconsistent usage records, including skipped records. */
+  readMalformedRecords?(state: State): readonly number[];
   /**
    * Present for formats whose records depend on earlier lines. The state at a
    * resume point is persisted in the scan cache through `schema`, so a grown

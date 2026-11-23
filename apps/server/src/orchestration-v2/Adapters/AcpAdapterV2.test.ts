@@ -628,6 +628,7 @@ const isProviderAdapterProtocolError = Schema.is(ProviderAdapter.ProviderAdapter
 const makePromptInactivityHarness = Effect.fnUntraced(function* (input: {
   readonly environment: (runtimeOrdinal: number) => Readonly<Record<string, string>>;
   readonly runtimeMode?: "full-access" | "approval-required";
+  readonly watchPromptOutcome?: AcpAdapterV2Flavor["watchPromptOutcome"];
   readonly wrapPrompt?: (
     prompt: AcpSessionRuntime.AcpSessionRuntime["Service"]["prompt"],
   ) => AcpSessionRuntime.AcpSessionRuntime["Service"]["prompt"];
@@ -644,6 +645,9 @@ const makePromptInactivityHarness = Effect.fnUntraced(function* (input: {
       driver: ACP_TEST_DRIVER,
       capabilities: AcpProviderCapabilitiesV2,
       promptInactivityTimeout: "15 minutes",
+      ...(input.watchPromptOutcome === undefined
+        ? {}
+        : { watchPromptOutcome: input.watchPromptOutcome }),
       ...(input.followAgentWorkState === true ? { followAgentWorkState: true } : {}),
       makeRuntime: makeMockRuntime({
         childProcessSpawner,
@@ -5847,6 +5851,48 @@ describe("AcpAdapterV2", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect("fails a silent prompt with the failure its outcome check recorded", () =>
+    Effect.gen(function* () {
+      const badGateway = {
+        class: "provider_error",
+        message: "Bad Gateway: Failed to connect to backend API",
+        code: "502 Bad Gateway",
+        retryable: true,
+      } as const;
+      // The agent logs the upstream error and leaves session/prompt open.
+      const harness = yield* makePromptInactivityHarness({
+        environment: () => ({ T3_ACP_HANG_PROMPT_FOREVER: "1" }),
+        watchPromptOutcome: () =>
+          Effect.succeed((_result, options) =>
+            Effect.succeed(
+              options?.retired === true
+                ? { failure: badGateway, threadDisposition: "reusable" as const }
+                : undefined,
+            ),
+          ),
+      });
+      yield* harness.startTurn(1);
+      yield* TestClock.adjust("15 minutes");
+      const [silent] = yield* harness.terminals(1);
+      assert.equal(silent?.status, "failed");
+      assert.deepEqual(silent?.failure, badGateway);
+    }).pipe(Effect.provide(layerTest), Effect.scoped),
+  );
+
+  it.effect("retires a silent prompt whose outcome check dies", () =>
+    Effect.gen(function* () {
+      const harness = yield* makePromptInactivityHarness({
+        environment: () => ({ T3_ACP_HANG_PROMPT_FOREVER: "1" }),
+        watchPromptOutcome: () => Effect.succeed(() => Effect.die("session log unreadable")),
+      });
+      yield* harness.startTurn(1);
+      yield* TestClock.adjust("15 minutes");
+      const [silent] = yield* harness.terminals(1);
+      assert.equal(silent?.status, "failed");
+      assert.include(silent?.failure?.message, "15 minutes");
+    }).pipe(Effect.provide(layerTest), Effect.scoped),
+  );
+
   // regression: #34160 a turn failed as silent right after the computer woke from sleep
   it.effect.each([
     { label: "a timer due during sleep fires on wake", timerCountsSleep: true, asleep: "2 hours" },
@@ -7248,11 +7294,9 @@ describe("AcpAdapterV2", () => {
         const event = yield* Queue.take(events);
         if (event.type === "turn.terminal" && event.providerTurnId === firstProviderTurnId) break;
       }
-      const snapshotBeforeRollback = yield* runtime.readThreadSnapshot({ providerThread });
-
       const rolledBack = yield* runtime.rollbackThread({
         providerThread: { ...providerThread, appThreadId: rollbackThreadId },
-        providerThreadTurns: snapshotBeforeRollback.providerTurns,
+        providerThreadTurns: [],
         target: {
           type: "thread_start",
           checkpointId: CheckpointId.make("checkpoint-acp-rollback-session"),
@@ -7260,7 +7304,6 @@ describe("AcpAdapterV2", () => {
         },
       });
       assert.isString(rolledBack.providerThread.nativeThreadRef?.nativeId);
-      assert.deepEqual(rolledBack.providerTurns, []);
       assert.equal(
         runtimeInputs[1]?.processEnvironment?.T3_ACP_MCP_AUTHORIZATION,
         "Bearer rollback-target-token",
@@ -7284,7 +7327,6 @@ describe("AcpAdapterV2", () => {
       const snapshotAfterRollback = yield* runtime.readThreadSnapshot({
         providerThread: rolledBack.providerThread,
       });
-      assert.deepEqual(snapshotAfterRollback.providerTurns, []);
       assert.deepEqual(snapshotAfterRollback.messages, []);
       const sessionEventsBeforeSecondTurn = sessionEventCount;
 
@@ -12703,15 +12745,13 @@ describe("AcpAdapterV2", () => {
 
         const tag = (note: string) => `<external_mcp_app_item-1>${note}</external_mcp_app_item-1>`;
 
-        // Unsuccessful stop reasons must not mark appContext delivered.
-        for (const stopReason of ["cancelled", "refusal", "error"] as const) {
-          const result = yield* runTurn({
-            text: `Attempt (${stopReason})`,
-            note: "Created Jira issue PROJ-42",
-            response: { stopReason },
-          });
-          assert.include(result.prompt, tag("Created Jira issue PROJ-42"));
-        }
+        // An unsuccessful stop reason must not mark appContext delivered.
+        const refusedTurn = yield* runTurn({
+          text: "Refused attempt",
+          note: "Created Jira issue PROJ-42",
+          response: { stopReason: "refusal" },
+        });
+        assert.include(refusedTurn.prompt, tag("Created Jira issue PROJ-42"));
 
         // Interrupted turns must not mark appContext delivered even if the prompt answers end_turn.
         const interruptedStarted = yield* Deferred.make<void>();

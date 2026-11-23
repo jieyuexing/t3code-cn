@@ -260,3 +260,15 @@ it("lets the update tool set, zero and clear the declared weight, within 0 to 10
   expect(decode({ environmentId, loadBalancingWeight: null }).loadBalancingWeight).toBeNull();
   expect(() => decode({ environmentId, loadBalancingWeight: 101 })).toThrow();
 });
+
+it("keeps agent feedback out of the preferences agents read and write", () => {
+  expect(
+    EnvironmentHandlers.preferences({
+      ...DEFAULT_SERVER_SETTINGS,
+      agentFeedback: { mode: "auto" },
+    }),
+  ).not.toHaveProperty("agentFeedback");
+  expect(
+    Object.keys(EnvironmentToolkit.tools.t3_environment_preferences_update.parametersSchema.fields),
+  ).not.toContain("agentFeedback");
+});

@@ -85,6 +85,7 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import {
   applyAcpAgentTerminalUpdate,
+  MAX_AGENT_TERMINAL_OUTPUT_CHARS,
   acpContentBlockDisplayText,
   embeddedTerminalIdsFromSessionUpdate,
   extractMcpToolCallIdentity,
@@ -422,15 +423,17 @@ export interface AcpAdapterV2Flavor {
   /** The flavor's runtime refuses a version the policy rates broken when it starts. */
   readonly checksVersionAtHandshake?: boolean;
   /**
-   * Runs before `session/prompt`. The returned check sees a prompt the agent ended
-   * without an error or cancel, and reports a failure its stop reason hid. A reported
-   * failure restarts the runtime before the next turn. A `broken` thread's native
-   * history is unusable, so the next turn falls back to a fresh session.
+   * Runs before `session/prompt`. The check reports a failure hidden by a clean stop, or
+   * by silence when the inactivity watchdog retires the prompt (`retired`). A failure
+   * restarts the runtime; a `broken` thread's next turn starts a fresh session.
    */
   readonly watchPromptOutcome?: (
     sessionId: string,
   ) => Effect.Effect<
-    (result: EffectAcpSchema.PromptResponse) => Effect.Effect<AcpPromptOutcomeFailure | undefined>
+    (
+      result: EffectAcpSchema.PromptResponse,
+      options?: { readonly retired?: boolean },
+    ) => Effect.Effect<AcpPromptOutcomeFailure | undefined>
   >;
   readonly requiresSignIn?: (cause: unknown) => boolean;
   /**
@@ -1818,6 +1821,12 @@ interface ActiveAcpTurn {
   inactivityWatchdog: Fiber.Fiber<void> | undefined;
 }
 
+const PROMPT_OUTCOME_CHECK_TIMEOUT = Duration.seconds(5);
+
+type PromptOutcomeCheck = Effect.Success<
+  ReturnType<NonNullable<AcpAdapterV2Flavor["watchPromptOutcome"]>>
+>;
+
 type AcpRuntimeTeardownState =
   | { readonly _tag: "Idle" }
   | {
@@ -2071,9 +2080,6 @@ const emptySnapshotState = (): SnapshotMessageState => ({
 /** How long a Stop waits for the agent to confirm before the user is offered Force stop. */
 const ACP_STOP_CONFIRM_TIMEOUT_MS = 10_000;
 const TOOL_UPDATE_PERSIST_EVERY = 10;
-
-// CommandOutputHub reads the last 256 KiB; retain more so its display cut stays unchanged.
-const MAX_AGENT_TERMINAL_OUTPUT_CHARS = 320 * 1024;
 
 // Agents can resend whole calls while streaming arguments.
 function shouldPersistToolUpdate(
@@ -2477,7 +2483,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         const emitNativeResponseLifecycle =
           options.testHooks?.onNativeResponseLifecycle ?? (() => Effect.void);
         const nextElicitationOrdinal = yield* Ref.make(0);
-        const providerTurns = yield* Ref.make(new Map<string, OrchestrationV2ProviderTurn>());
         const snapshot = yield* Ref.make(emptySnapshotState());
 
         const awaitRuntimeTeardown = Effect.fnUntraced(function* () {
@@ -8260,7 +8265,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             yield* Ref.set(deliveredAppContext, new Map());
             yield* Ref.set(compactionMarkers, new Map());
             yield* Ref.set(completedCompactionIds, new Set());
-            yield* Ref.set(providerTurns, new Map());
             yield* Ref.set(snapshot, emptySnapshotState());
             yield* continuationPermit.withPermit(
               Effect.gen(function* () {
@@ -8995,11 +8999,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           yield* reportAgentModeChanges(context.input.threadId);
           yield* reconcilePendingPromptSteers(context);
           const turn = providerTurnPayload(context, settledStatus, now);
-          yield* Ref.update(providerTurns, (current) => {
-            const updated = new Map(current);
-            updated.set(String(turn.id), turn);
-            return updated;
-          });
           yield* emitProviderEvent({
             type: "provider_turn.updated",
             driver,
@@ -9197,6 +9196,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           context: ActiveAcpTurn,
           generation: number,
           timeoutMillis: number,
+          checkPromptOutcome: PromptOutcomeCheck | undefined,
         ) {
           const retired = yield* runRuntimeCallbackAtGeneration(
             generation,
@@ -9217,14 +9217,31 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               yield* Ref.set(runtimeRestartRequired, true);
               yield* cancelPendingRuntimeRequests();
               yield* terminalizeOpenForegroundTools(context, "failed");
+              // Bounded: it runs under the transition permit that Stop and the next turn wait on.
+              const recorded =
+                checkPromptOutcome === undefined
+                  ? undefined
+                  : yield* checkPromptOutcome({ stopReason: "end_turn" }, { retired: true }).pipe(
+                      Effect.timeout(PROMPT_OUTCOME_CHECK_TIMEOUT),
+                      Effect.catchCause((cause) =>
+                        Effect.logError("failed to check a silent ACP prompt's outcome", {
+                          driver,
+                          cause,
+                        }).pipe(Effect.as(undefined)),
+                      ),
+                    );
               const minutes = Math.max(1, Math.round(timeoutMillis / 60_000));
               yield* finalizeTurn(
                 context,
                 "failed",
-                makeProviderFailure({
-                  class: "provider_error",
-                  message: `${flavor.runtimeHarness ?? driver} sent nothing for ${minutes} ${minutes === 1 ? "minute" : "minutes"}, so T3 Code stopped the turn and restarted the agent. Send a message to continue.`,
-                }),
+                recorded?.failure ??
+                  makeProviderFailure({
+                    class: "provider_error",
+                    message: `${flavor.runtimeHarness ?? driver} sent nothing for ${minutes} ${minutes === 1 ? "minute" : "minutes"}, so T3 Code stopped the turn and restarted the agent. Send a message to continue.`,
+                  }),
+                recorded === undefined
+                  ? undefined
+                  : { threadDisposition: recorded.threadDisposition },
               );
               return "retired" as const;
             }),
@@ -9248,6 +9265,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           context: ActiveAcpTurn,
           generation: number,
           timeoutMillis: number,
+          checkPromptOutcome: PromptOutcomeCheck | undefined,
         ) {
           yield* Deferred.await(context.promptDispatched);
           context.lastProgressAt = yield* Clock.currentTimeMillis;
@@ -9266,7 +9284,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               continue;
             }
             const outcome = yield* runtimeTransitionPermit.withPermit(
-              retireInactivePrompt(context, generation, timeoutMillis),
+              retireInactivePrompt(context, generation, timeoutMillis, checkPromptOutcome),
             );
             if (outcome !== "rearm") return;
           }
@@ -9386,6 +9404,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           });
           const sessionSetup = yield* Ref.get(activeSessionSetup);
           const runtimeInstructions = buildRuntimeInstructions({
+            agentFeedback: instructionState.hasT3Mcp ? (turnInput.agentFeedback ?? "off") : "off",
             harness: flavor.runtimeHarness ?? driver,
             model: turnInput.modelSelection.model,
             runtimePolicy: turnInput.runtimePolicy,
@@ -9989,11 +10008,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             yield* Ref.set(activeTurn, context);
             yield* Ref.set(stoppedRunQuarantine, false);
             const runningTurn = providerTurnPayload(context, "running", null);
-            yield* Ref.update(providerTurns, (current) => {
-              const updated = new Map(current);
-              updated.set(String(runningTurn.id), runningTurn);
-              return updated;
-            });
             yield* emitProviderEvent({
               type: "provider_turn.updated",
               driver,
@@ -10134,6 +10148,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 context,
                 promptGeneration,
                 promptInactivityTimeoutMillis,
+                checkPromptOutcome,
               ).pipe(Effect.forkIn(sessionScope));
             }
             const compactSession = isCompactionMessage(turnInput.message)
@@ -10335,6 +10350,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                         context,
                         generation,
                         promptInactivityTimeoutMillis,
+                        checkPromptOutcome,
                       ).pipe(Effect.forkIn(sessionScope));
                     }
                     const releasedForSteer = context.foregroundIdle;
@@ -10414,7 +10430,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               openTurn.interrupted = true;
               yield* finalizeTurn(openTurn, "interrupted");
             }
-            yield* Ref.set(deliveredAppContext, new Map());
             const requests = [...(yield* Ref.get(pendingRuntimeRequests)).values()];
             yield* Effect.forEach(
               requests,
@@ -10740,6 +10755,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 steerText,
                 images,
               );
+              let steerConfirmed = true;
               if (steerId !== undefined) {
                 const injected = steerInjection(steerId);
                 // The agent reads a steer at its next step. One that lands after the last
@@ -10756,8 +10772,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     detail: `Provider turn ${turnInput.providerTurnId} ended before it read the steering message.`,
                   });
                 }
+                // A steer still unread at the bound may yet be dropped, so its notes stay unsent.
+                steerConfirmed = yield* Deferred.isDone(injected);
               }
               if (
+                steerConfirmed &&
                 appContextEntries.length > 0 &&
                 !context.interrupted &&
                 (yield* Ref.get(compactionMarkers)).get(context.nativeThreadId) === compactionMarker
@@ -11239,7 +11258,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       status: "idle" as const,
                       updatedAt: now,
                     },
-                    providerTurns: [...(yield* Ref.get(providerTurns)).values()],
+                    // Imports read only the transcript; turns reach orchestration as events.
                     messages,
                     reasoningMessageIds: [...state.reasoningIds],
                     runtimeRequests: [],
@@ -11299,7 +11318,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       status: "idle" as const,
                       updatedAt: now,
                     },
-                    providerTurns: [],
                     messages: [],
                     runtimeRequests: [],
                   };
