@@ -35,6 +35,7 @@ import {
   isAntigravityTextGenerationAvailable,
   makeAntigravityTextGeneration,
 } from "../../textGeneration/AntigravityTextGeneration.ts";
+import { makeAntigravityPromptSuggestionSampler } from "../../textGeneration/antigravityPromptSuggestion.cn.ts";
 import { makeAntigravityAuth, type AntigravityAuth } from "../AntigravityAuth.ts";
 import * as AntigravityInstallation from "../AntigravityInstallation.ts";
 import { brokenRuntimeError } from "../providerCompatibility.ts";
@@ -619,12 +620,25 @@ export const AntigravityDriver: ProviderDriver<
       ),
     );
     const defaultModel = currentCatalog.pipe(Effect.map((catalog) => catalog?.defaultChatModel));
+    const isolatedHelperOptions = {
+      profileDirectory,
+      defaultModel,
+      withProcess: authFlow.withProcess,
+      makeRuntime: (cwd: string) =>
+        makeRuntime({
+          cwd,
+          mcpServers: [],
+        }),
+    };
+    const samplePromptSuggestion =
+      yield* makeAntigravityPromptSuggestionSampler(isolatedHelperOptions);
     const orchestrationAdapter = yield* makeAntigravityAdapterV2({
       instanceId,
       selfInvocation,
       makeRuntime,
       withProcess: authFlow.withProcess,
       defaultModel,
+      samplePromptSuggestion,
       supportsNativeGoals: provider.snapshot.getSnapshot.pipe(
         Effect.map(
           (snapshot) => snapshot.slashCommands?.some((command) => command.name === "goal") === true,
@@ -649,16 +663,7 @@ export const AntigravityDriver: ProviderDriver<
           threadId,
         }),
     });
-    const textGeneration = yield* makeAntigravityTextGeneration({
-      profileDirectory,
-      defaultModel,
-      withProcess: authFlow.withProcess,
-      makeRuntime: (cwd) =>
-        makeRuntime({
-          cwd,
-          mcpServers: [],
-        }),
-    });
+    const textGeneration = yield* makeAntigravityTextGeneration(isolatedHelperOptions);
 
     const refreshModels = Effect.fn("AntigravityDriver.refreshModels")(
       function* () {
