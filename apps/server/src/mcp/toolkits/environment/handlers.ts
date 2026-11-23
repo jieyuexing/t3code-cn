@@ -107,16 +107,7 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
       const resources = yield* HostResources.HostResources;
       const hostResources = yield* resources.read;
       // Bounded: storage answers within its 3 s deadline, with its last reading after that.
-      const machine = yield* resources.readMachine.pipe(
-        Effect.map((snapshot): ReturnType<typeof machineResources> | undefined =>
-          machineResources(snapshot),
-        ),
-        Effect.catchDefect((defect) =>
-          defect instanceof Error && defect.message.includes('Unimplemented method "readMachine"')
-            ? Effect.undefined
-            : Effect.die(defect),
-        ),
-      );
+      const machine = yield* resources.readMachine;
       return {
         environmentId: descriptor.environmentId,
         label: descriptor.label,
@@ -124,7 +115,7 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
         platform: descriptor.platform,
         preferences: preferences(current),
         hostResources,
-        ...(machine ? { machine } : {}),
+        machine: machineResources(machine),
       };
     }),
   ),

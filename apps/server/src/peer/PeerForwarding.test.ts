@@ -285,7 +285,10 @@ const serveBox = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) =>
       Layer.provide(
         Layer.mergeAll(
           ServerSettings.layerTest(),
-          Layer.mock(HostResources.HostResources)({ read: Effect.succeed(hostResourcesOf(8)) }),
+          Layer.mock(HostResources.HostResources)({
+            read: Effect.succeed(hostResourcesOf(8)),
+            readMachine: Effect.succeed(hostResourcesOf(8)),
+          }),
         ),
       ),
       Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
@@ -371,7 +374,10 @@ const makeLaptop = Effect.gen(function* () {
         Layer.mock(ProjectCheckout.ProjectCheckout)({}),
         Layer.mock(SecretRequests.SecretRequests)({}),
         ServerSettings.layerTest(),
-        Layer.mock(HostResources.HostResources)({ read: Effect.succeed(hostResourcesOf(4)) }),
+        Layer.mock(HostResources.HostResources)({
+          read: Effect.succeed(hostResourcesOf(4)),
+          readMachine: Effect.succeed(hostResourcesOf(4)),
+        }),
         // No thread here delegated to the box, so a send there is no follow-up.
         Layer.mock(RemoteDelegation.RemoteDelegation)({
           checkout: () => Effect.undefined,

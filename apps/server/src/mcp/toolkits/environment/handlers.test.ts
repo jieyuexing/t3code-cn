@@ -79,7 +79,9 @@ const dependencies = (options: {
     }),
     Layer.mock(HostResources.HostResources)({
       ...(options.read ? { read: options.read } : {}),
-      ...(options.readMachine ? { readMachine: options.readMachine } : {}),
+      ...((options.readMachine ?? options.read)
+        ? { readMachine: options.readMachine ?? options.read }
+        : {}),
     }),
     Layer.mock(Settings.ServerSettingsService)({
       getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),

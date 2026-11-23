@@ -687,7 +687,10 @@ const boxToolkitLayer = (thread: BoxThread) => {
     Layer.provide(
       Layer.mergeAll(
         ServerSettings.layerTest(),
-        Layer.mock(HostResources.HostResources)({ read: Effect.flatten(Ref.get(thread.load)) }),
+        Layer.mock(HostResources.HostResources)({
+          read: Effect.flatten(Ref.get(thread.load)),
+          readMachine: Effect.flatten(Ref.get(thread.load)),
+        }),
       ),
     ),
     Layer.provide(NodeServices.layer),
@@ -837,7 +840,12 @@ const makeLaptop = (
                 ),
             }),
           ),
-          Layer.provide(Layer.mock(HostResources.HostResources)({ read: Effect.succeed(load) })),
+          Layer.provide(
+            Layer.mock(HostResources.HostResources)({
+              read: Effect.succeed(load),
+              readMachine: Effect.succeed(load),
+            }),
+          ),
           Layer.provide(
             Layer.mock(ProjectCheckout.ProjectCheckout)({
               head: () => Ref.get(checkout).pipe(Effect.map((state) => state.head)),
