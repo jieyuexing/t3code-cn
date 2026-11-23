@@ -174,12 +174,14 @@ it.effect("agent context matches the committed budget", () =>
       ),
     };
 
-    // fork 自有工具多出的字节记在 agentContextBudget.cn.json，上游快照原样保留，同步时不再冲突。
+    // fork 相对上游的字节增减记在 agentContextBudget.cn.json，上游快照原样保留，同步时不再冲突。
     expect(
       measured,
       "Set agentContextBudget.json to the measured values. Before you cut text to fit, run the evals that cover it (evals/README.md).",
     ).toEqual({
-      ...budget,
+      claudeSystemAppendBytes: budget.claudeSystemAppendBytes + forkBudget.claudeSystemAppendBytes,
+      codexAdditionalContextBytes:
+        budget.codexAdditionalContextBytes + forkBudget.codexAdditionalContextBytes,
       mcpToolListJsonBytes: budget.mcpToolListJsonBytes + forkBudget.mcpToolListJsonBytes,
     });
   }).pipe(Effect.provide(layerAdvertisedTools)),

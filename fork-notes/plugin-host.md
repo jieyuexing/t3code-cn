@@ -194,7 +194,7 @@ git diff -U0 v0.1.10-nightly.20261114.4709 HEAD -- <文件>            # 逐行�
 
 1. 冲突落在上表的文件里时，先取上游版本，再按上表把插件那几行插回去，不手工合并上游的改动。`rightPanelStore.ts` 与 `ChatView.tsx` 最容易冲突。插回去时不贴着上游常追加的位置（列表末尾、上游正在改的相邻分支）：`switch` 的 `case "plugin"` 放第一个，联合类型的插件项放第一项，权限表与测试表放在同权限项旁边，`ws.ts`／`ws.test.ts` 的引入与取服务跟 Git 日志那几行放在一起。
 2. `routeTree.gen.ts` 不要手合，重新生成。
-3. `agentContextBudget.json` 与上游一致、不再冲突；fork 工具多出的字节在 `agentContextBudget.cn.json`（11-20 为 626，含插件工具与多机增强）。合并后跑 `apps/server` 的 `vp test run src/provider/AgentContextBudget.test.ts`，失败时只改 `.cn.json` 的增量，不改上游快照。
+3. `agentContextBudget.json` 与上游一致、不再冲突；fork 相对上游的字节增减在 `agentContextBudget.cn.json`，三项都可记（11-23：Claude −3、Codex −3、工具清单 621 = 插件工具与多机增强 626 加 #36693 挑拣 −5）。合并后跑 `apps/server` 的 `vp test run src/provider/AgentContextBudget.test.ts`，失败时只改 `.cn.json` 的增量，不改上游快照。
 4. 合并后用 `rg -l pluginHost apps packages` 对照上表，缺一处就补一处。然后在 `apps/server` 跑 `vp test run src/pluginHost src/ws.test.ts src/auth/RpcAuthorization.test.ts src/mcp`，在 `apps/web` 跑 `vp test run src/pluginHost`。
 5. 合并后用上面“重算方法”的两条命令重算上表，把基线换成新同步的上游 nightly，行数变了就改表。
 
