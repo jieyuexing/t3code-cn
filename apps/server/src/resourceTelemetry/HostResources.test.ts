@@ -12,6 +12,7 @@ import { vi } from "vite-plus/test";
 
 import * as HostResources from "./HostResources.ts";
 import * as HostStorage from "./HostStorage.ts";
+import * as NativeTelemetryClient from "./NativeTelemetryClient.ts";
 
 // An 8-CPU host; every cpus() call advances each CPU by 100 ms at `host.busy` utilization.
 const host = vi.hoisted(() => ({ busy: 0, reads: 0 }));
@@ -236,6 +237,50 @@ describe("HostResources.layer", () => {
       assert.deepStrictEqual(snapshot.gpu, { gpus: [], unavailableReason: "No GPU found" });
       assert.strictEqual(snapshot.cpuCount, 8);
       assert.deepStrictEqual(snapshot.cpuCoreUtilization, Array(8).fill(0.25));
+      assert.deepStrictEqual(
+        snapshot.cpuCores,
+        Array.from({ length: 8 }, () => ({ utilization: 0.25, user: 0.25, system: 0 })),
+      );
+      assert.strictEqual(snapshot.memoryBreakdown?.kind, "unavailable");
+      assert.isDefined(snapshot.memoryPressure?.unavailableReason);
+      assert.isDefined(snapshot.network?.unavailableReason);
+    }).pipe(Effect.provide(linuxHost(unlimitedCgroup))),
+  );
+
+  it.effect("reads network rates across machine polls without affecting load-balancing reads", () =>
+    Effect.gen(function* () {
+      setup(0.25);
+      let networkPoll = 0;
+      const nativeLayer = NativeTelemetryClient.layerTest({
+        hostNetwork: Effect.suspend(() => {
+          networkPoll += 1;
+          return Effect.succeed({
+            version: 3,
+            type: "hostNetwork" as const,
+            requestId: `net-${networkPoll}`,
+            sampledAtUnixMs: networkPoll * 2_000,
+            receivedBytes: networkPoll === 1 ? 10_000 : 50_000,
+            transmittedBytes: networkPoll === 1 ? 4_000 : 12_000,
+            interfaceCount: 2,
+          });
+        }),
+      });
+      const host = yield* HostResources.HostResources;
+      const loadFiber = yield* Effect.forkChild(host.read);
+      yield* TestClock.adjust("200 millis");
+      const loadSnapshot = yield* Fiber.join(loadFiber);
+      assert.notProperty(loadSnapshot, "cpuCores");
+      assert.notProperty(loadSnapshot, "memoryBreakdown");
+      assert.notProperty(loadSnapshot, "memoryPressure");
+      assert.notProperty(loadSnapshot, "network");
+
+      const first = yield* host.readMachine.pipe(Effect.provide(nativeLayer));
+      assert.strictEqual(first.network?.warmingUp, true);
+      assert.isUndefined(first.network?.downloadBytesPerSecond);
+
+      const second = yield* host.readMachine.pipe(Effect.provide(nativeLayer));
+      assert.strictEqual(second.network?.downloadBytesPerSecond, 20_000);
+      assert.strictEqual(second.network?.uploadBytesPerSecond, 4_000);
     }).pipe(Effect.provide(linuxHost(unlimitedCgroup))),
   );
 

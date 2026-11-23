@@ -171,6 +171,8 @@ describe("disabled native monitor", () => {
           client.sampleNow.pipe(Effect.asVoid),
           client.readHistory(1000).pipe(Effect.asVoid),
           client.capabilities.pipe(Effect.asVoid),
+          client.hostSystem.pipe(Effect.asVoid),
+          client.hostNetwork.pipe(Effect.asVoid),
         ]) {
           const error = yield* Effect.flip(request);
           expect(error._tag).toBe("NativeTelemetryUnavailable");

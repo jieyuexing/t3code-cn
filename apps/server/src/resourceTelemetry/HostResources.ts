@@ -11,6 +11,7 @@ import * as Layer from "effect/Layer";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as HostStorage from "./HostStorage.ts";
+import * as MachineDimensions from "./machineDimensions.cn.ts";
 
 export class HostResources extends Context.Service<
   HostResources,
@@ -167,20 +168,23 @@ const make = Effect.fn("makeHostResources")(function* () {
     }
 
     let totalMemoryBytes = NodeOS.totalmem();
+    const hostTotalMemoryBytes = totalMemoryBytes;
     // On Windows libuv returns GlobalMemoryStatusEx.ullAvailPhys, including standby memory.
     let availableMemoryBytes = NodeOS.freemem();
+    let meminfo = "";
+    let vmStatOutput = "";
     if (platform === "linux") {
-      const meminfo = yield* readFile("/proc/meminfo");
+      meminfo = yield* readFile("/proc/meminfo");
       const available = /^MemAvailable:\s+(\d+)\s+kB$/m.exec(meminfo)?.[1];
       if (available) availableMemoryBytes = Number(available) * 1024;
     } else if (platform === "darwin") {
-      const output = yield* spawner
+      vmStatOutput = yield* spawner
         .string(ChildProcess.make("/usr/bin/vm_stat", [], { stdin: "ignore", stderr: "ignore" }))
         .pipe(
           Effect.timeout("1 second"),
           Effect.orElseSucceed(() => ""),
         );
-      availableMemoryBytes = darwinAvailableMemory(output) ?? availableMemoryBytes;
+      availableMemoryBytes = darwinAvailableMemory(vmStatOutput) ?? availableMemoryBytes;
     }
     const memoryMax = cgroup
       ? cgroupNumber(yield* readFile(`${cgroup}/memory.max`), /^(\d+)$/m)
@@ -212,7 +216,21 @@ const make = Effect.fn("makeHostResources")(function* () {
       ...(cpuModel ? { cpuModel } : {}),
       ...(platform === "win32" ? {} : { loadAverage: { one, five, fifteen } }),
     } satisfies HostResourcesSnapshot;
-    return { snapshot, cores: coreUtilization(previousCpu.cores, cpu.cores) };
+    const cgroupMemoryCapped =
+      memoryMax !== null && memoryCurrent !== null && memoryMax < hostTotalMemoryBytes;
+    return {
+      snapshot,
+      cores: coreUtilization(previousCpu.cores, cpu.cores),
+      dimensions: MachineDimensions.sampleMachineDimensions({
+        platform,
+        beforeCores: previousCpu.cores,
+        afterCores: cpu.cores,
+        totalMemoryBytes,
+        vmStatOutput,
+        meminfo,
+        cgroupMemoryCapped,
+      }),
+    };
   });
 
   const cache = yield* Cache.make({
@@ -221,12 +239,19 @@ const make = Effect.fn("makeHostResources")(function* () {
     timeToLive: "5 seconds",
   });
   const sampled = Cache.get(cache, "host");
+  const dimensions = yield* MachineDimensions.makeMachineDimensions({
+    platform,
+    readFile,
+    spawner,
+  });
   return HostResources.of({
     read: Effect.map(sampled, ({ snapshot }) => snapshot),
-    readMachine: Effect.all([sampled, storage.read], { concurrency: 2 }).pipe(
-      Effect.map(([{ snapshot, cores }, machine]) => ({
+    readMachine: Effect.all([sampled, storage.read, dimensions.readExtra], { concurrency: 3 }).pipe(
+      Effect.map(([{ snapshot, cores, dimensions: sampledDimensions }, machine, extra]) => ({
         ...snapshot,
         ...(cores ? { cpuCoreUtilization: cores } : {}),
+        ...sampledDimensions,
+        ...extra,
         storage: machine.storage,
         gpu: machine.gpu,
         ...(machine.swap ? { swap: machine.swap } : {}),

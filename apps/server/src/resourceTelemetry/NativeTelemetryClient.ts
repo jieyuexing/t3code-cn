@@ -5,6 +5,7 @@ import type {
   ResourceMonitorEvent,
   ResourceMonitorExternalProcess,
   ResourceMonitorHelloEvent,
+  ResourceMonitorHostNetworkEvent,
   ResourceMonitorHostSystemEvent,
   ResourceMonitorProcessTableEntry,
   ResourceMonitorSnapshotEvent,
@@ -50,6 +51,7 @@ const SAMPLE_REQUEST_TIMEOUT = Duration.seconds(5);
 const PROCESS_TABLE_REQUEST_TIMEOUT = Duration.seconds(5);
 // Volume queries can stall on network mounts; callers keep serving their last reading.
 const HOST_SYSTEM_REQUEST_TIMEOUT = Duration.seconds(10);
+const HOST_NETWORK_REQUEST_TIMEOUT = Duration.seconds(2);
 const HISTORY_REQUEST_TIMEOUT = Duration.seconds(15);
 const INITIAL_RESTART_DELAY = Duration.millis(500);
 const MAX_RESTART_DELAY = Duration.seconds(10);
@@ -82,7 +84,13 @@ export class NativeTelemetryHandshakeTimedOut extends Schema.TaggedError<NativeT
 class NativeTelemetryRequestTimedOut extends Schema.TaggedError<NativeTelemetryRequestTimedOut>()(
   "NativeTelemetryRequestTimedOut",
   {
-    operation: Schema.Literals(["hostSystem", "processTable", "readHistory", "sampleNow"]),
+    operation: Schema.Literals([
+      "hostNetwork",
+      "hostSystem",
+      "processTable",
+      "readHistory",
+      "sampleNow",
+    ]),
     timeoutMs: Schema.Number,
   },
 ) {
@@ -204,6 +212,11 @@ export class NativeTelemetryClient extends Context.Service<
     >;
     /** Mounted volumes and swap; unavailable when the bundled monitor predates the command. */
     readonly hostSystem: Effect.Effect<ResourceMonitorHostSystemEvent, NativeTelemetryClientError>;
+    /** Cumulative non-loopback network bytes; unavailable when the monitor predates the command. */
+    readonly hostNetwork: Effect.Effect<
+      ResourceMonitorHostNetworkEvent,
+      NativeTelemetryClientError
+    >;
     readonly retry: Effect.Effect<boolean>;
     readonly health: Effect.Effect<NativeTelemetryClientHealth>;
     readonly subscribeHealth: Effect.Effect<
@@ -416,6 +429,12 @@ export const make = Effect.fn("resourceTelemetry.nativeTelemetryClient.make")(fu
       Deferred.Deferred<ResourceMonitorHostSystemEvent, NativeTelemetryClientError>
     >(),
   );
+  const pendingHostNetworks = yield* Ref.make(
+    new Map<
+      string,
+      Deferred.Deferred<ResourceMonitorHostNetworkEvent, NativeTelemetryClientError>
+    >(),
+  );
   const pendingHistories = yield* Ref.make(new Map<string, PendingHistoryRequest>());
   const snapshots = yield* PubSub.sliding<NativeTelemetrySnapshot>(8);
   const healthChanges = yield* PubSub.sliding<NativeTelemetryClientHealth>(4);
@@ -436,6 +455,7 @@ export const make = Effect.fn("resourceTelemetry.nativeTelemetryClient.make")(fu
     const samples = yield* Ref.getAndSet(pendingSamples, new Map());
     const processTables = yield* Ref.getAndSet(pendingProcessTables, new Map());
     const hostSystems = yield* Ref.getAndSet(pendingHostSystems, new Map());
+    const hostNetworks = yield* Ref.getAndSet(pendingHostNetworks, new Map());
     const histories = yield* Ref.getAndSet(pendingHistories, new Map());
     yield* Effect.forEach(samples.values(), (deferred) => Deferred.fail(deferred, error), {
       discard: true,
@@ -444,6 +464,9 @@ export const make = Effect.fn("resourceTelemetry.nativeTelemetryClient.make")(fu
       discard: true,
     });
     yield* Effect.forEach(hostSystems.values(), (deferred) => Deferred.fail(deferred, error), {
+      discard: true,
+    });
+    yield* Effect.forEach(hostNetworks.values(), (deferred) => Deferred.fail(deferred, error), {
       discard: true,
     });
     yield* Effect.forEach(histories.values(), (request) => Deferred.fail(request.deferred, error), {
@@ -539,6 +562,21 @@ export const make = Effect.fn("resourceTelemetry.nativeTelemetryClient.make")(fu
         );
       case "hostSystem":
         return Ref.modify(pendingHostSystems, (pending) => {
+          const next = new Map(pending);
+          const deferred = next.get(event.requestId);
+          next.delete(event.requestId);
+          return [Option.fromUndefinedOr(deferred), next] as const;
+        }).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.void,
+              onSome: (deferred) => Deferred.succeed(deferred, event),
+            }),
+          ),
+          Effect.asVoid,
+        );
+      case "hostNetwork":
+        return Ref.modify(pendingHostNetworks, (pending) => {
           const next = new Map(pending);
           const deferred = next.get(event.requestId);
           next.delete(event.requestId);
@@ -1123,6 +1161,63 @@ export const make = Effect.fn("resourceTelemetry.nativeTelemetryClient.make")(fu
     );
   });
 
+  const hostNetwork: NativeTelemetryClient["Service"]["hostNetwork"] = Effect.gen(function* () {
+    const current = yield* Ref.get(state);
+    if (!canCommandNativeTelemetrySidecar(current.status, Option.isSome(current.handle))) {
+      return yield* new NativeTelemetryUnavailable({
+        reason: Option.getOrElse(current.lastError, () => "sidecar is not running"),
+      });
+    }
+    // Older monitors answer unknown commands with an error event and mark themselves degraded.
+    if (!Option.exists(current.hello, (hello) => hello.capabilities.hostNetwork === true)) {
+      return yield* new NativeTelemetryUnavailable({
+        reason: "resource monitor does not report network counters",
+      });
+    }
+    const requestId = yield* random
+      .uuidV4()
+      .pipe(
+        Effect.mapError(
+          (cause) => new NativeTelemetryCommandFailed({ operation: "createRequestId", cause }),
+        ),
+      );
+    const deferred = yield* Deferred.make<
+      ResourceMonitorHostNetworkEvent,
+      NativeTelemetryClientError
+    >();
+    yield* Ref.update(pendingHostNetworks, (pending) => new Map(pending).set(requestId, deferred));
+    return yield* writeCommand(Option.getOrThrow(current.handle), {
+      version: RESOURCE_MONITOR_PROTOCOL_VERSION,
+      type: "hostNetwork",
+      requestId,
+    }).pipe(
+      Effect.andThen(
+        Deferred.await(deferred).pipe(
+          Effect.timeoutOption(HOST_NETWORK_REQUEST_TIMEOUT),
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.fail(
+                  new NativeTelemetryRequestTimedOut({
+                    operation: "hostNetwork",
+                    timeoutMs: Duration.toMillis(HOST_NETWORK_REQUEST_TIMEOUT),
+                  }),
+                ),
+              onSome: Effect.succeed,
+            }),
+          ),
+        ),
+      ),
+      Effect.ensuring(
+        Ref.update(pendingHostNetworks, (pending) => {
+          const next = new Map(pending);
+          next.delete(requestId);
+          return next;
+        }),
+      ),
+    );
+  });
+
   const health = currentHealth;
 
   return NativeTelemetryClient.of({
@@ -1146,6 +1241,7 @@ export const make = Effect.fn("resourceTelemetry.nativeTelemetryClient.make")(fu
     sampleNow,
     processTable,
     hostSystem,
+    hostNetwork,
     retry: Ref.get(state).pipe(
       Effect.flatMap((current) =>
         disabled || !canRequestNativeTelemetryRetry(current.status, Option.isSome(current.handle))
@@ -1212,6 +1308,11 @@ export const layerTest = (
       hostSystem: Effect.fail(
         new NativeTelemetryUnavailable({
           reason: "No resource monitor host system was configured for this test.",
+        }),
+      ),
+      hostNetwork: Effect.fail(
+        new NativeTelemetryUnavailable({
+          reason: "No resource monitor host network was configured for this test.",
         }),
       ),
       retry: Effect.succeed(false),

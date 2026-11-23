@@ -51,13 +51,40 @@ describe("HostResourcesSnapshot", () => {
         unavailableReason: "Only T3 volumes are shown.",
       },
       cpuCoreUtilization: [0.25, 1],
+      cpuCores: [
+        { utilization: 0.25, user: 0.2, system: 0.05 },
+        { utilization: 1, user: 0.7, system: 0.3 },
+      ],
+      memoryBreakdown: {
+        kind: "darwin",
+        appBytes: 2,
+        wiredBytes: 1,
+        compressedBytes: 0,
+        availableBytes: 1,
+      },
+      memoryPressure: { level: "normal" },
+      network: {
+        sampledAt: 1,
+        downloadBytesPerSecond: 1024,
+        uploadBytesPerSecond: 512,
+      },
       gpu: { gpus: [{ name: "Apple M3 Max", utilization: 0.09, memoryUsedBytes: 1024 }] },
     });
 
     expect(snapshot.storage?.volumes[0]?.roles).toEqual(["t3Home", "worktrees"]);
+    expect(snapshot.cpuCores?.[0]?.user).toBe(0.2);
+    expect(snapshot.memoryBreakdown?.kind).toBe("darwin");
+    expect(snapshot.memoryPressure?.level).toBe("normal");
+    expect(snapshot.network?.downloadBytesPerSecond).toBe(1024);
     expect(snapshot.gpu?.gpus[0]?.memoryTotalBytes).toBeUndefined();
     expect(() =>
       decodeSnapshot({ ...snapshot, gpu: { gpus: [{ name: "GPU", utilization: 37 }] } }),
+    ).toThrow();
+    expect(() =>
+      decodeSnapshot({
+        ...snapshot,
+        cpuCores: [{ utilization: 0.5, user: 1.2, system: 0 }],
+      }),
     ).toThrow();
   });
 });
@@ -83,6 +110,7 @@ describe("ResourceMonitorEvent", () => {
     });
 
     expect(hello.capabilities.hostSystem).toBeUndefined();
+    expect(hello.capabilities.hostNetwork).toBeUndefined();
   });
 
   it("decodes a host system event", () => {
@@ -108,5 +136,20 @@ describe("ResourceMonitorEvent", () => {
 
     expect(event.type).toBe("hostSystem");
     expect(event.type === "hostSystem" && event.gpus?.[0]?.utilizationPercent).toBe(9);
+  });
+
+  it("decodes a host network event", () => {
+    const event = decodeMonitorEvent({
+      version: 3,
+      type: "hostNetwork",
+      requestId: "net-1",
+      sampledAtUnixMs: 1_700_000_000_000,
+      receivedBytes: 4096,
+      transmittedBytes: 2048,
+      interfaceCount: 2,
+    });
+
+    expect(event.type).toBe("hostNetwork");
+    expect(event.type === "hostNetwork" && event.receivedBytes).toBe(4096);
   });
 });

@@ -29,6 +29,68 @@ export const HostStorage = Schema.Struct({
 export type HostStorage = typeof HostStorage.Type;
 
 const UnitInterval = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }));
+const NonNegativeNumber = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0));
+
+const HostCpuCore = Schema.Struct({
+  /** Busy share of this logical core (0–1), matching `cpuCoreUtilization[index]`. */
+  utilization: UnitInterval,
+  /** User-space share (`user + nice`) of this logical core (0–1). */
+  user: UnitInterval,
+  /** Kernel-space share (`sys + irq`) of this logical core (0–1). */
+  system: UnitInterval,
+});
+export type HostCpuCore = typeof HostCpuCore.Type;
+
+const HostDarwinMemoryBreakdown = Schema.Struct({
+  kind: Schema.Literal("darwin"),
+  appBytes: NonNegativeInt,
+  wiredBytes: NonNegativeInt,
+  compressedBytes: NonNegativeInt,
+  availableBytes: NonNegativeInt,
+});
+export type HostDarwinMemoryBreakdown = typeof HostDarwinMemoryBreakdown.Type;
+
+const HostLinuxMemoryBreakdown = Schema.Struct({
+  kind: Schema.Literal("linux"),
+  appBytes: NonNegativeInt,
+  kernelBytes: NonNegativeInt,
+  cachedBytes: NonNegativeInt,
+  freeBytes: NonNegativeInt,
+});
+export type HostLinuxMemoryBreakdown = typeof HostLinuxMemoryBreakdown.Type;
+
+const HostUnavailableMemoryBreakdown = Schema.Struct({
+  kind: Schema.Literal("unavailable"),
+  unavailableReason: Schema.String,
+});
+export type HostUnavailableMemoryBreakdown = typeof HostUnavailableMemoryBreakdown.Type;
+
+const HostMemoryBreakdown = Schema.Union([
+  HostDarwinMemoryBreakdown,
+  HostLinuxMemoryBreakdown,
+  HostUnavailableMemoryBreakdown,
+]);
+export type HostMemoryBreakdown = typeof HostMemoryBreakdown.Type;
+
+const HostMemoryPressureLevel = Schema.Literals(["normal", "warning", "critical"]);
+export type HostMemoryPressureLevel = typeof HostMemoryPressureLevel.Type;
+
+const HostMemoryPressure = Schema.Struct({
+  level: Schema.optionalKey(HostMemoryPressureLevel),
+  someAvg10: Schema.optionalKey(NonNegativeNumber),
+  fullAvg10: Schema.optionalKey(NonNegativeNumber),
+  unavailableReason: Schema.optionalKey(Schema.String),
+});
+export type HostMemoryPressure = typeof HostMemoryPressure.Type;
+
+const HostNetwork = Schema.Struct({
+  sampledAt: NonNegativeInt,
+  downloadBytesPerSecond: Schema.optionalKey(NonNegativeNumber),
+  uploadBytesPerSecond: Schema.optionalKey(NonNegativeNumber),
+  warmingUp: Schema.optionalKey(Schema.Boolean),
+  unavailableReason: Schema.optionalKey(Schema.String),
+});
+export type HostNetwork = typeof HostNetwork.Type;
 
 export const HostGpu = Schema.Struct({
   name: Schema.String,
@@ -65,6 +127,11 @@ export const HostResourcesSnapshot = Schema.Struct({
   storage: Schema.optionalKey(HostStorage),
   /** Per-core busy share, in core order; machine reads only. */
   cpuCoreUtilization: Schema.optionalKey(Schema.Array(UnitInterval)),
+  /** Per-core user and system shares, in core order; machine reads only. */
+  cpuCores: Schema.optionalKey(Schema.Array(HostCpuCore)),
+  memoryBreakdown: Schema.optionalKey(HostMemoryBreakdown),
+  memoryPressure: Schema.optionalKey(HostMemoryPressure),
+  network: Schema.optionalKey(HostNetwork),
   gpu: Schema.optionalKey(HostGpus),
 });
 export type HostResourcesSnapshot = typeof HostResourcesSnapshot.Type;
@@ -127,6 +194,7 @@ export const ResourceMonitorCapabilities = Schema.Struct({
   processStartTime: Schema.Boolean,
   processTree: Schema.Boolean,
   hostSystem: Schema.optionalKey(Schema.Boolean),
+  hostNetwork: Schema.optionalKey(Schema.Boolean),
 });
 export type ResourceMonitorCapabilities = typeof ResourceMonitorCapabilities.Type;
 
@@ -209,6 +277,13 @@ export const ResourceMonitorHostSystemCommand = Schema.Struct({
 });
 export type ResourceMonitorHostSystemCommand = typeof ResourceMonitorHostSystemCommand.Type;
 
+const ResourceMonitorHostNetworkCommand = Schema.Struct({
+  version: Schema.Literal(RESOURCE_MONITOR_PROTOCOL_VERSION),
+  type: Schema.Literal("hostNetwork"),
+  requestId: TrimmedNonEmptyString,
+});
+export type ResourceMonitorHostNetworkCommand = typeof ResourceMonitorHostNetworkCommand.Type;
+
 export const ResourceMonitorShutdownCommand = Schema.Struct({
   version: Schema.Literal(RESOURCE_MONITOR_PROTOCOL_VERSION),
   type: Schema.Literal("shutdown"),
@@ -224,6 +299,7 @@ export const ResourceMonitorCommand = Schema.Union([
   ResourceMonitorProcessTableCommand,
   ResourceMonitorReadHistoryCommand,
   ResourceMonitorHostSystemCommand,
+  ResourceMonitorHostNetworkCommand,
   ResourceMonitorShutdownCommand,
 ]);
 export type ResourceMonitorCommand = typeof ResourceMonitorCommand.Type;
@@ -309,6 +385,18 @@ export const ResourceMonitorHostSystemEvent = Schema.Struct({
 });
 export type ResourceMonitorHostSystemEvent = typeof ResourceMonitorHostSystemEvent.Type;
 
+const ResourceMonitorHostNetworkEvent = Schema.Struct({
+  version: Schema.Literal(RESOURCE_MONITOR_PROTOCOL_VERSION),
+  type: Schema.Literal("hostNetwork"),
+  requestId: TrimmedNonEmptyString,
+  sampledAtUnixMs: NonNegativeInt,
+  receivedBytes: NonNegativeInt,
+  transmittedBytes: NonNegativeInt,
+  interfaceCount: NonNegativeInt,
+  unavailableReason: Schema.optionalKey(Schema.String),
+});
+export type ResourceMonitorHostNetworkEvent = typeof ResourceMonitorHostNetworkEvent.Type;
+
 export const ResourceMonitorErrorEvent = Schema.Struct({
   version: Schema.Literal(RESOURCE_MONITOR_PROTOCOL_VERSION),
   type: Schema.Literal("error"),
@@ -324,6 +412,7 @@ export const ResourceMonitorEvent = Schema.Union([
   ResourceMonitorProcessTableEvent,
   ResourceMonitorHistoryChunkEvent,
   ResourceMonitorHostSystemEvent,
+  ResourceMonitorHostNetworkEvent,
   ResourceMonitorErrorEvent,
 ]);
 export type ResourceMonitorEvent = typeof ResourceMonitorEvent.Type;

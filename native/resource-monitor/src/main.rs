@@ -1,4 +1,5 @@
 mod gpu;
+mod network;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -83,6 +84,10 @@ enum Command {
         version: u32,
         request_id: String,
     },
+    HostNetwork {
+        version: u32,
+        request_id: String,
+    },
     Shutdown {
         version: u32,
     },
@@ -99,6 +104,7 @@ impl Command {
             | Self::ProcessTable { version, .. }
             | Self::ReadHistory { version, .. }
             | Self::HostSystem { version, .. }
+            | Self::HostNetwork { version, .. }
             | Self::Shutdown { version } => *version,
         }
     }
@@ -122,6 +128,7 @@ struct Capabilities {
     process_start_time: bool,
     process_tree: bool,
     host_system: bool,
+    host_network: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -928,6 +935,7 @@ fn main() -> io::Result<()> {
                 process_start_time: true,
                 process_tree: true,
                 host_system: true,
+                host_network: true,
             },
         },
     )?;
@@ -935,6 +943,7 @@ fn main() -> io::Result<()> {
     let (sender, receiver) = spawn_input_reader();
     let mut host_system_requests: Vec<String> = Vec::new();
     let mut collector = Collector::new();
+    let mut network_collector = network::NetworkCollector::new();
     let mut history = HistoryRecorder::default();
     let mut config: Option<CollectorConfig> = None;
     let mut next_sample_at: Option<Instant> = None;
@@ -1103,6 +1112,10 @@ fn main() -> io::Result<()> {
                             });
                         }
                         host_system_requests.push(request_id);
+                    }
+                    Command::HostNetwork { request_id, .. } => {
+                        let event = network_collector.read_event(PROTOCOL_VERSION, &request_id);
+                        write_event(&mut writer, &event)?;
                     }
                     Command::Shutdown { .. } => return Ok(()),
                 }
@@ -1318,6 +1331,15 @@ mod tests {
         assert!(matches!(
             host_system,
             Command::HostSystem { request_id, .. } if request_id == "host-1"
+        ));
+
+        let host_network = serde_json::from_str::<Command>(
+            r#"{"version":3,"type":"hostNetwork","requestId":"net-1"}"#,
+        )
+        .expect("host network command");
+        assert!(matches!(
+            host_network,
+            Command::HostNetwork { request_id, .. } if request_id == "net-1"
         ));
     }
 
