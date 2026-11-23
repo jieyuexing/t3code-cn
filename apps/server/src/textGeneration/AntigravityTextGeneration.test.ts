@@ -377,7 +377,8 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
         expect(fixture.state.workspaces).not.toContain(fixture.projectDirectory);
         expect(fixture.state.nativeFilesAtClose).toEqual([true, true, true, true]);
         expect(fixture.state.selectedModes).toEqual(["default", "default", "default", "default"]);
-        expect(fixture.state.selectedModels).toEqual(Array(4).fill(modelSelection.model));
+        // The helper session already runs the requested model, so no setModel is sent.
+        expect(fixture.state.selectedModels).toEqual([]);
         expect(fixture.state.prompts[0]?.prompt).toEqual([
           { type: "text", text: expect.stringContaining("+handleRemoteCallback()") },
         ]);
