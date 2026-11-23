@@ -91,6 +91,10 @@
       "types": "./src/machineResources.ts",
       "default": "./src/machineResources.ts"
     },
+    "./machine-resources-history-cn": {
+      "types": "./src/machineResourcesHistory.cn.ts",
+      "default": "./src/machineResourcesHistory.cn.ts"
+    },
     "./project-favicon-cache": {
       "types": "./src/projectFaviconCache.ts",
       "default": "./src/projectFaviconCache.ts"

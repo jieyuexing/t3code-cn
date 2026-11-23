@@ -32,6 +32,7 @@ import { cn } from "../../lib/utils";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentScope } from "../../state/session";
+import { useMachineDiagnostics } from "./MachineDiagnostics.cn";
 import { SettingsSection } from "./settingsLayout";
 
 const ROLE_LABELS = {
@@ -43,7 +44,7 @@ function formatPercent(share: number): string {
   return `${Math.round(share * 100)}%`;
 }
 
-function UsageBar({ share, tone = "default" }: { share: number; tone?: MachineVolumeTone }) {
+export function UsageBar({ share, tone = "default" }: { share: number; tone?: MachineVolumeTone }) {
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
       <div
@@ -58,7 +59,7 @@ function UsageBar({ share, tone = "default" }: { share: number; tone?: MachineVo
   );
 }
 
-function MachineStat({
+export function MachineStat({
   icon,
   label,
   value,
@@ -88,7 +89,7 @@ function MachineStat({
   );
 }
 
-function CoreStrip({ cores }: { cores: HostResourcesSnapshot["cpuCoreUtilization"] }) {
+export function CoreStrip({ cores }: { cores: HostResourcesSnapshot["cpuCoreUtilization"] }) {
   const gt = useGT();
   if (cores === undefined) {
     return (
@@ -156,7 +157,7 @@ function GpuRow({ gpu }: { gpu: HostGpu }) {
   );
 }
 
-function GpuSection({ snapshot }: { snapshot: HostResourcesSnapshot }) {
+export function GpuSection({ snapshot }: { snapshot: HostResourcesSnapshot }) {
   const gt = useGT();
   const state = machineGpuState(snapshot);
   return (
@@ -193,7 +194,7 @@ function GpuSection({ snapshot }: { snapshot: HostResourcesSnapshot }) {
   );
 }
 
-function VolumeRow({ volume }: { volume: HostVolume }) {
+export function VolumeRow({ volume }: { volume: HostVolume }) {
   const gt = useGT();
   const m = useMessages();
   const tone = machineVolumeTone(volume);
@@ -237,7 +238,7 @@ function VolumeRow({ volume }: { volume: HostVolume }) {
   );
 }
 
-function MachineResourcesView({
+export function MachineResourcesView({
   snapshot,
   error,
   dataUpdatedAt,
@@ -340,16 +341,18 @@ function MachineResourcesView({
 export function MachineResourcesSection({ environmentId }: { environmentId: EnvironmentId }) {
   const gt = useGT();
   const canRead = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
-  const { data, error, dataUpdatedAt } = useEnvironmentQuery(
+  const query = useEnvironmentQuery(
     canRead ? serverEnvironment.machineResources({ environmentId, input: {} }) : null,
   );
+  const diagnostics = useMachineDiagnostics({ environmentId, canRead, query });
   if (!canRead) return null;
   return (
     <SettingsSection
       title={gt("Machine")}
       icon={<MonitorIcon className="size-4 text-muted-foreground" />}
+      headerAction={diagnostics.headerAction}
     >
-      <MachineResourcesView snapshot={data} error={error} dataUpdatedAt={dataUpdatedAt} />
+      {diagnostics.content}
     </SettingsSection>
   );
 }

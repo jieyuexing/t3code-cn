@@ -66,7 +66,7 @@ import {
 } from "./ResourceTelemetryDiagnostics.logic";
 import { SettingsSection } from "./settingsLayout";
 
-const HISTORY_WINDOWS = [
+export const HISTORY_WINDOWS = [
   { label: "5m", windowMs: 5 * 60_000, bucketMs: 15_000 },
   { label: "15m", windowMs: 15 * 60_000, bucketMs: 30_000 },
   { label: "30m", windowMs: 30 * 60_000, bucketMs: 60_000 },
@@ -196,7 +196,7 @@ function SourceStatusBadge({
   );
 }
 
-function LastSampleLabel({ sampledAt }: { sampledAt: DateTime.Utc | null }) {
+export function LastSampleLabel({ sampledAt }: { sampledAt: DateTime.Utc | null }) {
   const relative = useRelativeTimeState(sampledAt ? DateTime.formatIso(sampledAt) : null);
   if (relative.status !== "relative") {
     return (
@@ -342,7 +342,7 @@ function HealthSource({ label, health }: { label: string; health: ResourceTeleme
   );
 }
 
-function DetailRow({
+export function DetailRow({
   label,
   value,
   valueClassName,
@@ -366,7 +366,7 @@ function DetailRow({
   );
 }
 
-function HistoryWindowSelector({
+export function HistoryWindowSelector({
   selectedWindowMs,
   onSelect,
 }: {
