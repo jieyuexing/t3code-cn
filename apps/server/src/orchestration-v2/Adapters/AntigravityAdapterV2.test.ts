@@ -38,6 +38,7 @@ import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import { makeAcpAdapterV2 } from "@t3tools/provider-acp/server/adapter";
 import { makeAntigravityAcpRuntime } from "../../provider/acp/AntigravityAcpSupport.ts";
+import { wrapAntigravitySteerText } from "../../provider/acp/AntigravitySteer.cn.ts";
 import { normalizeAntigravitySessionUpdate } from "../../provider/acp/AntigravityProtocol.ts";
 import { ANTIGRAVITY_SIGN_IN_REQUIRED_MESSAGE } from "../../provider/antigravityAuthSupport.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -2134,7 +2135,7 @@ describe("AntigravityAdapterV2 work after the prompt ends", () => {
       assert.equal(opened.cancels(), 0, "a steer must not cancel the agent's work");
       assert.lengthOf(opened.prompts, 2);
       assert.deepEqual(opened.prompts[1]!.prompt, [
-        { type: "text", text: "Use opus subagents from now on" },
+        { type: "text", text: wrapAntigravitySteerText("Use opus subagents from now on") },
       ]);
       assert.isTrue(
         yield* Deferred.isDone(opened.prompts[0]!.released!),
@@ -2281,7 +2282,9 @@ describe("AntigravityAdapterV2 work after the prompt ends", () => {
       );
       assert.equal(opened.cancels(), 0, "a steer must not cancel the agent's work");
       assert.lengthOf(opened.prompts, 2);
-      assert.deepEqual(opened.prompts[1]!.prompt, [{ type: "text", text: "Skip the build" }]);
+      assert.deepEqual(opened.prompts[1]!.prompt, [
+        { type: "text", text: wrapAntigravitySteerText("Skip the build") },
+      ]);
 
       yield* send({ sessionUpdate: "tool_call_update", ...followUp, status: "completed" });
       yield* TestClock.adjust("16 minutes");

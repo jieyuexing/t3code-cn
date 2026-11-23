@@ -39,6 +39,10 @@ import {
 import { readAntigravityClientTextFile } from "../../provider/acp/AntigravityClientFiles.ts";
 import { watchAntigravityPromptOutcome } from "../../provider/acp/AntigravityTurnOutcome.ts";
 import {
+  watchAntigravitySteerDelivery,
+  wrapAntigravitySteerText,
+} from "../../provider/acp/AntigravitySteer.cn.ts";
+import {
   antigravityApprovalOptions,
   antigravityToolOutlivesPrompt,
   antigravityCommandOutlivesPrompt,
@@ -257,6 +261,7 @@ export function makeAntigravityAcpAdapterFlavor(
     preserveRuntimeOnSettledInterrupt: true,
     // `agy acp` reads a prompt sent mid-turn as a steer; cancel-and-restart killed its subagents.
     steersWithPrompt: antigravitySteersWithPrompt,
+    formatSteerText: wrapAntigravitySteerText,
     ...(options.onSessionEvent === undefined ? {} : { onSessionEvent: options.onSessionEvent }),
     ...(options.samplePromptSuggestion === undefined
       ? {}
@@ -310,6 +315,8 @@ export function makeAntigravityAcpAdapterFlavor(
       : {
           watchPromptOutcome: (sessionId: string) =>
             watchAntigravityPromptOutcome(profileDirectory, sessionId),
+          watchSteerDelivery: (sessionId: string) =>
+            watchAntigravitySteerDelivery(profileDirectory, sessionId),
           subagentsOutlivingPrompt: ({ sessionId, nativeTaskIds }) =>
             readAntigravityChildrenAtWork({
               profileDirectory,

@@ -2,6 +2,7 @@
 
 import {
   type ChatAttachment,
+  type MessageId,
   type ModelSelection,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ExecutionNode,
@@ -583,6 +584,12 @@ export interface AcpAdapterV2Flavor {
    * agent's id for it, which `injectedSteerId` reads from the update that delivers it.
    * No id means the running turn reads the message once the agent accepts it.
    */
+  /** Runs on non-resume prompt-steer text before `runtime.prompt`. */
+  readonly formatSteerText?: (text: string) => string;
+  /** Checks whether a prompt-steer was ingested by the agent before finalization. */
+  readonly watchSteerDelivery?: (
+    sessionId: string,
+  ) => Effect.Effect<(() => Effect.Effect<boolean | undefined>) | undefined>;
   readonly steering?: {
     readonly send: (
       runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
@@ -1718,6 +1725,10 @@ interface ActiveAcpTurn {
   readonly reasoning: ActiveTextStream;
   /** The latest non-empty assistant segment not yet followed by a new tool or input request. */
   closingAssistant: ActiveTextSegment | null;
+  readonly pendingPromptSteers: Array<{
+    readonly messageId: MessageId;
+    readonly checkDelivered: () => Effect.Effect<boolean | undefined>;
+  }>;
   providerRetry?:
     | {
         readonly failure: OrchestrationV2ProviderFailure;
@@ -6011,6 +6022,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             } else if (context.nativeThreadId === notification.sessionId) {
               if (update.sessionUpdate === "usage_update") {
                 context.replyOpen = false;
+                yield* reconcilePendingPromptSteers(context);
                 if (
                   !context.finalized &&
                   !context.interrupted &&
@@ -8852,6 +8864,26 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           });
         });
 
+        const reconcilePendingPromptSteers = Effect.fnUntraced(function* (context: ActiveAcpTurn) {
+          if (context.pendingPromptSteers.length === 0) return;
+          for (const steer of context.pendingPromptSteers.slice()) {
+            if (!context.pendingPromptSteers.includes(steer)) continue;
+            const delivered = yield* steer.checkDelivered();
+            if (delivered === false) continue;
+            const index = context.pendingPromptSteers.indexOf(steer);
+            if (index === -1) continue;
+            context.pendingPromptSteers.splice(index, 1);
+            yield* emitProviderEvent({
+              type: "steer.updated",
+              driver,
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              messageId: steer.messageId,
+              status: "completed",
+            });
+          }
+        });
+
         const finalizeTurn = Effect.fnUntraced(function* (
           context: ActiveAcpTurn,
           status: "completed" | "interrupted" | "failed" | "cancelled",
@@ -8948,6 +8980,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             });
           }
           yield* reportAgentModeChanges(context.input.threadId);
+          yield* reconcilePendingPromptSteers(context);
           const turn = providerTurnPayload(context, settledStatus, now);
           yield* Ref.update(providerTurns, (current) => {
             const updated = new Map(current);
@@ -9561,13 +9594,16 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       sessionId: context.nativeThreadId,
                       failure: hiddenFailure.failure,
                     });
-                    yield* steerWithPrompt({
-                      threadId: context.input.threadId,
-                      runId: context.input.runId,
-                      providerThread: context.input.providerThread,
-                      providerTurnId: context.providerTurnId,
-                      message: { ...context.input.message, text: resumeWith, attachments: [] },
-                    }).pipe(
+                    yield* steerWithPrompt(
+                      {
+                        threadId: context.input.threadId,
+                        runId: context.input.runId,
+                        providerThread: context.input.providerThread,
+                        providerTurnId: context.providerTurnId,
+                        message: { ...context.input.message, text: resumeWith, attachments: [] },
+                      },
+                      { internalResume: true },
+                    ).pipe(
                       Effect.catchCause(() =>
                         runRuntimeCallbackAtGeneration(
                           settle.generation,
@@ -9638,6 +9674,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       : false;
                   if (context.finalized) return;
                   if (!context.interrupted && (deferredBackgroundWork || pendingReply)) {
+                    yield* reconcilePendingPromptSteers(context);
                     if (status === "completed") {
                       yield* closeTextStreamsAsFinalAnswer(context);
                     } else {
@@ -9885,6 +9922,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               assistant: { current: null, nextSegment: 0, closedNamedSegments: new Map() },
               reasoning: { current: null, nextSegment: 0, closedNamedSegments: new Map() },
               closingAssistant: null,
+              pendingPromptSteers: [],
               contextUsage: rememberedContextUsage ?? turnInput.providerThread.contextUsage ?? null,
               nativeMetadata: initialNativeMetadata,
               tools: new Map(),
@@ -10145,18 +10183,25 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
 
         const steerWithPrompt = Effect.fn("AcpAdapterV2.steerWithPrompt")(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2SteerInput,
+          options?: { readonly internalResume?: boolean },
         ) {
           const isNativeSlashCommand = turnInput.message.text.trimStart().startsWith("/");
-          const text = yield* providerMessageTextWithAttachmentPaths({
+          const rawText = yield* providerMessageTextWithAttachmentPaths({
             text: turnInput.message.text,
             attachments: turnInput.message.attachments,
             resolveAttachmentPath: host.resolveAttachmentPath,
             resolveExtractedTextPath: host.resolveExtractedTextPath,
           });
           const attachmentBlocks = yield* promptAttachmentBlocks(
-            text,
+            rawText,
             turnInput.message.attachments,
           );
+          const text =
+            !options?.internalResume &&
+            turnInput.message.createdBy === "user" &&
+            flavor.formatSteerText !== undefined
+              ? flavor.formatSteerText(rawText)
+              : rawText;
           const [dispatched, context] = yield* runtimeTransitionPermit.withPermit(
             Effect.gen(function* () {
               const context = yield* Ref.get(activeTurn);
@@ -10176,6 +10221,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 flavor.watchPromptOutcome === undefined
                   ? undefined
                   : yield* flavor.watchPromptOutcome(context.nativeThreadId);
+              const checkSteerDelivered =
+                options?.internalResume || flavor.watchSteerDelivery === undefined
+                  ? undefined
+                  : yield* flavor.watchSteerDelivery(context.nativeThreadId);
               const dispatched = yield* Deferred.make<void, never>();
               const steered = yield* runRuntimeCallbackAtGeneration(
                 generation,
@@ -10228,53 +10277,96 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     { type: "text", text },
                     ...attachmentBlocks,
                   ];
-                  // The steer prompt carries the turn on, also past a prompt that already settled.
-                  const released = context.foregroundIdle;
-                  context.foregroundIdle = yield* Deferred.make<void>();
-                  if (yield* Deferred.isDone(context.promptWireSettled)) {
-                    context.promptWireSettled = yield* Deferred.make<void, never>();
+                  const registeredSteer =
+                    checkSteerDelivered === undefined
+                      ? undefined
+                      : {
+                          messageId: turnInput.message.messageId,
+                          checkDelivered: checkSteerDelivered,
+                        };
+                  if (registeredSteer !== undefined) {
+                    context.pendingPromptSteers.push(registeredSteer);
+                    yield* emitProviderEvent({
+                      type: "steer.updated",
+                      driver,
+                      threadId: context.input.threadId,
+                      runId: context.input.runId,
+                      messageId: turnInput.message.messageId,
+                      status: "pending",
+                    });
                   }
-                  context.promptSettled = false;
-                  context.promptSettledStatus = null;
-                  context.closingAssistant = null;
-                  context.backgroundFinalizeGeneration += 1;
-                  context.promptSentAt = yield* Clock.currentTimeMillis;
-                  context.lastProgressAt = context.promptSentAt;
-                  const watchdog = context.inactivityWatchdog;
-                  context.inactivityWatchdog = undefined;
-                  if (watchdog !== undefined) {
-                    yield* Fiber.interrupt(watchdog).pipe(Effect.forkDetach, Effect.asVoid);
-                  }
-                  if (promptInactivityTimeoutMillis !== undefined) {
-                    context.inactivityWatchdog = yield* watchPromptInactivity(
-                      context,
-                      generation,
-                      promptInactivityTimeoutMillis,
-                    ).pipe(Effect.forkIn(sessionScope));
-                  }
-                  const releasedForSteer = context.foregroundIdle;
-                  yield* followPrompt(
-                    context,
-                    (superseded) =>
-                      sendPromptWhenIdle(
+                  let promptForked = false;
+                  return yield* Effect.gen(function* () {
+                    // The steer prompt carries the turn on, also past a prompt that already settled.
+                    const released = context.foregroundIdle;
+                    context.foregroundIdle = yield* Deferred.make<void>();
+                    if (yield* Deferred.isDone(context.promptWireSettled)) {
+                      context.promptWireSettled = yield* Deferred.make<void, never>();
+                    }
+                    context.promptSettled = false;
+                    context.promptSettledStatus = null;
+                    context.closingAssistant = null;
+                    context.backgroundFinalizeGeneration += 1;
+                    context.promptSentAt = yield* Clock.currentTimeMillis;
+                    context.lastProgressAt = context.promptSentAt;
+                    const watchdog = context.inactivityWatchdog;
+                    context.inactivityWatchdog = undefined;
+                    if (watchdog !== undefined) {
+                      yield* Fiber.interrupt(watchdog).pipe(Effect.forkDetach, Effect.asVoid);
+                    }
+                    if (promptInactivityTimeoutMillis !== undefined) {
+                      context.inactivityWatchdog = yield* watchPromptInactivity(
                         context,
-                        () =>
-                          runtime.prompt(
-                            { prompt: steerPrompt },
-                            { dispatched, released: releasedForSteer },
-                          ),
-                        superseded,
-                      ),
-                    {
-                      generation,
-                      checkPromptOutcome,
-                      promptParts: null,
-                      appContext: steerAppContext,
-                      compactSession: undefined,
-                    },
-                  ).pipe(Effect.forkIn(sessionScope));
-                  yield* Deferred.succeed(released, undefined);
-                  return true;
+                        generation,
+                        promptInactivityTimeoutMillis,
+                      ).pipe(Effect.forkIn(sessionScope));
+                    }
+                    const releasedForSteer = context.foregroundIdle;
+                    yield* followPrompt(
+                      context,
+                      (superseded) =>
+                        sendPromptWhenIdle(
+                          context,
+                          () =>
+                            runtime.prompt(
+                              { prompt: steerPrompt },
+                              { dispatched, released: releasedForSteer },
+                            ),
+                          superseded,
+                        ),
+                      {
+                        generation,
+                        checkPromptOutcome,
+                        promptParts: null,
+                        appContext: steerAppContext,
+                        compactSession: undefined,
+                      },
+                    ).pipe(Effect.forkIn(sessionScope));
+                    promptForked = true;
+                    yield* Deferred.succeed(released, undefined);
+                    return true;
+                  }).pipe(
+                    Effect.onExit(() => {
+                      if (promptForked) return Effect.void;
+                      if (
+                        appContextOffered !== undefined &&
+                        context.appContextOffered === appContextOffered
+                      ) {
+                        context.appContextOffered = appContextBefore;
+                      }
+                      if (registeredSteer === undefined) return Effect.void;
+                      const index = context.pendingPromptSteers.indexOf(registeredSteer);
+                      if (index !== -1) context.pendingPromptSteers.splice(index, 1);
+                      return emitProviderEvent({
+                        type: "steer.updated",
+                        driver,
+                        threadId: context.input.threadId,
+                        runId: context.input.runId,
+                        messageId: turnInput.message.messageId,
+                        status: "completed",
+                      });
+                    }),
+                  );
                 }),
               );
               if (!Option.contains(steered, true)) {
