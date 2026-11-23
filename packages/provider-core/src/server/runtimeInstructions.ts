@@ -15,8 +15,7 @@ Link each PR you create, take over, or push to: link_pull_request, or link_pull_
 If available, call link_issue for each issue you take on or file, even via CLI; skip issues you only read.
 </pull_request_linking>`;
 
-/** Omit model and effort when the harness manages them dynamically. */
-export function buildRuntimeInstructions(runtime: {
+interface RuntimeInstructionInput {
   readonly harness: string;
   readonly agentFeedback?: AgentFeedbackMode;
   readonly model?: string | undefined;
@@ -26,7 +25,34 @@ export function buildRuntimeInstructions(runtime: {
   readonly pullRequestLinking?: boolean;
   /** Adds the folder list of a multi-folder thread. */
   readonly runtimePolicy?: Pick<ProviderAdapterV2RuntimePolicy, "cwd" | "workspace"> | undefined;
+}
+
+export interface RuntimeInstructionParts {
+  readonly runtimeInfo: string;
+  readonly pullRequestLinking: string;
+  readonly agentFeedback: string;
+  readonly workspace: string;
+}
+
+function joinRuntimeInstructionParts(parts: {
+  readonly runtimeInfo?: string;
+  readonly pullRequestLinking?: string;
+  readonly agentFeedback?: string;
+  readonly workspace?: string;
 }): string {
+  const head = [parts.runtimeInfo, parts.pullRequestLinking].filter(Boolean).join("\n\n");
+  const withFeedback = parts.agentFeedback
+    ? head
+      ? `${head}\n${parts.agentFeedback}`
+      : parts.agentFeedback
+    : head;
+  return [withFeedback, parts.workspace].filter(Boolean).join("\n\n");
+}
+
+/** Splits dynamic identity from session-stable blocks so prompt-based harnesses can deduplicate each. */
+export function buildRuntimeInstructionParts(
+  runtime: RuntimeInstructionInput,
+): RuntimeInstructionParts {
   const harness = toSingleLine(runtime.harness);
   const model = toSingleLine(runtime.model ?? "");
   const modelName = toSingleLine(runtime.modelName ?? "");
@@ -35,16 +61,38 @@ export function buildRuntimeInstructions(runtime: {
     modelName && modelName !== model ? `${modelName} (model slug: ${model})` : model;
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${modelLabel}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
-  const runtimeInfo = `<runtime_info>In case you're asked: you are running in T3 Code through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images, video, and audio using Markdown image syntax with absolute file paths. Link every other file you cite or produce by its absolute path, as in [http.ts:42](/abs/path/http.ts:42), so the user can open it in T3 Code's files viewer.</runtime_info>`;
-  const feedbackLine = AGENT_FEEDBACK_INSTRUCTIONS[runtime.agentFeedback ?? "off"];
-  const feedback = feedbackLine ? `\n${feedbackLine}` : "";
-  const workspace =
-    runtime.runtimePolicy === undefined ? "" : buildWorkspaceInstructions(runtime.runtimePolicy);
-  const linked =
-    runtime.pullRequestLinking === false
-      ? runtimeInfo
-      : `${runtimeInfo}\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}`;
-  return [linked + feedback, ...(workspace === "" ? [] : [workspace])].join("\n\n");
+  return {
+    runtimeInfo: `<runtime_info>In case you're asked: you are running in T3 Code through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images, video, and audio using Markdown image syntax with absolute file paths. Link every other file you cite or produce by its absolute path, as in [http.ts:42](/abs/path/http.ts:42), so the user can open it in T3 Code's files viewer.</runtime_info>`,
+    pullRequestLinking:
+      runtime.pullRequestLinking === false ? "" : PULL_REQUEST_LINKING_INSTRUCTIONS,
+    agentFeedback: AGENT_FEEDBACK_INSTRUCTIONS[runtime.agentFeedback ?? "off"],
+    workspace:
+      runtime.runtimePolicy === undefined ? "" : buildWorkspaceInstructions(runtime.runtimePolicy),
+  };
+}
+
+export function formatRuntimeInstructionDelta(
+  parts: RuntimeInstructionParts,
+  previous?: RuntimeInstructionParts,
+): string | undefined {
+  const text = joinRuntimeInstructionParts({
+    ...(parts.runtimeInfo !== previous?.runtimeInfo ? { runtimeInfo: parts.runtimeInfo } : {}),
+    ...(parts.pullRequestLinking !== "" && parts.pullRequestLinking !== previous?.pullRequestLinking
+      ? { pullRequestLinking: parts.pullRequestLinking }
+      : {}),
+    ...(parts.agentFeedback !== "" && parts.agentFeedback !== previous?.agentFeedback
+      ? { agentFeedback: parts.agentFeedback }
+      : {}),
+    ...(parts.workspace !== "" && parts.workspace !== previous?.workspace
+      ? { workspace: parts.workspace }
+      : {}),
+  });
+  return text === "" ? undefined : text;
+}
+
+/** Omit model and effort when the harness manages them dynamically. */
+export function buildRuntimeInstructions(runtime: RuntimeInstructionInput): string {
+  return joinRuntimeInstructionParts(buildRuntimeInstructionParts(runtime));
 }
 
 function toSingleLine(value: string): string {

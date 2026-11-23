@@ -81,26 +81,33 @@ export function t3AcpPromptWithInstructions(input: {
 }): string {
   // Native slash commands must remain at the start of the prompt.
   if (input.prompt.trimStart().startsWith("/")) return input.prompt;
-  if (
-    input.previousState?.interactionMode === input.state.interactionMode &&
-    input.previousState.hasT3Mcp === input.state.hasT3Mcp &&
-    input.previousState.hasDeviceTools === input.state.hasDeviceTools
-  ) {
-    return input.prompt;
-  }
+  const previousState = input.previousState;
+  const needsMode =
+    previousState === undefined || previousState.interactionMode !== input.state.interactionMode;
+  const hadT3Mcp = previousState?.hasT3Mcp === true;
+  const hadDeviceTools = hadT3Mcp && previousState?.hasDeviceTools === true;
+  const needsMcp = input.state.hasT3Mcp && !hadT3Mcp;
+  const needsDeviceTools = input.state.hasT3Mcp && input.state.hasDeviceTools && !hadDeviceTools;
   const instructions = [
-    input.state.interactionMode === "plan"
-      ? T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS
-      : T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS,
-    ...(input.state.hasT3Mcp
+    ...(needsMode
+      ? [
+          input.state.interactionMode === "plan"
+            ? T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS
+            : T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS,
+        ]
+      : []),
+    ...(needsMcp
       ? [
           T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim(),
-          ...(input.state.hasDeviceTools ? [T3_CODE_DEVICE_TOOL_INSTRUCTIONS] : []),
+          ...(needsDeviceTools ? [T3_CODE_DEVICE_TOOL_INSTRUCTIONS] : []),
           T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim(),
           T3_CODE_ACP_MCP_FALLBACK_INSTRUCTIONS,
         ]
-      : []),
+      : needsDeviceTools
+        ? [T3_CODE_DEVICE_TOOL_INSTRUCTIONS]
+        : []),
   ];
+  if (instructions.length === 0) return input.prompt;
   return `<t3_code_instructions>\n${instructions.join("\n\n")}\n</t3_code_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
 }
 

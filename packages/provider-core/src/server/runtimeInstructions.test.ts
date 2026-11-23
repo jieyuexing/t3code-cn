@@ -2,7 +2,9 @@ import { assert, describe, it } from "@effect/vitest";
 
 import {
   AGENT_FEEDBACK_INSTRUCTIONS,
+  buildRuntimeInstructionParts,
   buildRuntimeInstructions,
+  formatRuntimeInstructionDelta,
   PULL_REQUEST_LINKING_INSTRUCTIONS,
 } from "./runtimeInstructions.ts";
 
@@ -153,5 +155,46 @@ describe("buildRuntimeInstructions", () => {
     assert.isAbove(shown, 0);
     assert.include(block, `\n- Not listed: ${128 - shown} more\n</workspace_folders>`);
     assert.isBelow(new TextEncoder().encode(block).length, 4000);
+  });
+
+  it("formats only changed runtime instruction sections after the initial prompt", () => {
+    const firstPolicy = {
+      cwd: "/work/app",
+      workspace: {
+        folders: [{ name: "api", path: "/work/api", isGitRepository: true }],
+        extraRoots: [],
+      },
+    };
+    const initialInput = {
+      harness: "Antigravity",
+      model: "model-a",
+      agentFeedback: "auto" as const,
+      runtimePolicy: firstPolicy,
+    };
+    const first = buildRuntimeInstructionParts(initialInput);
+    assert.equal(formatRuntimeInstructionDelta(first), buildRuntimeInstructions(initialInput));
+    assert.isUndefined(formatRuntimeInstructionDelta(first, first));
+
+    const switchedModel = buildRuntimeInstructionParts({ ...initialInput, model: "model-b" });
+    assert.equal(formatRuntimeInstructionDelta(switchedModel, first), switchedModel.runtimeInfo);
+
+    const updatedWorkspace = buildRuntimeInstructionParts({
+      ...initialInput,
+      model: "model-b",
+      runtimePolicy: {
+        cwd: "/work/app",
+        workspace: {
+          folders: [
+            { name: "api", path: "/work/api", isGitRepository: true },
+            { name: "docs", path: "/work/docs", isGitRepository: false },
+          ],
+          extraRoots: [],
+        },
+      },
+    });
+    assert.equal(
+      formatRuntimeInstructionDelta(updatedWorkspace, switchedModel),
+      updatedWorkspace.workspace,
+    );
   });
 });

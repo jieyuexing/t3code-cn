@@ -120,7 +120,11 @@ import {
   t3AcpPromptWithInstructions,
   type T3AcpInstructionState,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildRuntimeInstructionParts,
+  formatRuntimeInstructionDelta,
+  type RuntimeInstructionParts,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import {
@@ -2373,7 +2377,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           ProviderAdapter.ProviderAdapterV2RuntimePolicy["runtimeMode"] | null
         >(null);
         const promptInstructionStates = yield* Ref.make(new Map<string, T3AcpInstructionState>());
-        const promptRuntimeInstructions = yield* Ref.make(new Map<string, string>());
+        const promptRuntimeInstructions = yield* Ref.make(
+          new Map<string, RuntimeInstructionParts>(),
+        );
         const deliveredAppContext = yield* Ref.make(new Map<string, ReadonlyMap<string, string>>());
         // Unique markers keep delayed prompt completions from clearing later compactions.
         const compactionMarkers = yield* Ref.make(new Map<string, symbol>());
@@ -9159,7 +9165,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               : { previousState: previousInstructionState }),
           });
           const sessionSetup = yield* Ref.get(activeSessionSetup);
-          const runtimeInstructions = buildRuntimeInstructions({
+          const previousRuntimeInstructions = (yield* Ref.get(promptRuntimeInstructions)).get(
+            sessionId,
+          );
+          const runtimeInstructionParts = buildRuntimeInstructionParts({
             agentFeedback: instructionState.hasT3Mcp ? (turnInput.agentFeedback ?? "off") : "off",
             harness: flavor.runtimeHarness ?? driver,
             model: turnInput.modelSelection.model,
@@ -9168,11 +9177,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               sessionSetup === null ||
               flavor.sessionCarriesPullRequestLinking?.(sessionSetup.initializeResult) !== true,
           });
-          // The agent keeps its own history, so resend only after compaction or when the text changes.
-          const sendRuntimeInstructions =
-            !isNativeSlashCommand &&
-            (compactionMarker !== undefined ||
-              (yield* Ref.get(promptRuntimeInstructions)).get(sessionId) !== runtimeInstructions);
+          // The agent keeps its own history, so resend only after compaction or for changed sections.
+          const runtimeInstructions = isNativeSlashCommand
+            ? undefined
+            : formatRuntimeInstructionDelta(
+                runtimeInstructionParts,
+                compactionMarker !== undefined ? undefined : previousRuntimeInstructions,
+              );
           const promptText = flavor.buildAttachmentPrompt ? text.trim() : text;
           const prompt: Array<EffectAcpSchema.ContentBlock> =
             promptText.length > 0 ? [{ type: "text", text: promptText }] : [];
@@ -9191,13 +9202,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               })),
             );
           }
-          if (sendRuntimeInstructions) {
+          if (runtimeInstructions !== undefined) {
             prompt.push({ type: "text", text: runtimeInstructions });
           }
           return {
             prompt,
             instructionState: text === messageText ? undefined : instructionState,
-            runtimeInstructions: sendRuntimeInstructions ? runtimeInstructions : undefined,
+            runtimeInstructions:
+              runtimeInstructions === undefined ? undefined : runtimeInstructionParts,
             appContextEntries,
             compactionMarker,
           };

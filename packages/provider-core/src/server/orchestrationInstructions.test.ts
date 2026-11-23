@@ -83,18 +83,59 @@ describe("T3 device instructions", () => {
     assert.equal(providerRun(true), "Check the login screen.");
   });
 
-  it("reach ACP agents again when device access changes mid-thread", () => {
+  it("sends only changed ACP instruction sections on mode or capability transitions", () => {
     const state = { interactionMode: "default", hasT3Mcp: true, hasDeviceTools: false } as const;
+    const initial = t3AcpPromptWithInstructions({ prompt: "Hi.", state });
+    assert.include(initial, "T3 Code interaction mode: Default");
+    assert.include(initial, "## T3 Code browser");
+    assert.include(initial, "T3 Code orchestration");
+    assert.include(initial, "ACP fallback:");
+    assert.notInclude(initial, "## T3 Code devices");
+
+    assert.equal(
+      t3AcpPromptWithInstructions({ prompt: "Again.", state, previousState: state }),
+      "Again.",
+    );
+
+    const switchedToPlan = t3AcpPromptWithInstructions({
+      prompt: "Plan this.",
+      state: { ...state, interactionMode: "plan" },
+      previousState: state,
+    });
+    assert.include(switchedToPlan, "T3 Code interaction mode: Plan");
+    assert.notInclude(switchedToPlan, "## T3 Code browser");
+    assert.notInclude(switchedToPlan, "T3 Code orchestration");
+    assert.notInclude(switchedToPlan, "ACP fallback:");
+
     const withDevices = t3AcpPromptWithInstructions({
       prompt: "Check the login screen.",
       state: { ...state, hasDeviceTools: true },
       previousState: state,
     });
     assert.include(withDevices, T3_CODE_DEVICE_TOOL_INSTRUCTIONS);
+    assert.notInclude(withDevices, "T3 Code interaction mode:");
+    assert.notInclude(withDevices, "## T3 Code browser");
+    assert.notInclude(withDevices, "T3 Code orchestration");
+    assert.notInclude(withDevices, "ACP fallback:");
+
+    const gainedMcp = t3AcpPromptWithInstructions({
+      prompt: "Use T3 tools.",
+      state: { interactionMode: "default", hasT3Mcp: true, hasDeviceTools: true },
+      previousState: { interactionMode: "default", hasT3Mcp: false, hasDeviceTools: false },
+    });
+    assert.notInclude(gainedMcp, "T3 Code interaction mode:");
+    assert.include(gainedMcp, "## T3 Code browser");
+    assert.include(gainedMcp, T3_CODE_DEVICE_TOOL_INSTRUCTIONS);
+    assert.include(gainedMcp, "T3 Code orchestration");
+    assert.include(gainedMcp, "ACP fallback:");
+
     assert.equal(
-      t3AcpPromptWithInstructions({ prompt: "Again.", state, previousState: state }),
-      "Again.",
+      t3AcpPromptWithInstructions({
+        prompt: "No devices now.",
+        state,
+        previousState: { ...state, hasDeviceTools: true },
+      }),
+      "No devices now.",
     );
-    assert.notInclude(t3AcpPromptWithInstructions({ prompt: "Hi.", state }), "## T3 Code devices");
   });
 });

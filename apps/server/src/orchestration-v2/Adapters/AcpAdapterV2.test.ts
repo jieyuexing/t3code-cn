@@ -954,6 +954,7 @@ function assertReinjectedInstructions(
   assert.include(text, "T3 Code orchestration");
   assert.include(text, `<user_request>\n${request}\n</user_request>`);
   assert.include(blocks[1]?.text ?? "", "<runtime_info>");
+  assert.include(blocks[1]?.text ?? "", "<pull_request_linking>");
 }
 
 const makeAdvertisedCompactionHarness = Effect.fnUntraced(function* (
@@ -2609,11 +2610,26 @@ describe("AcpAdapterV2", () => {
           },
           selfInvocation,
         });
-        const policy = (interactionMode: "default" | "plan") =>
+        const initialWorkspace = {
+          folders: [{ name: "api", path: "/work/api", isGitRepository: true }],
+          extraRoots: [],
+        } as const;
+        const expandedWorkspace = {
+          folders: [
+            { name: "api", path: "/work/api", isGitRepository: true },
+            { name: "docs", path: "/work/docs", isGitRepository: false },
+          ],
+          extraRoots: [],
+        } as const;
+        const policy = (
+          interactionMode: "default" | "plan",
+          workspace: ProviderAdapter.ProviderAdapterV2RuntimePolicy["workspace"] = initialWorkspace,
+        ) =>
           ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
             runtimeMode: "full-access",
             interactionMode,
             cwd: process.cwd(),
+            workspace,
           });
         const defaultPolicy = policy("default");
         const modelSelection = { instanceId, model: "default" } as const;
@@ -2691,6 +2707,9 @@ describe("AcpAdapterV2", () => {
         assert.include(firstDefault.prompt, "## T3 Code browser");
         assert.include(firstDefault.prompt, "T3 Code orchestration");
         assert.include(firstDefault.prompt, "<runtime_info>");
+        assert.include(firstDefault.prompt, "<pull_request_linking>");
+        assert.include(firstDefault.prompt, "<workspace_folders>");
+        assert.include(firstDefault.prompt, "- api (Git repository): /work/api");
         assert.notInclude(
           firstDefault.methods,
           "session/set_config_option",
@@ -2702,14 +2721,22 @@ describe("AcpAdapterV2", () => {
 
         const planPolicy = policy("plan");
         const firstPlan = yield* runTurn(4, planPolicy, "Plan this change.");
+        assert.equal(firstPlan.textBlockCount, 1);
         assert.include(firstPlan.prompt, "T3 Code interaction mode: Plan");
+        assert.notInclude(firstPlan.prompt, "## T3 Code browser");
+        assert.notInclude(firstPlan.prompt, "T3 Code orchestration");
+        assert.notInclude(firstPlan.prompt, "ACP fallback:");
         assert.deepEqual(firstPlan.modeSets, [planModeId]);
         assert.include(
           (yield* runTurn(5, planPolicy, "Continue planning.")).prompt,
           "Continue planning.",
         );
         const restoredBuild = yield* runTurn(6, defaultPolicy, "Implement the change.");
+        assert.equal(restoredBuild.textBlockCount, 1);
         assert.include(restoredBuild.prompt, "T3 Code interaction mode: Default");
+        assert.notInclude(restoredBuild.prompt, "## T3 Code browser");
+        assert.notInclude(restoredBuild.prompt, "T3 Code orchestration");
+        assert.notInclude(restoredBuild.prompt, "ACP fallback:");
         assert.deepEqual(
           restoredBuild.modeSets,
           [buildModeId],
@@ -2720,7 +2747,25 @@ describe("AcpAdapterV2", () => {
           model: "composer-2",
         });
         assert.equal(switchedModel.textBlockCount, 2);
+        assert.include(switchedModel.prompt, "<runtime_info>");
         assert.include(switchedModel.prompt, "as composer-2");
+        assert.notInclude(switchedModel.prompt, "<pull_request_linking>");
+        assert.notInclude(switchedModel.prompt, "<workspace_folders>");
+
+        const updatedWorkspace = yield* runTurn(
+          8,
+          policy("default", expandedWorkspace),
+          "Check expanded workspace.",
+          {
+            instanceId,
+            model: "composer-2",
+          },
+        );
+        assert.equal(updatedWorkspace.textBlockCount, 2);
+        assert.include(updatedWorkspace.prompt, "<workspace_folders>");
+        assert.include(updatedWorkspace.prompt, "- docs (folder): /work/docs");
+        assert.notInclude(updatedWorkspace.prompt, "<runtime_info>");
+        assert.notInclude(updatedWorkspace.prompt, "<pull_request_linking>");
       }).pipe(Effect.provide(layerTest)),
   );
 
