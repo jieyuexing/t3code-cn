@@ -62,6 +62,8 @@ import {
   workEntryIconName,
 } from "./TimelineWorkEntryRow.logic";
 import { formatWorkingTimerNow } from "./TimelineWorkGroupRows.logic";
+import { liveStepDigest } from "./liveStepDigest-cn";
+import { useThreadPlan } from "../../pluginHost/threadPlan/useThreadPlan";
 
 export const WorkGroupSection = memo(function WorkGroupSection({
   anchorKey,
@@ -591,6 +593,8 @@ export function LiveWorkEntryTimelineRow({
   const threadTarget = useThreadReadTarget(row.entry, ctx.activeThreadEnvironmentId);
   const label = liveWorkEntryLabel(row.entry, ctx.workspaceRoot, row.active, m);
   const threadLabel = threadReadLabel(label, row.entry, threadTarget, m);
+  // A live todo list already tracks the steps, so only a run without one gets the tally.
+  const planIsLive = useThreadPlan(ctx.threadRef)?.live === true;
 
   const item = row.entry.projectedItem?.item;
   const pendingApproval =
@@ -602,6 +606,8 @@ export function LiveWorkEntryTimelineRow({
     row.thought && !row.expanded
       ? liveThoughtLine((row.thought.detail ?? "").slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH))
       : "";
+  const digest =
+    row.active && !row.expanded && !planIsLive ? liveStepDigest(row.groupedEntries, m) : null;
   const thoughtIsStatus = thoughtLine !== "" && row.entry === row.thought;
 
   return (
@@ -609,7 +615,7 @@ export function LiveWorkEntryTimelineRow({
       type="button"
       className={cn(
         "group/live-work flex w-full max-w-full cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-        thoughtLine ? "flex-col items-start" : "min-h-6 items-center",
+        thoughtLine || digest !== null ? "flex-col items-start" : "min-h-6 items-center",
       )}
       aria-label={
         failed
@@ -682,6 +688,11 @@ export function LiveWorkEntryTimelineRow({
         failed={failed}
         active={row.active}
       />
+      {digest === null ? null : (
+        <span className="max-w-full truncate ps-7.5 text-xs text-muted-foreground tabular-nums">
+          {digest} · <WorkingTimer createdAt={row.createdAt} />
+        </span>
+      )}
     </button>
   );
 }
