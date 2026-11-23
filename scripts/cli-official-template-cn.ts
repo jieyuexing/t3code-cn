@@ -13,14 +13,15 @@ import { windowsSystemTar } from "./lib/windows-tar.ts";
 type CliPlatform = Parameters<typeof cliArchiveStem>[1];
 type CliArch = Parameters<typeof cliArchiveStem>[2];
 
-// 仅在依赖、补丁和 native 源码完全相同的 nightly 上复用官方闭包。
+// 仅在依赖、补丁和外部包清单完全相同的 nightly 上复用官方闭包。
 const officialBaselinePaths = [
-  "native/resource-monitor",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
   "patches",
   "scripts/lib/cli-external-packages.ts",
 ];
+// 资源监控沿用官方二进制，不比源码：fork 加的整机读数（hostSystem／hostNetwork）在服务端按握手能力位降级。
+const officialResourceMonitorPath = "native/resource-monitor";
 const OfficialRelease = Schema.Struct({
   tag_name: Schema.String,
   html_url: Schema.String,
@@ -117,7 +118,7 @@ export function verifyOfficialTemplate(input: {
   const git = (...args: string[]) => toolOutput("git", args, input.repoRoot).trim();
   git("merge-base", "--is-ancestor", tag, "HEAD");
   if (git("diff", tag, "--", ...officialBaselinePaths))
-    throw new Error("Official native/dependency baseline mismatch");
+    throw new Error("Official dependency baseline mismatch");
   const original = JSON.parse(git("show", `${tag}:apps/server/package.json`));
   const current = JSON.parse(
     NodeFS.readFileSync(NodePath.join(input.repoRoot, "apps/server/package.json"), "utf8"),
@@ -167,7 +168,9 @@ export function verifyOfficialTemplate(input: {
     releaseUrl,
     archiveHash,
     sumsHash,
-    baselineTrees: git("ls-tree", tag, ...officialBaselinePaths).split("\n"),
+    baselineTrees: git("ls-tree", tag, ...officialBaselinePaths, officialResourceMonitorPath).split(
+      "\n",
+    ),
   };
 }
 
