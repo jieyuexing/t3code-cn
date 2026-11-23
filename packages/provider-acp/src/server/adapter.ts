@@ -586,10 +586,13 @@ export interface AcpAdapterV2Flavor {
    */
   /** Runs on non-resume prompt-steer text before `runtime.prompt`. */
   readonly formatSteerText?: (text: string) => string;
-  /** Checks whether a prompt-steer was ingested by the agent before finalization. */
-  readonly watchSteerDelivery?: (
-    sessionId: string,
-  ) => Effect.Effect<(() => Effect.Effect<boolean | undefined>) | undefined>;
+  /** Tracks whether prompt-steers were ingested by the agent before finalization. */
+  readonly makeSteerDeliveryTracker?: (sessionId: string) => {
+    readonly watch: () => Effect.Effect<symbol | undefined>;
+    readonly reconcile: (
+      tickets: ReadonlyArray<symbol>,
+    ) => Effect.Effect<ReadonlyArray<boolean | undefined>>;
+  };
   readonly steering?: {
     readonly send: (
       runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
@@ -1725,9 +1728,17 @@ interface ActiveAcpTurn {
   readonly reasoning: ActiveTextStream;
   /** The latest non-empty assistant segment not yet followed by a new tool or input request. */
   closingAssistant: ActiveTextSegment | null;
+  steerDeliveryTracker?:
+    | {
+        readonly watch: () => Effect.Effect<symbol | undefined>;
+        readonly reconcile: (
+          tickets: ReadonlyArray<symbol>,
+        ) => Effect.Effect<ReadonlyArray<boolean | undefined>>;
+      }
+    | undefined;
   readonly pendingPromptSteers: Array<{
     readonly messageId: MessageId;
-    readonly checkDelivered: () => Effect.Effect<boolean | undefined>;
+    readonly ticket: symbol;
   }>;
   providerRetry?:
     | {
@@ -8865,11 +8876,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         });
 
         const reconcilePendingPromptSteers = Effect.fnUntraced(function* (context: ActiveAcpTurn) {
-          if (context.pendingPromptSteers.length === 0) return;
-          for (const steer of context.pendingPromptSteers.slice()) {
-            if (!context.pendingPromptSteers.includes(steer)) continue;
-            const delivered = yield* steer.checkDelivered();
-            if (delivered === false) continue;
+          const tracker = context.steerDeliveryTracker;
+          if (tracker === undefined || context.pendingPromptSteers.length === 0) return;
+          const pending = context.pendingPromptSteers.slice();
+          const results = yield* tracker.reconcile(pending.map((steer) => steer.ticket));
+          for (let i = 0; i < pending.length; i += 1) {
+            const steer = pending[i]!;
+            if (results[i] === false) continue;
             const index = context.pendingPromptSteers.indexOf(steer);
             if (index === -1) continue;
             context.pendingPromptSteers.splice(index, 1);
@@ -10221,10 +10234,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 flavor.watchPromptOutcome === undefined
                   ? undefined
                   : yield* flavor.watchPromptOutcome(context.nativeThreadId);
-              const checkSteerDelivered =
-                options?.internalResume || flavor.watchSteerDelivery === undefined
-                  ? undefined
-                  : yield* flavor.watchSteerDelivery(context.nativeThreadId);
+              let steerTicket: symbol | undefined;
+              if (!options?.internalResume && flavor.makeSteerDeliveryTracker !== undefined) {
+                const tracker = (context.steerDeliveryTracker ??= flavor.makeSteerDeliveryTracker(
+                  context.nativeThreadId,
+                ));
+                steerTicket = yield* tracker.watch();
+              }
               const dispatched = yield* Deferred.make<void, never>();
               const steered = yield* runRuntimeCallbackAtGeneration(
                 generation,
@@ -10278,11 +10294,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     ...attachmentBlocks,
                   ];
                   const registeredSteer =
-                    checkSteerDelivered === undefined
+                    steerTicket === undefined
                       ? undefined
                       : {
                           messageId: turnInput.message.messageId,
-                          checkDelivered: checkSteerDelivered,
+                          ticket: steerTicket,
                         };
                   if (registeredSteer !== undefined) {
                     context.pendingPromptSteers.push(registeredSteer);

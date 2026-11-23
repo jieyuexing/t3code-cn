@@ -39,7 +39,7 @@ import {
 import { readAntigravityClientTextFile } from "../../provider/acp/AntigravityClientFiles.ts";
 import { watchAntigravityPromptOutcome } from "../../provider/acp/AntigravityTurnOutcome.ts";
 import {
-  watchAntigravitySteerDelivery,
+  makeAntigravitySteerTracker,
   wrapAntigravitySteerText,
 } from "../../provider/acp/AntigravitySteer.cn.ts";
 import {
@@ -315,8 +315,8 @@ export function makeAntigravityAcpAdapterFlavor(
       : {
           watchPromptOutcome: (sessionId: string) =>
             watchAntigravityPromptOutcome(profileDirectory, sessionId),
-          watchSteerDelivery: (sessionId: string) =>
-            watchAntigravitySteerDelivery(profileDirectory, sessionId),
+          makeSteerDeliveryTracker: (sessionId: string) =>
+            makeAntigravitySteerTracker(profileDirectory, sessionId),
           subagentsOutlivingPrompt: ({ sessionId, nativeTaskIds }) =>
             readAntigravityChildrenAtWork({
               profileDirectory,

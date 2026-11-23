@@ -2,7 +2,7 @@ import * as NodeSqlite from "node:sqlite";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, it, vi } from "@effect/vitest";
 import {
   MessageId,
   NodeId,
@@ -502,5 +502,142 @@ describe("AntigravityAdapterV2 steer delivery and wrapping", () => {
       yield* harness.releaseSteer;
       yield* harness.until((event) => event.type === "turn.terminal");
     }).pipe(Effect.provide(layerSession)),
+  );
+
+  it.effect(
+    "reconciles same-baseline concurrent steers monotonically in a single SQLite read",
+    () =>
+      Effect.gen(function* () {
+        const firstStarted = yield* Deferred.make<void>();
+        const releaseFirst = yield* Deferred.make<void>();
+        const releaseSteer1 = yield* Deferred.make<void>();
+        const releaseSteer2 = yield* Deferred.make<void>();
+        const harness = yield* openSteerHarness({
+          onPrompt: ({ index, send, appendSteps }) =>
+            Effect.gen(function* () {
+              if (index === 0) {
+                appendSteps([[USER_INPUT, Buffer.from("Start work")]]);
+                yield* send({
+                  sessionUpdate: "tool_call",
+                  toolCallId: "call_work",
+                  kind: "execute",
+                  title: "ls",
+                  status: "in_progress",
+                });
+                yield* Deferred.succeed(firstStarted, undefined);
+                yield* Deferred.await(releaseFirst);
+                return { stopReason: "end_turn" as const };
+              }
+              if (index === 1) {
+                yield* Deferred.await(releaseSteer1);
+                appendSteps([
+                  [USER_INPUT, Buffer.from("steer 1")],
+                  [PLANNER_RESPONSE, Buffer.from("ack steer 1")],
+                ]);
+                yield* send({
+                  sessionUpdate: "agent_message_chunk",
+                  content: { type: "text", text: "Handled steer 1." },
+                });
+                yield* send({ sessionUpdate: "usage_update", used: 1000, size: 100000 });
+                return { stopReason: "end_turn" as const };
+              }
+              yield* Deferred.await(releaseSteer2);
+              yield* send({
+                sessionUpdate: "tool_call_update",
+                toolCallId: "call_work",
+                kind: "execute",
+                title: "ls",
+                status: "completed",
+              });
+              // Steer 2 never lands in the session DB.
+              yield* send({ sessionUpdate: "usage_update", used: 1100, size: 100000 });
+              return { stopReason: "end_turn" as const };
+            }),
+        });
+
+        yield* harness.startTurn();
+        yield* Deferred.await(firstStarted);
+        const started = yield* harness.until(
+          (event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.nativeItemRef?.nativeId === "call_work",
+        );
+        const providerTurnId = started.flatMap((event) =>
+          event.type === "provider_turn.updated" ? [event.providerTurn.id] : [],
+        )[0]!;
+
+        const steer1Id = MessageId.make("msg-steer-same-baseline-1");
+        const steer2Id = MessageId.make("msg-steer-same-baseline-2");
+
+        yield* harness.session
+          .steerTurn({
+            threadId: harness.threadId,
+            runId: harness.runId,
+            providerThread: harness.providerThread,
+            providerTurnId,
+            message: {
+              messageId: steer1Id,
+              text: "First steer",
+              attachments: [],
+              createdBy: "user",
+              creationSource: "web",
+            },
+          })
+          .pipe(Effect.forkScoped);
+
+        yield* harness.until(
+          (event) => event.type === "steer.updated" && event.messageId === steer1Id,
+        );
+
+        yield* harness.session
+          .steerTurn({
+            threadId: harness.threadId,
+            runId: harness.runId,
+            providerThread: harness.providerThread,
+            providerTurnId,
+            message: {
+              messageId: steer2Id,
+              text: "Second steer",
+              attachments: [],
+              createdBy: "user",
+              creationSource: "web",
+            },
+          })
+          .pipe(Effect.forkScoped);
+
+        yield* harness.until(
+          (event) => event.type === "steer.updated" && event.messageId === steer2Id,
+        );
+
+        const prepareSpy = vi.spyOn(NodeSqlite.DatabaseSync.prototype, "prepare");
+        try {
+          yield* Deferred.succeed(releaseSteer1, undefined);
+          const afterSteer1 = yield* harness.until(
+            (event) => event.type === "steer.updated" && event.messageId === steer1Id,
+          );
+          yield* Deferred.succeed(releaseFirst, undefined);
+          yield* Deferred.succeed(releaseSteer2, undefined);
+          const tailEvents = yield* harness.until((event) => event.type === "turn.terminal");
+
+          const allTail = [...afterSteer1, ...tailEvents];
+          const steer1Statuses = allTail.flatMap((event) =>
+            event.type === "steer.updated" && event.messageId === steer1Id ? [event.status] : [],
+          );
+          const steer2Statuses = allTail.flatMap((event) =>
+            event.type === "steer.updated" && event.messageId === steer2Id ? [event.status] : [],
+          );
+          assert.deepEqual(steer1Statuses, ["completed"]);
+          assert.deepEqual(steer2Statuses, []);
+
+          // Index 1 usage_update batches both steers in 1 DB read; index 2 usage_update and
+          // finalizeTurn each read once for the remaining steer -> 3 batch queries total (not 4+).
+          const batchStepQueries = prepareSpy.mock.calls.filter(
+            ([sql]) => typeof sql === "string" && sql.includes("SELECT idx, step_type FROM steps"),
+          );
+          assert.lengthOf(batchStepQueries, 3);
+        } finally {
+          prepareSpy.mockRestore();
+        }
+      }).pipe(Effect.provide(layerSession)),
   );
 });

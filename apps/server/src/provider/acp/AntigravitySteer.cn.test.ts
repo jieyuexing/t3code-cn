@@ -1,12 +1,16 @@
 import * as NodeSqlite from "node:sqlite";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { watchAntigravitySteerDelivery, wrapAntigravitySteerText } from "./AntigravitySteer.cn.ts";
+import {
+  makeAntigravitySteerTracker,
+  watchAntigravitySteerDelivery,
+  wrapAntigravitySteerText,
+} from "./AntigravitySteer.cn.ts";
 
 const USER_INPUT = 14;
 const PLANNER_RESPONSE = 15;
@@ -130,6 +134,64 @@ describe("watchAntigravitySteerDelivery", () => {
         assert.isUndefined(yield* checkValid!());
         yield* fs.writeFileString(path.join(conversations, `${valid}.db`), "corrupt");
         assert.isUndefined(yield* checkValid!());
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "matches same-baseline steers monotonically in FIFO order with one SQLite open per reconcile",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const profileDirectory = yield* fs.makeTempDirectoryScoped();
+        const sessionId = "f1aba774-5472-4277-b6ee-27b2e05570a8";
+        const conversations = path.join(profileDirectory, "antigravity-acp", "conversations");
+        yield* fs.makeDirectory(conversations, { recursive: true });
+        let nextIndex = 0;
+        const appendSteps = (steps: ReadonlyArray<number>) => {
+          const database = new NodeSqlite.DatabaseSync(path.join(conversations, `${sessionId}.db`));
+          try {
+            database.exec(
+              "CREATE TABLE IF NOT EXISTS steps (idx INTEGER PRIMARY KEY, step_type INTEGER, step_payload BLOB)",
+            );
+            const insert = database.prepare("INSERT INTO steps VALUES (?, ?, ?)");
+            for (const type of steps) insert.run(nextIndex++, type, Buffer.from("step"));
+          } finally {
+            database.close();
+          }
+        };
+
+        appendSteps([USER_INPUT, PLANNER_RESPONSE]);
+
+        const tracker = makeAntigravitySteerTracker(profileDirectory, sessionId);
+        const t1 = yield* tracker.watch();
+        const t2 = yield* tracker.watch();
+        assert.isDefined(t1);
+        assert.isDefined(t2);
+
+        // Scenario 1: only steer 1 receives USER_INPUT -> PLANNER_RESPONSE.
+        appendSteps([USER_INPUT, PLANNER_RESPONSE]);
+        const prepareSpy = vi.spyOn(NodeSqlite.DatabaseSync.prototype, "prepare");
+        try {
+          const batch1 = yield* tracker.reconcile([t1!, t2!]);
+          assert.deepEqual(batch1, [true, false]);
+
+          const batchQueries = prepareSpy.mock.calls.filter(
+            ([sql]) => typeof sql === "string" && sql.includes("SELECT idx, step_type FROM steps"),
+          );
+          assert.lengthOf(batchQueries, 1);
+
+          // Subsequent reconcile after steer 1 was removed must still keep steer 2 false.
+          assert.deepEqual(yield* tracker.reconcile([t2!]), [false]);
+
+          // Scenario 2: two consecutive USER_INPUTs followed by a single PLANNER_RESPONSE.
+          const t3 = yield* tracker.watch();
+          assert.isDefined(t3);
+          appendSteps([USER_INPUT, USER_INPUT, PLANNER_RESPONSE]);
+          assert.deepEqual(yield* tracker.reconcile([t2!, t3!]), [true, true]);
+        } finally {
+          prepareSpy.mockRestore();
+        }
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- node:sqlite and lstat read the native session log.
+import type * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
@@ -48,20 +49,22 @@ const lastStepIndex = (database: NodeSqlite.DatabaseSync) => {
   return typeof index === "number" ? index : -1;
 };
 
-const hasPlannerResponseAfterSteer =
-  (baselineIdx: number) =>
-  (database: NodeSqlite.DatabaseSync): boolean => {
-    const userRow = database
-      .prepare("SELECT min(idx) AS idx FROM steps WHERE idx > ? AND step_type = ?")
-      .get(baselineIdx, USER_INPUT_STEP_TYPE);
-    const userIdx = userRow?.idx;
-    if (typeof userIdx !== "number") return false;
-    return (
-      database
-        .prepare("SELECT 1 FROM steps WHERE idx > ? AND step_type = ? LIMIT 1")
-        .get(userIdx, PLANNER_RESPONSE_STEP_TYPE) !== undefined
-    );
-  };
+interface SteerWatchTicket {
+  readonly root: string;
+  readonly identity: NodeFS.Stats | undefined;
+  readonly baselineIdx: number;
+}
+
+export interface AntigravitySteerTracker {
+  readonly watch: () => Effect.Effect<symbol | undefined>;
+  readonly reconcile: (
+    tickets: ReadonlyArray<symbol>,
+  ) => Effect.Effect<ReadonlyArray<boolean | undefined>>;
+}
+
+const isSameFile = (ticket: SteerWatchTicket, afterInfo: NodeFS.Stats): boolean =>
+  ticket.identity === undefined ||
+  (afterInfo.dev === ticket.identity.dev && afterInfo.ino === ticket.identity.ino);
 
 /**
  * Wraps non-empty, non-slash mid-turn steer text in an explicit `<user_steer>` block
@@ -81,64 +84,159 @@ export function wrapAntigravitySteerText(text: string): string {
 }
 
 /**
- * Records the session log's current step index before sending a prompt-steer and
- * returns a read-only check verifying that both a new USER_INPUT and a subsequent
- * PLANNER_RESPONSE landed. Returns `undefined` when the log cannot be verified safely.
+ * Tracks mid-turn prompt-steers against `<sessionId>.db` with a monotonic USER_INPUT
+ * consumption cursor and single-open batch reconciliation per flush.
  */
-export const watchAntigravitySteerDelivery = Effect.fn("AntigravitySteer.watch")(function* (
+export function makeAntigravitySteerTracker(
   profileDirectory: string,
   sessionId: string,
-): Effect.fn.Return<(() => Effect.Effect<boolean | undefined>) | undefined> {
-  if (!NATIVE_SESSION_ID.test(sessionId)) return undefined;
+): AntigravitySteerTracker {
   const segments = [...conversationSegments, `${sessionId}.db`];
-  const before = yield* Effect.tryPromise({
-    try: async () => {
-      const root = await antigravityProfileRoot(profileDirectory);
-      if (root === undefined) return undefined;
-      if ((await antigravityManagedPath(root, conversationSegments, "directory")) === undefined) {
-        return undefined;
-      }
-      const database = await antigravityManagedPath(root, segments, "file");
-      if (database === undefined) {
-        const present = await NodeFSP.lstat(NodePath.join(root, ...segments)).then(
-          () => true,
-          () => false,
-        );
-        return present ? undefined : { root, identity: undefined, baselineIdx: -1 };
-      }
-      return { root, identity: database.info, baselineIdx: undefined };
-    },
-    catch: steerLogError,
-  }).pipe(Effect.orElseSucceed(() => undefined));
-  if (before === undefined) {
-    yield* Effect.logWarning("The Antigravity session log is not this session's own file.");
-    return undefined;
-  }
-  const baselineIdx =
-    before.baselineIdx ??
-    (yield* readSteps(NodePath.join(before.root, ...segments), lastStepIndex).pipe(
-      Effect.map((index) => index ?? -1),
-      Effect.orElseSucceed(() => undefined),
-    ));
-  if (baselineIdx === undefined) {
-    yield* Effect.logWarning("Could not read the Antigravity session log before the steer.");
-    return undefined;
-  }
-  return Effect.fn("AntigravitySteer.check")(function* () {
-    const after = yield* Effect.tryPromise({
-      try: () => antigravityManagedPath(before.root, segments, "file"),
+  const ticketsById = new Map<symbol, SteerWatchTicket>();
+  let lastConsumedUserIdx = -1;
+
+  const watch = Effect.fn("AntigravitySteer.watch")(function* (): Effect.fn.Return<
+    symbol | undefined
+  > {
+    if (!NATIVE_SESSION_ID.test(sessionId)) return undefined;
+    const before = yield* Effect.tryPromise({
+      try: async () => {
+        const root = await antigravityProfileRoot(profileDirectory);
+        if (root === undefined) return undefined;
+        if ((await antigravityManagedPath(root, conversationSegments, "directory")) === undefined) {
+          return undefined;
+        }
+        const database = await antigravityManagedPath(root, segments, "file");
+        if (database === undefined) {
+          const present = await NodeFSP.lstat(NodePath.join(root, ...segments)).then(
+            () => true,
+            () => false,
+          );
+          return present ? undefined : { root, identity: undefined, baselineIdx: -1 };
+        }
+        return { root, identity: database.info, baselineIdx: undefined };
+      },
       catch: steerLogError,
     }).pipe(Effect.orElseSucceed(() => undefined));
-    const sameFile =
-      after !== undefined &&
-      (before.identity === undefined ||
-        (after.info.dev === before.identity.dev && after.info.ino === before.identity.ino));
-    if (!sameFile) return undefined;
-    return yield* readSteps(after.path, hasPlannerResponseAfterSteer(baselineIdx)).pipe(
+    if (before === undefined) {
+      yield* Effect.logWarning("The Antigravity session log is not this session's own file.");
+      return undefined;
+    }
+    const baselineIdx =
+      before.baselineIdx ??
+      (yield* readSteps(NodePath.join(before.root, ...segments), lastStepIndex).pipe(
+        Effect.map((index) => index ?? -1),
+        Effect.orElseSucceed(() => undefined),
+      ));
+    if (baselineIdx === undefined) {
+      yield* Effect.logWarning("Could not read the Antigravity session log before the steer.");
+      return undefined;
+    }
+    const ticket = Symbol("AntigravitySteerTicket");
+    ticketsById.set(ticket, {
+      root: before.root,
+      identity: before.identity,
+      baselineIdx,
+    });
+    return ticket;
+  });
+
+  const reconcile = Effect.fn("AntigravitySteer.reconcile")(function* (
+    tickets: ReadonlyArray<symbol>,
+  ): Effect.fn.Return<ReadonlyArray<boolean | undefined>> {
+    if (tickets.length === 0) return [];
+    const entries = tickets.map((ticket) => ticketsById.get(ticket));
+    const root = entries.find((entry) => entry !== undefined)?.root;
+    if (root === undefined) return tickets.map(() => undefined);
+
+    const after = yield* Effect.tryPromise({
+      try: () => antigravityManagedPath(root, segments, "file"),
+      catch: steerLogError,
+    }).pipe(Effect.orElseSucceed(() => undefined));
+    if (after === undefined) return tickets.map(() => undefined);
+
+    let minFloor: number | undefined;
+    for (const entry of entries) {
+      if (entry === undefined || !isSameFile(entry, after.info)) continue;
+      const floor = Math.max(entry.baselineIdx, lastConsumedUserIdx);
+      minFloor = minFloor === undefined ? floor : Math.min(minFloor, floor);
+    }
+    if (minFloor === undefined) return tickets.map(() => undefined);
+
+    const queryFloor = minFloor;
+    const resolved = yield* readSteps(after.path, (database) => {
+      const rows = database
+        .prepare(
+          "SELECT idx, step_type FROM steps WHERE idx > ? AND step_type IN (?, ?) ORDER BY idx",
+        )
+        .all(queryFloor, USER_INPUT_STEP_TYPE, PLANNER_RESPONSE_STEP_TYPE) as ReadonlyArray<{
+        readonly idx?: unknown;
+        readonly step_type?: unknown;
+      }>;
+      const steps: Array<{ readonly idx: number; readonly stepType: number }> = [];
+      for (const row of rows) {
+        if (typeof row.idx === "number" && typeof row.step_type === "number") {
+          steps.push({ idx: row.idx, stepType: row.step_type });
+        }
+      }
+
+      let batchUserCursor = lastConsumedUserIdx;
+      let confirmedUserCursor = lastConsumedUserIdx;
+      const results: Array<boolean | undefined> = new Array<boolean | undefined>(
+        tickets.length,
+      ).fill(undefined);
+      for (let i = 0; i < tickets.length; i += 1) {
+        const entry = entries[i];
+        if (entry === undefined || !isSameFile(entry, after.info)) {
+          results[i] = undefined;
+          continue;
+        }
+        const floor = Math.max(entry.baselineIdx, batchUserCursor);
+        const userPos = steps.findIndex(
+          (step) => step.idx > floor && step.stepType === USER_INPUT_STEP_TYPE,
+        );
+        if (userPos === -1) {
+          results[i] = false;
+          continue;
+        }
+        const userIdx = steps[userPos]!.idx;
+        const hasResponse = steps.some(
+          (step, pos) => pos > userPos && step.stepType === PLANNER_RESPONSE_STEP_TYPE,
+        );
+        batchUserCursor = userIdx;
+        if (hasResponse) {
+          confirmedUserCursor = userIdx;
+          results[i] = true;
+        } else {
+          results[i] = false;
+        }
+      }
+      return { results, confirmedUserCursor };
+    }).pipe(
       Effect.tapError(() =>
         Effect.logWarning("Could not read the Antigravity session log after the steer."),
       ),
       Effect.orElseSucceed(() => undefined),
     );
+    if (resolved === undefined) return tickets.map(() => undefined);
+    lastConsumedUserIdx = Math.max(lastConsumedUserIdx, resolved.confirmedUserCursor);
+    return resolved.results;
   });
+
+  return { watch, reconcile };
+}
+
+/**
+ * Records the session log's current step index before sending a prompt-steer and
+ * returns a read-only check verifying that both a new USER_INPUT and a subsequent
+ * PLANNER_RESPONSE landed. Returns `undefined` when the log cannot be verified safely.
+ */
+export const watchAntigravitySteerDelivery = Effect.fn("AntigravitySteer.watchSingle")(function* (
+  profileDirectory: string,
+  sessionId: string,
+): Effect.fn.Return<(() => Effect.Effect<boolean | undefined>) | undefined> {
+  const tracker = makeAntigravitySteerTracker(profileDirectory, sessionId);
+  const ticket = yield* tracker.watch();
+  if (ticket === undefined) return undefined;
+  return () => tracker.reconcile([ticket]).pipe(Effect.map((results) => results[0]));
 });
