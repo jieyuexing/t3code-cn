@@ -87,6 +87,10 @@
       "types": "./src/worktreeSetup.ts",
       "default": "./src/worktreeSetup.ts"
     },
+    "./machine-resources": {
+      "types": "./src/machineResources.ts",
+      "default": "./src/machineResources.ts"
+    },
     "./project-favicon-cache": {
       "types": "./src/projectFaviconCache.ts",
       "default": "./src/projectFaviconCache.ts"

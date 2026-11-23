@@ -16,7 +16,6 @@ import { GitManager } from "../git/GitManager.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { TaskFolders } from "../workspace/TaskFolders.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
-import { HostResources } from "../resourceTelemetry/HostResources.ts";
 import { PreviewAutomationBroker } from "../mcp/PreviewAutomationBroker.ts";
 import {
   CLAUDE_PROVIDER,
@@ -34,6 +33,7 @@ import { PeerLinks } from "../peer/PeerLinks.ts";
 import { RemoteDelegation } from "../peer/RemoteDelegation.ts";
 import { PluginHost } from "../pluginHost/PluginHost.ts";
 import { PreviewManager } from "../preview/Manager.ts";
+import { HostResources } from "../resourceTelemetry/HostResources.ts";
 import { PreviewBrowser } from "../preview/PreviewBrowser.ts";
 import { ManagedProjectFolders } from "../project/ManagedProjectFolders.ts";
 import { ProjectCheckout } from "../project/ProjectCheckout.ts";
