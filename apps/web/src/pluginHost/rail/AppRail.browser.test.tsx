@@ -17,10 +17,12 @@ vi.mock("../usePluginHost", () => ({
   usePluginHostSnapshot: () => ({ snapshot: null, failed: false }),
   useCanCallPluginHost: () => false,
   usePluginHostAction: () => async () => ({ _tag: "Success" }),
+  usePluginHostCall: () => async () => ({ _tag: "Failure" }),
 }));
 vi.mock("../threadPlan/useThreadPlan", () => ({ useThreadPlanProgress: () => null }));
 vi.mock("../needsYou/useNeedsYou", () => ({ useNeedsYou: () => needsYou.entries }));
 vi.mock("../needsYou/useNeedsYouActions", () => ({ useNeedsYouActions: () => ({}) }));
+vi.mock("../needsYou/useThreadProjectCwd", () => ({ useThreadProjectCwd: () => null }));
 
 const needsYou = vi.hoisted(() => ({ entries: [] as ReadonlyArray<NeedsYouEntry> }));
 

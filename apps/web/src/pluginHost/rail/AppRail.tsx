@@ -1,3 +1,4 @@
+/* oxlint-disable t3code/no-untranslated-copy -- fork-only UI copy, outside upstream catalogs */
 import { useAtomValue } from "@effect/atom-react";
 import {
   DndContext,
@@ -14,7 +15,6 @@ import {
   railItemKey,
   type PluginHostView,
   type RailBuiltinId,
-  type EnvironmentId,
   type RailItem,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -47,6 +47,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { openPluginView } from "../launcherViews";
 import { NeedsYouPopup } from "../needsYou/NeedsYouPopup";
 import { useNeedsYou } from "../needsYou/useNeedsYou";
+import { useThreadProjectCwd } from "../needsYou/useThreadProjectCwd";
 import { useThreadPlanProgress } from "../threadPlan/useThreadPlan";
 import { RAIL_BUILTIN_LABELS } from "./railBuiltins";
 import { RailOverflowPopover, type RailOverflowRow } from "./RailOverflowPopover";
@@ -215,12 +216,14 @@ function PluginAppIcon(props: {
 
 /** The needs-you button: its badge counts the threads waiting on the user, and it is the trigger of the list it opens. */
 function NeedsYouRailButton(props: {
-  readonly environmentId: EnvironmentId;
+  readonly threadRef: ScopedThreadRef;
   readonly onContextMenu: (event: React.MouseEvent) => void;
 }) {
   const [handle] = useState(() => PopoverCreateHandle());
   const [open, setOpen] = useState(false);
-  const entries = useNeedsYou(props.environmentId);
+  const { environmentId } = props.threadRef;
+  const entries = useNeedsYou(environmentId);
+  const cwd = useThreadProjectCwd(props.threadRef);
   const { label, icon: Icon } = RAIL_BUILTIN_LABELS.needsYou;
   return (
     <>
@@ -242,8 +245,9 @@ function NeedsYouRailButton(props: {
       </RailButton>
       <NeedsYouPopup
         handle={handle}
-        environmentId={props.environmentId}
+        environmentId={environmentId}
         entries={entries}
+        cwd={cwd}
         onOpenChange={setOpen}
       />
     </>
@@ -352,7 +356,7 @@ export function AppRail(props: AppRailProps) {
       return (
         <SortableRailItem key={railItemKey(item)} id={railItemKey(item)}>
           <NeedsYouRailButton
-            environmentId={threadRef.environmentId}
+            threadRef={threadRef}
             onContextMenu={(event) => void showMenu(event, item)}
           />
         </SortableRailItem>

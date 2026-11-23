@@ -21,6 +21,12 @@ export const PluginHostCallInput = Schema.Union([
   Schema.TaggedStruct("setHostEnabled", { enabled: Schema.Boolean }),
   /** Replaces the right app rail's pins; allowed while the host switch is off, because the rail is not a plugin. */
   Schema.TaggedStruct("setRail", { rail: RailConfig }),
+  /** Read-only GTD digest of a project that is the universe repo; allowed while the host switch is off, because the needs-you rail is not a plugin. */
+  Schema.TaggedStruct("needsYouGtd", {
+    cwd: TrimmedNonEmptyString,
+    dueDays: Schema.optionalKey(NonNegativeInt),
+    recentDays: Schema.optionalKey(NonNegativeInt),
+  }),
   Schema.TaggedStruct("invoke", {
     ...Target,
     handler: Schema.String.check(Schema.isMaxLength(128)),
@@ -63,6 +69,47 @@ export const PluginHostCallInput = Schema.Union([
   Schema.TaggedStruct("resume", Target),
 ]);
 export type PluginHostCallInput = typeof PluginHostCallInput.Type;
+
+export const NeedsYouDueItem = Schema.Struct({
+  file: Schema.String,
+  line: Schema.Number,
+  date: Schema.String,
+  daysLeft: Schema.Number,
+  section: Schema.String,
+  excerpt: Schema.String,
+});
+export type NeedsYouDueItem = typeof NeedsYouDueItem.Type;
+
+export const NeedsYouTopic = Schema.Struct({
+  topic: Schema.String,
+  thread: Schema.String,
+  capturedAt: Schema.String,
+  status: Schema.Literals(["pending", "started"]),
+});
+export type NeedsYouTopic = typeof NeedsYouTopic.Type;
+
+export const NeedsYouOrphan = Schema.Struct({
+  date: Schema.String,
+  repo: Schema.String,
+  file: Schema.String,
+  subject: Schema.String,
+});
+export type NeedsYouOrphan = typeof NeedsYouOrphan.Type;
+
+/** What `needsYouGtd` returns in `value`; a source that failed leaves its list empty and says why in `errors`. */
+export const NeedsYouGtd = Schema.Struct({
+  available: Schema.Boolean,
+  overdue: Schema.Array(NeedsYouDueItem),
+  upcoming: Schema.Array(NeedsYouDueItem),
+  topics: Schema.Array(NeedsYouTopic),
+  orphans: Schema.Array(NeedsYouOrphan),
+  recentLinkedCount: Schema.Number,
+  privateCount: Schema.Number,
+  reposScanned: Schema.Number,
+  errors: Schema.Array(Schema.String),
+  scannedAt: Schema.String,
+});
+export type NeedsYouGtd = typeof NeedsYouGtd.Type;
 
 /** `invoke` and the service calls return the value, `readView` the bundle; other operations return null. */
 export const PluginHostCallResult = Schema.Struct({ value: Schema.Json });

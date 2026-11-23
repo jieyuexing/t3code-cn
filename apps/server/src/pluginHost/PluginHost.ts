@@ -43,6 +43,7 @@ import {
   planReconcile,
   serviceOwners,
 } from "./PluginReconcile.ts";
+import { readNeedsYouGtd } from "./NeedsYouGtd.ts";
 import { buildSnapshot, displayName } from "./PluginSnapshot.ts";
 import { resolveSettings, settingProblem } from "./PluginSettings.ts";
 import { makeServiceCalls, type AgentServiceMethod } from "./PluginServiceCall.ts";
@@ -718,6 +719,10 @@ export const make = Effect.fn("PluginHost.make")(function* (
   const call = Effect.fn("PluginHost.call")(function* (input: PluginHostCallInput) {
     if (input._tag === "setRail")
       return yield* mutate(setRail(input.rail)).pipe(Effect.andThen(none));
+    if (input._tag === "needsYouGtd")
+      return {
+        value: yield* readNeedsYouGtd(input).pipe(Effect.provide(platform)),
+      };
     if (!hostEnabled && input._tag !== "setHostEnabled") return yield* fail("host-disabled");
     switch (input._tag) {
       case "setHostEnabled":
