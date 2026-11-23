@@ -24,6 +24,7 @@ import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import { resolveWorktreeT3Home } from "@t3tools/shared/devHome";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Context from "effect/Context";
+import * as Digest from "effect/crypto/Digest";
 import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
 import * as Clock from "effect/Clock";
@@ -55,6 +56,7 @@ import { MAX_OVERDUE_ARM_MS } from "./orchestration-v2/UsageLimitRecoveryWorker.
 import * as WorktreeBranchSync from "./orchestration-v2/WorktreeBranchSync.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
+import { cleanDeletedAntigravitySessions } from "./provider/acp/AntigravityThreadCleanup.cn.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { isFilesystemRoot, managedWorktreesDirectories } from "./worktreesDirectory.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -333,6 +335,7 @@ const make = Effect.gen(function* () {
   const terminals = yield* TerminalManager.TerminalManager;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const digest = yield* Digest.Digest;
   const taskFolders = yield* TaskFolders.TaskFolders;
   const liveTerminals = new Map<string, Map<string, TerminalSummary>>();
   const orphanSizes = new Map<string, number | null>();
@@ -1946,6 +1949,7 @@ const make = Effect.gen(function* () {
   // Only deleted threads' worktrees wait on session stops: any stop while one waits, or a stop inside one kept for another reason.
   // A deletion stays pending until a sweep that started after it finishes.
   let deletedWorktreeWaits = true;
+  let deletedAntigravityWaits = false;
   let keptDeletedWorktrees: ReadonlyArray<string> = [];
   let deletions = 0;
   let sweptDeletions = 0;
@@ -1960,6 +1964,21 @@ const make = Effect.gen(function* () {
     yield* cleanCheckpointRefs().pipe(
       Effect.catch((cause) => Effect.logWarning("checkpoint ref cleanup failed", { cause })),
     );
+    const deletedAntigravity = yield* cleanDeletedAntigravitySessions({
+      stateDir: config.stateDir,
+      sql,
+      providerSessions,
+    }).pipe(
+      Effect.provideService(Digest.Digest, digest),
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.catch((cause) =>
+        Effect.logWarning("antigravity session cleanup failed", { cause }).pipe(
+          Effect.as({ waiting: true, removedSessions: 0 }),
+        ),
+      ),
+    );
+    deletedAntigravityWaits = deletedAntigravity.waiting;
     const deletedWorktrees = yield* cleanWorktrees(serverSettings, now, entries, trigger).pipe(
       Effect.catch((error) =>
         Effect.gen(function* () {
@@ -2123,24 +2142,29 @@ const make = Effect.gen(function* () {
     );
     yield* forkParked(
       Stream.runForEach(events, (event) => {
-        if (event.type === "thread.deleted") deletions++;
-        else if (
+        if (event.type === "thread.deleted") {
+          deletions++;
+          return requestSweep;
+        }
+        if (
           event.type !== "provider-session.updated" ||
           (event.payload.status !== "stopped" && event.payload.status !== "error")
-        )
+        ) {
           return Effect.void;
-        else if (!deletedWorktreeWaits && deletions === sweptDeletions) {
-          const cwd = pathKey(event.payload.cwd);
-          if (
-            !keptDeletedWorktrees.some(
-              (worktreePath) => pathKey(worktreePath) === cwd || inside(worktreePath, cwd),
-            )
-          )
-            return Effect.void;
         }
-        if (event.type === "thread.deleted") return requestSweep;
-        if (!anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnDelete)) return Effect.void;
-        return event.type === "provider-session.updated" && event.payload.status === "error"
+        const cwd = pathKey(event.payload.cwd);
+        const wakeWorktree =
+          anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnDelete) &&
+          (deletedWorktreeWaits ||
+            deletions !== sweptDeletions ||
+            keptDeletedWorktrees.some(
+              (worktreePath) => pathKey(worktreePath) === cwd || inside(worktreePath, cwd),
+            ));
+        const wakeAntigravity =
+          event.payload.driver === "antigravity" &&
+          (deletedAntigravityWaits || deletions !== sweptDeletions);
+        if (!wakeWorktree && !wakeAntigravity) return Effect.void;
+        return event.payload.status === "error"
           ? providerSessions
               .isLive(event.payload.id)
               .pipe(Effect.flatMap((live) => (live ? Effect.void : requestSweep)))
