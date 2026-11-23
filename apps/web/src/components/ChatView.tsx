@@ -127,6 +127,7 @@ import {
 import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
 import { projectScriptCwd, resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { orchestrationV2WorktreePending } from "@t3tools/shared/orchestrationV2ThreadError";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabelsCopy";
@@ -2128,6 +2129,7 @@ export default function ChatView(props: ChatViewProps) {
     runningTurnId: activeRunningTurnId,
     latestRun: activeLatestRun,
     latestRunSettled,
+    backgroundWorkHolds: backgroundWorkHoldsCompletion(pendingBackgroundTasks),
     turnDiffSummaries,
     isGitRepo: gitStatusQuery.data?.isRepo,
     linkedPullRequest: linkedThreadPullRequest,

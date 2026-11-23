@@ -12,9 +12,9 @@ import {
   observeProactivePanelUserChoice,
   resolveProactiveTurnDiffAction,
   shouldOpenProactivePullRequest,
-  shouldOpenProactiveTurnDiff,
   shouldRetargetThreadPullRequestPanel,
 } from "../components/ChatView.logic";
+import { observeProactiveTurnDiff } from "./proactiveTurnDiff.cn";
 
 // Settings and drafts unmount ChatView; remember links until the page reloads.
 const observedThreadPullRequests = new Map<string, ThreadLinkedPullRequest | null>();
@@ -34,6 +34,7 @@ export function useProactivePanels(input: {
   readonly runningTurnId: RunId | null;
   readonly latestRun: { readonly runId: RunId; readonly status: string } | null;
   readonly latestRunSettled: boolean;
+  readonly backgroundWorkHolds: boolean;
   readonly turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   readonly isGitRepo: boolean | undefined;
   readonly linkedPullRequest: ThreadLinkedPullRequest | null;
@@ -53,6 +54,7 @@ export function useProactivePanels(input: {
     runningTurnId: activeRunningTurnId,
     latestRun: activeLatestRun,
     latestRunSettled,
+    backgroundWorkHolds,
     turnDiffSummaries,
     isGitRepo,
     linkedPullRequest: linkedThreadPullRequest,
@@ -145,14 +147,13 @@ export function useProactivePanels(input: {
     if (threadDetailLoading) return;
 
     const settledTurnId = latestRunSettled ? (activeLatestRun?.runId ?? null) : null;
-    const newlyCompletedTurnId = shouldOpenProactiveTurnDiff({
+    const { newlyCompletedTurnId, nextRunningTurnId } = observeProactiveTurnDiff({
       previousRunningTurnId,
       runningTurnId: activeRunningTurnId,
       settledTurnId,
       turnCompleted: activeLatestRun?.status === "completed",
-    })
-      ? settledTurnId
-      : null;
+      backgroundWorkHolds,
+    });
     const eligibleCompletion =
       proactivePanelsEnabled &&
       newlyCompletedTurnId !== null &&
@@ -173,7 +174,7 @@ export function useProactivePanels(input: {
       ...proactivePanelObservationRef.current,
       // Preserve first-entry eligibility while capabilities, checkpoint or repository load.
       runningTurnId:
-        diffAction === "defer" || shouldDeferLink ? previousRunningTurnId : activeRunningTurnId,
+        diffAction === "defer" || shouldDeferLink ? previousRunningTurnId : nextRunningTurnId,
     };
     if (diffAction !== "open" || newlyCompletedTurnId === null) return;
     if (
@@ -191,6 +192,7 @@ export function useProactivePanels(input: {
     activeLatestRun?.runId,
     activeLatestRun?.status,
     activeRunningTurnId,
+    backgroundWorkHolds,
     clientSettingsHydrated,
     hasLinkedPullRequestDetail,
     isGitRepo,
