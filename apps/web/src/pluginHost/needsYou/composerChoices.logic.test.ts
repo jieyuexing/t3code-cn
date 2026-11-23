@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { composerChoices, mergeComposerChoices, mergedAdvisorFill } from "./composerChoices.logic";
+import { composerChoices, mergeComposerChoices } from "./composerChoices.logic";
 import type { PromptAdvisorItem } from "./promptAdvisorPayload.cn";
 
 const fills = (reply: string) => composerChoices(reply).map((choice) => choice.fill);
@@ -105,7 +105,6 @@ describe("规则按钮与上下文顾问的融合", () => {
   });
 
   it("合并按钮：0 或 1 枚顾问不出，有解析选项时不出，2 或 3 枚单独顾问时追加且文本正确", () => {
-    expect(mergedAdvisorFill([])).toBe("");
     expect(mergeComposerChoices("改完了。", [])).toEqual([]);
     expect(mergeComposerChoices("改完了。", [advisor("next", "验收", "跑测试")])).toHaveLength(1);
 

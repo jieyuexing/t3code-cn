@@ -53,8 +53,7 @@ function advisorChoice(item: PromptAdvisorItem, beside: boolean): ComposerChoice
 }
 
 /** Combine multiple advisor prompts into one numbered follow-up message. */
-export function mergedAdvisorFill(items: ReadonlyArray<PromptAdvisorItem>): string {
-  if (items.length === 0) return "";
+function mergedAdvisorFill(items: ReadonlyArray<PromptAdvisorItem>): string {
   return ["请逐条回应以下几点：", ...items.map((item, index) => `${index + 1}. ${item.fill}`)].join(
     "\n",
   );
