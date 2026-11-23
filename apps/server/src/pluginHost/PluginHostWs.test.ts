@@ -44,6 +44,9 @@ import * as IssueService from "../issue/IssueService.ts";
 import * as IssueTrackerConnections from "../issue/IssueTrackerConnections.ts";
 import * as McpAppRequests from "../mcpApps/McpAppRequests.ts";
 import * as McpSignIn from "../mcpApps/McpSignIn.ts";
+import * as Workflows from "../workflows/Workflows.ts";
+import * as WorkflowRuntime from "../workflows/WorkflowRuntime.ts";
+import * as FeedbackStore from "../feedback/FeedbackStore.ts";
 import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as OtlpEndpointCheck from "../observability/OtlpEndpointCheck.ts";
@@ -218,6 +221,9 @@ const layerRpcServices = Layer.mergeAll(
   Layer.mock(ServerEnvironment.ServerEnvironment)({}),
   Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
   Layer.mock(McpSignIn.McpSignIn)({}),
+  Workflows.layerDisabled,
+  Layer.mock(WorkflowRuntime.WorkflowDefinitions)({}),
+  Layer.mock(FeedbackStore.FeedbackStore)({}),
   Layer.mock(PeerThreadRelay.PeerThreadRelay)({}),
   Layer.mock(PeerClientPairing.PeerClientPairing)({}),
   Layer.mock(WorkspaceFolders.WorkspaceFolders)({}),
