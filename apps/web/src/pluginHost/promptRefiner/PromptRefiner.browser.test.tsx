@@ -48,11 +48,20 @@ const refined = (text: string, usedWorkspaceContext = true): PromptRefineOutcome
 
 /** An open thread whose refiner client answers with `outcomes` in turn, the last one repeating. */
 async function openThread(name: string, ...outcomes: ReadonlyArray<PromptRefineOutcome>) {
+  return openThreads([name], ...outcomes);
+}
+
+/** The first of `names` is open; `router` moves to the others. */
+async function openThreads(
+  names: ReadonlyArray<string>,
+  ...outcomes: ReadonlyArray<PromptRefineOutcome>
+) {
   client.requestPromptRefine.mockReset();
   for (const outcome of outcomes) client.requestPromptRefine.mockResolvedValueOnce(outcome);
   client.requestPromptRefine.mockResolvedValue(outcomes.at(-1));
-  const thread = threadWithHistory(name, 1);
-  const environment = installFakeEnvironment([thread], { acceptCommands: true });
+  const threads = names.map((name) => threadWithHistory(name, 1));
+  const thread = threads[0]!;
+  const environment = installFakeEnvironment(threads, { acceptCommands: true });
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
@@ -69,6 +78,8 @@ async function openThread(name: string, ...outcomes: ReadonlyArray<PromptRefineO
   await expect.element(editor).toBeVisible();
   return {
     editor,
+    router,
+    threads,
     threadId: thread.id,
     trigger: page.getByRole("button", { name: /优化提示词/ }),
     card: page.getByRole("region", { name: "提示词优化" }),
@@ -120,6 +131,8 @@ it("切换模式用最初的草稿重新优化，并标出当前模式", async (
   await expect
     .element(view.card.getByRole("button", { name: "结构清晰" }))
     .toHaveAttribute("aria-pressed", "true");
+  await userEvent.click(view.editor);
+  await userEvent.keyboard("，又改了几个字");
   await view.card.getByRole("button", { name: "大胆发散" }).click();
   await expect.element(view.card.getByTestId("prompt-refiner-result")).toHaveTextContent("大胆稿");
   expect(client.requestPromptRefine).toHaveBeenLastCalledWith(
@@ -154,17 +167,8 @@ it("快捷键在输入框里触发优化", async () => {
   await using view = await openThread("refine-shortcut", refined("优化稿"));
   await userEvent.click(view.editor);
   await userEvent.keyboard("看一下架构");
-  // A chord through userEvent hangs the provider, so the key reaches the focused editor as an event.
-  document.activeElement?.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      key: "y",
-      shiftKey: true,
-      metaKey: isMacPlatform(navigator.platform),
-      ctrlKey: !isMacPlatform(navigator.platform),
-      bubbles: true,
-      cancelable: true,
-    }),
-  );
+  const mod = isMacPlatform(navigator.platform) ? "Meta" : "Control";
+  await userEvent.keyboard(`{${mod}>}{Shift>}y{/Shift}{/${mod}}`);
   await expect.element(view.card.getByTestId("prompt-refiner-result")).toHaveTextContent("优化稿");
 });
 
@@ -212,4 +216,22 @@ it("预览期间草稿被改动时提示，仍可确认替换当前草稿", asyn
   await expect.element(view.editor).toHaveTextContent("优化稿");
   await page.getByRole("button", { name: "撤销优化" }).click();
   await expect.element(view.editor).toHaveTextContent("看一下架构，再加一句");
+});
+
+it("切到另一个线程后预览卡收起，甲线程的优化稿不会进入乙线程的输入框", async () => {
+  await using view = await openThreads(
+    ["refine-owner-a", "refine-owner-b"],
+    refined("甲线程的优化稿"),
+  );
+  await userEvent.click(view.editor);
+  await userEvent.keyboard("甲线程草稿");
+  await view.trigger.click();
+  await expect.element(view.card.getByTestId("prompt-refiner-result")).toBeVisible();
+  await view.router.navigate({
+    to: "/$environmentId/$threadId",
+    params: { environmentId: ENVIRONMENT_ID, threadId: view.threads[1]!.id },
+  });
+  await expect.element(view.card).not.toBeInTheDocument();
+  await expect.element(view.editor).not.toHaveTextContent("甲线程的优化稿");
+  expect(view.sent()).toHaveLength(0);
 });

@@ -2573,10 +2573,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const promptRefiner = usePromptRefiner({
     environmentId,
+    ownerKey: questionAttachmentTarget ?? composerDraftTargetKey,
     projectId: activeProjectId,
     threadId: activeThreadId,
     prompt,
-    disabled: dictationDisabled || voiceInputActive,
+    disabled:
+      dictationDisabled || voiceInputActive || phase === "running" || phase === "connecting",
     readDraft: () => ({
       text: readComposerSnapshot().value,
       selection: composerEditorRef.current?.readSelectionRange(),

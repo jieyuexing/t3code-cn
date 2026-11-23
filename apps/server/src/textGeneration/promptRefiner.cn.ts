@@ -134,7 +134,11 @@ export function threadMessages(
 ): ReadonlyArray<PromptRefinerMessage> {
   return rows.flatMap(({ item }): Array<PromptRefinerMessage> => {
     if (item.type === "user_message" && item.text.trim() !== "") {
-      return [{ role: "user", text: item.text.trim() }];
+      // Provider wake-ups and idle compactions are system turns, not something the user said.
+      const system =
+        (item.createdBy === "agent" && item.creationSource === "provider") ||
+        item.idleCompaction !== undefined;
+      return system ? [] : [{ role: "user", text: item.text.trim() }];
     }
     if (
       item.type === "assistant_message" &&

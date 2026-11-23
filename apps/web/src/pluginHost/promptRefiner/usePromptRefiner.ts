@@ -42,10 +42,13 @@ export type PromptRefinerState =
     };
 
 interface AppliedRefinement {
+  readonly ownerKey: string;
   readonly undo: PromptReplacement;
   /** The whole draft right after applying; the undo offer ends with the next edit. */
   readonly appliedText: string;
 }
+
+const IDLE: PromptRefinerState = { status: "idle" };
 
 /**
  * The refiner's state machine: ask with a snapshot of the draft, show the answer, replace on
@@ -53,6 +56,8 @@ interface AppliedRefinement {
  */
 export function usePromptRefiner(options: {
   readonly environmentId: EnvironmentId;
+  /** The draft the composer is editing; the composer stays mounted across threads, the card must not. */
+  readonly ownerKey: string;
   readonly projectId: string | null;
   readonly threadId: string | null;
   readonly prompt: string;
@@ -63,8 +68,22 @@ export function usePromptRefiner(options: {
   };
   readonly replaceRange: (replacement: PromptReplacement) => boolean;
 }) {
-  const { environmentId, projectId, threadId, prompt, disabled, readDraft, replaceRange } = options;
-  const [state, setState] = useState<PromptRefinerState>({ status: "idle" });
+  const {
+    environmentId,
+    ownerKey,
+    projectId,
+    threadId,
+    prompt,
+    disabled,
+    readDraft,
+    replaceRange,
+  } = options;
+  const [held, setHeld] = useState<{
+    readonly ownerKey: string;
+    readonly state: PromptRefinerState;
+  }>({ ownerKey, state: IDLE });
+  const state = held.ownerKey === ownerKey ? held.state : IDLE;
+  const setState = (next: PromptRefinerState) => setHeld({ ownerKey, state: next });
   const [lastMode, setLastMode] = useState<PromptRefineMode>(DEFAULT_REFINE_MODE);
   const [applied, setApplied] = useState<AppliedRefinement | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
@@ -129,13 +148,15 @@ export function usePromptRefiner(options: {
       return;
     }
     setApplied({
+      ownerKey,
       undo: planUndo(plan),
       appliedText: `${current.slice(0, plan.start)}${plan.replacement}${current.slice(plan.end)}`,
     });
     setState({ status: "idle" });
   };
 
-  const undoAvailable = applied !== null && prompt === applied.appliedText;
+  const undoAvailable =
+    applied !== null && applied.ownerKey === ownerKey && prompt === applied.appliedText;
   const undo = () => {
     if (applied === null || !undoAvailable) return;
     replaceRange(applied.undo);

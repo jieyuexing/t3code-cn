@@ -166,6 +166,13 @@ describe("threadMessages", () => {
         row({ type: "tool_call", text: "ls" }),
         row({ type: "assistant_message", phase: "final_answer", text: "好的" }),
         row({ type: "user_message", text: "  " }),
+        row({
+          type: "user_message",
+          text: "后台唤醒",
+          createdBy: "agent",
+          creationSource: "provider",
+        }),
+        row({ type: "user_message", text: "压缩", idleCompaction: {} }),
       ]),
     ).toEqual([
       { role: "user", text: "你好" },
