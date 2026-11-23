@@ -85,7 +85,7 @@ export const makePromptAdvisorService = Effect.fn("PromptAdvisorService.make")(f
     if (
       thread === null ||
       thread.deletedAt !== null ||
-      thread.lineage.relationshipToParent !== null ||
+      thread.lineage.relationshipToParent === "subagent" ||
       thread.delegatedFrom !== undefined
     ) {
       return;

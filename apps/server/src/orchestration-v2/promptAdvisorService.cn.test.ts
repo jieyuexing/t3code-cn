@@ -215,7 +215,7 @@ describe("上下文顾问服务", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("开关关闭、没有顾问、被删除线程、子会话与分叉线程、委派线程都不采样", () =>
+  it.effect("开关关闭、没有顾问、被删除线程、子会话与委派线程都不采样", () =>
     Effect.gen(function* () {
       for (const setup of [
         { enabled: false },
@@ -227,7 +227,6 @@ describe("上下文顾问服务", () => {
           },
         },
         { thread: { deletedAt: null, lineage: { relationshipToParent: "subagent" } } },
-        { thread: { deletedAt: null, lineage: { relationshipToParent: "fork" } } },
         { thread: { deletedAt: null, lineage: { relationshipToParent: null }, delegatedFrom: {} } },
         { thread: null },
       ] satisfies ReadonlyArray<Setup>) {
@@ -239,6 +238,20 @@ describe("上下文顾问服务", () => {
         expect(yield* Queue.size(harness.published)).toBe(0);
         expect(harness.calls).toHaveLength(0);
       }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("分叉线程照常采样，避免原生预测关闭后既无顾问又无灰字", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        thread: { deletedAt: null, lineage: { relationshipToParent: "fork" } },
+      });
+      yield* harness.emit(run("run-1", "thread-1"));
+      expect(yield* Queue.take(harness.published)).toEqual({
+        threadId: "thread-1",
+        runId: "run-1",
+        text: ENCODED,
+      });
     }).pipe(Effect.scoped),
   );
 

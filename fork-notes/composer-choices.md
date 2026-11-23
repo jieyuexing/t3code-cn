@@ -20,7 +20,7 @@
 - **融合规则**（`mergeComposerChoices`）：规则有按钮时原样保留，再最多追加 1 枚顾问按钮（优先 `challenge`，其次 `angle`，忽略 `next`），徽标 `盲点`/`换角度`（英文 fill 用 `Blind spot`/`Angle`）；规则为空时顾问的 1–3 枚全部展示，徽标 `反问`/`推进`/`换角度`（英文 `Challenge`/`Next`/`Angle`）。顾问按钮是虚线边框，悬停看 `fill` 全文。
 - **交互**：顾问按钮一律只填入不发送，哪怕 `fill` 恰好是「按推荐」；发送只属于规则里的「按推荐」。Tab 填第一枚、Esc 收起本轮，与规则按钮共用同一套。
 - **服务端结构**：`textGeneration/promptAdvisor.cn.ts`（提示词、清洗、温进程采样器：隔离边界同 `AntigravityTextGeneration`，5 分钟空闲销毁、最多复用 20 次、单次 30 秒超时、出错、超时或被中断立刻重建）、`promptAdvisorRegistry.cn.ts`（进程内注册表，`AntigravityDriver` 启用时注册、Scope 关闭时注销，优先 id 为 `antigravity` 的实例）、`orchestration-v2/promptAdvisorService.cn.ts`（订阅已提交的 `run.updated`，同线程新 run 开始即取消旧采样，写回 `promptSuggestionStore`）。
-- **跳过条件**：开关关、无可用顾问、已删除线程、有父线程的会话（`relationshipToParent` 非空，含子会话与分叉线程）与委派线程、续跑与委派任务的 run、唤醒与 `/compact` 触发的 run、采样结束时最新 run 已变。有顾问时原生预测也关着，所以分叉线程既没有顾问建议也没有灰字，是否放开分叉线程待定。
+- **跳过条件**：开关关、无可用顾问、已删除线程、子会话（`relationshipToParent === "subagent"`）与委派线程（`delegatedFrom` 非空）、续跑与委派任务的 run、唤醒与 `/compact` 触发的 run、采样结束时最新 run 已变；分叉线程（`relationshipToParent === "fork"`）照常采样。
 - **末条回复已有显式选项**（两个以上标号或「待你定」段，`hasExplicitReplyChoices`）：顾问只允许给 0–1 条 `challenge`/`angle`，没有真盲点就不出。
 
 ## 上游文件改动（相对 `2f24a064c9`）
