@@ -22,6 +22,7 @@ import { ChevronDownIcon, MoreVertical, PlusIcon } from "lucide-react";
 import { cn, randomUUID } from "../../lib/utils";
 import { deviceEnvironment } from "../../state/device";
 import { environmentAtomList, environmentIdsKey } from "../../state/environmentAtomList";
+import { useEnvironments } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -56,6 +57,16 @@ import {
   type SimlockTokenEntry,
 } from "./simlockDeviceHostsSettings.logic";
 import { useHostConnectionChecks } from "./useHostConnectionChecks";
+import {
+  DeviceHostHeadroomPill,
+  DeviceHostHeadroomWarnings,
+  useDeviceHostHeadroom,
+} from "./DeviceHostHeadroomView.cn";
+import {
+  matchSshDeviceHostToEnvironment,
+  selectLocalSimulatorHeadroomEnvironments,
+  type HeadroomHostTarget,
+} from "./deviceHostHeadroom.cn";
 
 const deviceHostStatesAtom = environmentAtomList("web-device-host-states", (environmentId) =>
   deviceEnvironment.state({ environmentId, input: {} }),
@@ -97,6 +108,7 @@ interface SourceRow {
    * pool), so its platforms are the same for all of them. Local simulators differ per machine.
    */
   readonly shared: boolean;
+  readonly headroomHosts?: ReadonlyArray<HeadroomHostTarget> | undefined;
   readonly actions?: ReactNode;
 }
 
@@ -165,6 +177,7 @@ export function DeviceSourcesSettings(props: {
   const gt = useGT();
   const m = useMessages();
   const { scope, environments, connectedEnvironments, environment: primary } = useSettingsScope();
+  const { environments: allEnvironments } = useEnvironments();
   const projectScope = scope.kind === "project" || scope.kind === "checkout";
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const list = useAtomCommand(deviceEnvironment.list, { reportFailure: false });
@@ -391,6 +404,11 @@ export function DeviceSourcesSettings(props: {
 
   const rows: SourceRow[] = [];
 
+  const localHeadroomEnvironments = selectLocalSimulatorHeadroomEnvironments(
+    environments,
+    new Set(active.map((member) => member.environmentId)),
+  );
+
   rows.push({
     key: "local",
     shared: false,
@@ -399,6 +417,11 @@ export function DeviceSourcesSettings(props: {
       members.length > 1
         ? gt("Simulators and emulators installed on each environment's own machine.")
         : gt("Simulators and emulators installed on this environment's machine."),
+    headroomHosts: localHeadroomEnvironments.map((environment) => ({
+      environmentId: environment.environmentId,
+      label: label(environment),
+      connected: environment.connection.phase === "connected" && environment.serverConfig !== null,
+    })),
     environments: active.map((member) => {
       const local = member.state?.hosts.find((host) => host.kind === "local");
       const status = local
@@ -443,12 +466,26 @@ export function DeviceSourcesSettings(props: {
     const host = group.host;
     const holders = new Set(group.members.map((member) => member.environmentId));
     const testing = group.members.some((member) => testingHosts.has(member.host.id));
+    const matchedEnvironment = matchSshDeviceHostToEnvironment(host, allEnvironments);
     rows.push({
       key: `ssh:${host.id}:${group.members.map((member) => member.environmentId).join(",")}`,
       shared: true,
       title: host.label,
       kind: "SSH",
       description: host.target,
+      ...(matchedEnvironment
+        ? {
+            headroomHosts: [
+              {
+                environmentId: matchedEnvironment.environmentId,
+                label: settingsScopeEnvironmentLabel(matchedEnvironment, allEnvironments),
+                connected:
+                  matchedEnvironment.connection.phase === "connected" &&
+                  matchedEnvironment.serverConfig !== null,
+              },
+            ],
+          }
+        : {}),
       environments: active.map((member) => {
         const held = group.members.find(
           (candidate) => candidate.environmentId === member.environmentId,
@@ -809,8 +846,11 @@ function PlatformIcon(props: {
   );
 }
 
+const EMPTY_HEADROOM_HOSTS: ReadonlyArray<HeadroomHostTarget> = [];
+
 function DeviceSourceRow(props: { row: SourceRow }) {
   const { row } = props;
+  const headroom = useDeviceHostHeadroom(row.headroomHosts ?? EMPTY_HEADROOM_HOSTS);
   const several = row.environments.length > 1;
   const issues = row.environments.filter(
     (environment): environment is SourceEnvironment & { status: SourceStatus } =>
@@ -819,8 +859,8 @@ function DeviceSourceRow(props: { row: SourceRow }) {
   const problems = issues.filter((environment) => environment.status.tone !== "pending");
   const pending = issues.find((environment) => environment.status.tone === "pending");
   return (
-    <div className="flex items-center gap-3 border-t border-border/60 px-3 py-3 first:border-t-0 sm:px-4">
-      <div className="min-w-0 flex-1">
+    <div className="flex flex-wrap items-center gap-3 border-t border-border/60 px-3 py-3 first:border-t-0 sm:px-4">
+      <div className="min-w-[min(100%,14rem)] flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
           <p className="truncate text-sm font-medium">{row.title}</p>
           {row.kind ? (
@@ -830,6 +870,7 @@ function DeviceSourceRow(props: { row: SourceRow }) {
           ) : null}
         </div>
         <p className="truncate text-xs text-muted-foreground">{row.description}</p>
+        <DeviceHostHeadroomWarnings summary={headroom} />
         {problems.map((environment) => (
           <p
             key={environment.environmentId}
@@ -865,20 +906,23 @@ function DeviceSourceRow(props: { row: SourceRow }) {
           </p>
         ))}
       </div>
-      {pending ? (
-        <span
-          role="status"
-          className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
-        >
-          <Spinner size="xs" />
-          {pending.status.label}
-        </span>
-      ) : (
-        <div className="flex shrink-0 items-center gap-0.5">
-          <SourcePlatforms row={row} />
-        </div>
-      )}
-      {row.actions ? <div className="flex shrink-0 items-center gap-1">{row.actions}</div> : null}
+      <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <DeviceHostHeadroomPill summary={headroom} />
+        {pending ? (
+          <span
+            role="status"
+            className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+          >
+            <Spinner size="xs" />
+            {pending.status.label}
+          </span>
+        ) : (
+          <div className="flex shrink-0 items-center gap-0.5">
+            <SourcePlatforms row={row} />
+          </div>
+        )}
+        {row.actions ? <div className="flex shrink-0 items-center gap-1">{row.actions}</div> : null}
+      </div>
     </div>
   );
 }
