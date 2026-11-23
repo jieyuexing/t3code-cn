@@ -133,6 +133,7 @@ import {
   healthTone,
 } from "./EnvironmentsMapDetails";
 import { LinkEnvironmentDialog, type LinkEnvironmentPrefill } from "./LinkedEnvironmentsSettings";
+import { EnvironmentsMapLoadToggle, EnvironmentNodeLoadRow } from "./EnvironmentsMapLoad.cn";
 import { LinkSeveralEnvironmentsDialog } from "./LinkSeveralEnvironments";
 import { savedBackendStatus } from "./SavedEnvironmentRows";
 import { SettingsSearchTarget } from "./settingsLayout";
@@ -361,12 +362,16 @@ function useFleetLayout(
   stacks: ReadonlyArray<FleetStack>,
   shapeKey: string,
   canvasWidth: number | null,
+  showLoad: boolean,
 ) {
   const width = canvasWidth === null ? undefined : fleetLayoutWidth(canvasWidth);
   const key = `${shapeKey}\n${width}`;
-  const [laid, setLaid] = useState(() => ({ key, layout: layoutFleetGraph(graph, stacks, width) }));
+  const [laid, setLaid] = useState(() => ({
+    key,
+    layout: layoutFleetGraph(graph, stacks, width, { showLoad }),
+  }));
   if (laid.key === key) return laid;
-  const next = { key, layout: layoutFleetGraph(graph, stacks, width) };
+  const next = { key, layout: layoutFleetGraph(graph, stacks, width, { showLoad }) };
   setLaid(next);
   return next;
 }
@@ -402,8 +407,9 @@ export function EnvironmentsMap(
 ) {
   const { graph, environments, connectProblem } = useFleetGraph();
   const [expanded, setExpanded] = useState(NO_STACKS);
+  const [showLoad, setShowLoad] = useState(false);
   const stacks = fleetStacks(graph, expanded);
-  const key = fleetShapeKey(graph, stacks);
+  const key = fleetShapeKey(graph, stacks, showLoad);
   const [picked, setPicked] = useState<FleetFocus | null>(null);
   // Machines ticked for a batch link: apart from `picked`, which is what the details show.
   const [ticked, setTicked] = useState(NO_SELECTION);
@@ -517,6 +523,8 @@ export function EnvironmentsMap(
         graph={graph}
         stacks={stacks}
         shapeKey={key}
+        showLoad={showLoad}
+        onShowLoadChange={setShowLoad}
         environments={environments}
         selection={selection}
         selected={selected}
@@ -580,6 +588,7 @@ interface FleetSceneProps {
   readonly graph: FleetGraph;
   readonly stacks: ReadonlyArray<FleetStack>;
   readonly layout: FleetLayout;
+  readonly showLoad: boolean;
   readonly environments: ReadonlyArray<EnvironmentPresentation>;
   readonly selection: FleetFocus | null;
   /** Machines ticked for a batch link. */
@@ -593,6 +602,7 @@ interface FleetSceneProps {
 interface FleetCanvasProps extends Omit<FleetSceneProps, "layout"> {
   /** The graph's shape. The canvas lays it out at its own width. */
   readonly shapeKey: string;
+  readonly onShowLoadChange: (checked: boolean) => void;
   readonly onClearTicked: () => void;
   readonly onLinkSeveral: (sourceId: string) => void;
   readonly dropped: CodeOnlyDrop | null;
@@ -604,6 +614,7 @@ interface FleetCanvasProps extends Omit<FleetSceneProps, "layout"> {
 
 function FleetCanvas({
   shapeKey: graphKey,
+  onShowLoadChange,
   onClearTicked,
   onLinkSeveral,
   dropped,
@@ -613,10 +624,10 @@ function FleetCanvas({
   ...scene
 }: FleetCanvasProps) {
   const gt = useGT();
-  const { graph, stacks, selection, selected, onSelect, onTick } = scene;
+  const { graph, stacks, showLoad, selection, selected, onSelect, onTick } = scene;
   const [canvas, setCanvas] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState<number | null>(null);
-  const { key: layoutKey, layout } = useFleetLayout(graph, stacks, graphKey, width);
+  const { key: layoutKey, layout } = useFleetLayout(graph, stacks, graphKey, width, showLoad);
   const [query, setQuery] = useState("");
   // A held view lasts while the map keeps its shape, whatever the width; otherwise it fits itself.
   const [manual, setManual] = useState<FleetHeldView | null>(null);
@@ -916,7 +927,8 @@ function FleetCanvas({
                   $context: "how many machines a search by name found",
                 })}
         </p>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <EnvironmentsMapLoadToggle checked={showLoad} onCheckedChange={onShowLoadChange} />
           {selected.size > 0 ? (
             <span className="flex items-center gap-1 text-2xs text-foreground">
               <span role="status" className="tabular-nums">
@@ -1345,6 +1357,7 @@ const FleetScene = memo(function FleetScene({
   graph,
   stacks,
   layout,
+  showLoad,
   environments,
   selection,
   selected,
@@ -2173,43 +2186,49 @@ const FleetScene = memo(function FleetScene({
               )}
               className={cn(
                 nodeClass(node.id),
-                "gap-2 rounded-lg border bg-card px-2.5 text-card-foreground shadow-sm/5 hover:border-foreground/45",
+                "rounded-lg border bg-card px-2.5 text-card-foreground shadow-sm/5 hover:border-foreground/45",
+                showLoad
+                  ? "flex-col items-stretch justify-center gap-1 py-1.5 has-[[data-load-tone=warning]]:border-warning/70 has-[[data-load-tone=danger]]:border-destructive/70"
+                  : "gap-2",
                 dimmed ? "border-dashed border-foreground/25" : "border-foreground/20",
                 over && "border-primary",
               )}
             >
-              <span
-                className={cn(
-                  "relative flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-foreground/80 forced-colors:border",
-                  dimmed && "opacity-60",
-                )}
-              >
-                <EnvironmentMachineIcon kind={node.machine ?? "server"} className="size-3.5" />
-                <span
-                  aria-hidden
-                  className={cn(
-                    "absolute -right-1 -bottom-1 size-2.5 rounded-full border-2 border-card",
-                    node.enabled
-                      ? connectionPhaseDotClassName(node.phase)
-                      : "bg-muted-foreground/40",
-                  )}
-                />
-              </span>
-              <span className={cn("min-w-0 flex-1 pr-1.5", dimmed && "opacity-70")}>
-                <span className="line-clamp-2 text-xs leading-4 font-semibold [overflow-wrap:anywhere]">
-                  {node.label}
-                </span>
+              <span className={cn("flex min-w-0 items-center gap-2", showLoad && "w-full")}>
                 <span
                   className={cn(
-                    "block truncate text-2xs leading-4",
-                    node.outgoing === "error" && node.phase === "connected"
-                      ? "text-destructive"
-                      : "text-muted-foreground",
+                    "relative flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-foreground/80 forced-colors:border",
+                    dimmed && "opacity-60",
                   )}
                 >
-                  {status}
+                  <EnvironmentMachineIcon kind={node.machine ?? "server"} className="size-3.5" />
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "absolute -right-1 -bottom-1 size-2.5 rounded-full border-2 border-card",
+                      node.enabled
+                        ? connectionPhaseDotClassName(node.phase)
+                        : "bg-muted-foreground/40",
+                    )}
+                  />
+                </span>
+                <span className={cn("min-w-0 flex-1 pr-1.5", dimmed && "opacity-70")}>
+                  <span className="line-clamp-2 text-xs leading-4 font-semibold [overflow-wrap:anywhere]">
+                    {node.label}
+                  </span>
+                  <span
+                    className={cn(
+                      "block truncate text-2xs leading-4",
+                      node.outgoing === "error" && node.phase === "connected"
+                        ? "text-destructive"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {status}
+                  </span>
                 </span>
               </span>
+              {showLoad ? <EnvironmentNodeLoadRow node={node} environment={environment} /> : null}
             </button>
             {handle !== undefined && node.linking === "ready" ? (
               <button

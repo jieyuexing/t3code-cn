@@ -37,6 +37,7 @@ import {
   linkTroubleRank,
 } from "./environmentsMap.logic";
 import { peerLinkStatusText, useForgetPeerLink } from "./LinkedEnvironmentsSettings";
+import { EnvironmentNodeDiagnosticsBar } from "./EnvironmentsMapLoad.cn";
 import { savedBackendStatus } from "./SavedEnvironmentRows";
 
 type GT = ReturnType<typeof useGT>;
@@ -733,6 +734,13 @@ function NodeDetails({
           />
         ) : null)}
       <div className={cn(SECTION, "space-y-3 border-t border-border/60")}>
+        <EnvironmentNodeDiagnosticsBar
+          environmentId={node.environmentId}
+          connected={node.phase === "connected"}
+          hasInlineSummary={
+            saved !== null && environment?.entry.enabled === true && node.phase === "connected"
+          }
+        />
         {environment && saved !== null ? <Reconnect environment={environment} /> : null}
         {note ? <p className="max-w-2xl text-muted-foreground">{note}</p> : null}
         <LinkList

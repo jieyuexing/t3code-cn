@@ -12,6 +12,8 @@ import {
 } from "@t3tools/contracts";
 import type * as DateTime from "effect/DateTime";
 
+import { CARD_LOAD_HEIGHT } from "./environmentsMapLoad.logic.cn";
+
 export const FLEET_CLIENT_NODE_ID = "client";
 
 /** What this client knows of the links an environment holds to others. */
@@ -702,8 +704,13 @@ export const fleetStackPartial = (stack: FleetStack) =>
   stack.kind === "targets" && stack.reachable < stack.memberIds.length;
 
 /** Changes exactly when the layout would: membership, labels, routes, wiring and open stacks. */
-export function fleetShapeKey(graph: FleetGraph, stacks: ReadonlyArray<FleetStack>): string {
+export function fleetShapeKey(
+  graph: FleetGraph,
+  stacks: ReadonlyArray<FleetStack>,
+  showLoad = false,
+): string {
   return [
+    showLoad ? "load:1" : "load:0",
     ...graph.nodes.map((node) => `${node.kind}\u0000${node.id}\u0000${node.label}`),
     ...graph.edges.map((edge) =>
       edge.kind === "link" ? `${edge.id}\u0000${edge.link.access}` : edge.id,
@@ -1041,32 +1048,39 @@ const pushTo = <K, V>(into: Map<K, V[]>, key: K, value: V) => {
  * has to shrink it, and takes more of each on a wide canvas, up to a point. With no width it is
  * laid out at its regular measures.
  */
+export interface FleetLayoutOptions {
+  readonly showLoad?: boolean;
+}
+
 export function layoutFleetGraph(
   graph: FleetGraph,
   stacks: ReadonlyArray<FleetStack> = [],
   canvasWidth?: number,
+  options?: FleetLayoutOptions,
 ): FleetLayout {
+  const showLoad = options?.showLoad === true;
   // The measures follow the map with every stack closed, so opening one moves no column.
   const closed = closedStacks(stacks);
-  const { metrics, layout } = fitFleetMetrics(graph, closed, canvasWidth);
+  const { metrics, layout } = fitFleetMetrics(graph, closed, canvasWidth, showLoad);
   if (closed === stacks) return layout;
   if (canvasWidth === undefined) {
     const bayX = layout.columns.find((column) => column.id === "targets")?.x ?? null;
-    return layoutFleetGraphAt(graph, stacks, metrics, { width: Infinity, bayX });
+    return layoutFleetGraphAt(graph, stacks, metrics, { width: Infinity, bayX }, showLoad);
   }
   const bayX = layout.columns.find((column) => column.id === "targets")?.x ?? null;
   // How much of the map the closed fit shows across: the room a tray has at that same scale.
   const room = canvasWidth - fleetFitPadding(canvasWidth) * 2;
   const shown = room / Math.min(FLEET_FIT_MAX_SCALE, room / layout.width);
-  return layoutFleetGraphAt(graph, stacks, metrics, { width: shown - (bayX ?? 0), bayX });
+  return layoutFleetGraphAt(graph, stacks, metrics, { width: shown - (bayX ?? 0), bayX }, showLoad);
 }
 
 function fitFleetMetrics(
   graph: FleetGraph,
   stacks: ReadonlyArray<FleetStack>,
   canvasWidth: number | undefined,
+  showLoad = false,
 ): { readonly metrics: FleetMetrics; readonly layout: FleetLayout } {
-  const regular = layoutFleetGraphAt(graph, stacks, REGULAR);
+  const regular = layoutFleetGraphAt(graph, stacks, REGULAR, undefined, showLoad);
   if (canvasWidth === undefined) return { metrics: REGULAR, layout: regular };
   const room = canvasWidth - fleetFitPadding(canvasWidth) * 2;
   const narrow = room < regular.width;
@@ -1074,12 +1088,12 @@ function fitFleetMetrics(
   const wanted = narrow ? room : room / FLEET_FIT_MAX_SCALE;
   if (!narrow && wanted <= regular.width) return { metrics: REGULAR, layout: regular };
   const limit = narrow ? COMPACT : ROOMY;
-  const end = layoutFleetGraphAt(graph, stacks, limit);
+  const end = layoutFleetGraphAt(graph, stacks, limit, undefined, showLoad);
   if (narrow ? end.width >= wanted : end.width <= wanted) return { metrics: limit, layout: end };
   // Width is a maximum of sums of the measures, so it never exceeds this straight-line estimate.
   const t = (wanted - regular.width) / (end.width - regular.width);
   const metrics = mixMetrics(REGULAR, limit, t);
-  return { metrics, layout: layoutFleetGraphAt(graph, stacks, metrics) };
+  return { metrics, layout: layoutFleetGraphAt(graph, stacks, metrics, undefined, showLoad) };
 }
 
 /**
@@ -1092,6 +1106,7 @@ function layoutFleetGraphAt(
   stacks: ReadonlyArray<FleetStack>,
   metrics: FleetMetrics,
   room: FleetTrayRoom = { width: Infinity, bayX: null },
+  showLoad = false,
 ): FleetLayout {
   const CLIENT_SIZE = { width: metrics.app, height: CLIENT.height };
   const PILL_SIZE = { width: metrics.pill, height: PILL.height };
@@ -1241,9 +1256,8 @@ function layoutFleetGraphAt(
   const cardHeight = (host: FleetNode) =>
     host.kind === "connect"
       ? OFFER.height
-      : host.label.length > CARD.nameLine
-        ? CARD.twoLines
-        : CARD.height;
+      : (host.label.length > CARD.nameLine ? CARD.twoLines : CARD.height) +
+        (showLoad && host.kind === "environment" ? CARD_LOAD_HEIGHT : 0);
   const routeEntryPitch = (hostId: string) =>
     routesInto(hostId) < 2
       ? 0
