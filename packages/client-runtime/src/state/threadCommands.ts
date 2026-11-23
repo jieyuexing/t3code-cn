@@ -50,6 +50,7 @@ import {
   reorderPinnedThread,
   reorderActiveThread,
   setThreadAutoSettle,
+  setThreadTag,
   settleThread,
   snoozeThread,
   startThreadTurn,
@@ -277,6 +278,12 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
+    setTag: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:set-tag",
+      execute: setThreadTag,
+      scheduler,
+      concurrency,
+    }),
     reorderActive: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:reorder-active",
       execute: reorderActiveThread,
@@ -495,6 +502,7 @@ export function createThreadEnvironmentAtoms<R, E>(
     unsnooze: rowAction(sent.unsnooze),
     pin: rowAction(sent.pin),
     unpin: rowAction(sent.unpin),
+    setTag: rowAction(sent.setTag),
   };
   const optimistic = createOptimisticThreadLifecycle(snapshotAtom);
   const disconnectedAtom = Atom.family((environmentId: EnvironmentId) =>
@@ -585,6 +593,17 @@ export function createThreadEnvironmentAtoms<R, E>(
       ...thread,
       autoSettleDisabledAt: input.enabled ? null : (thread.autoSettleDisabledAt ?? now),
     })),
+    setTag: optimistic.wrap(commands.setTag, (thread, input) => {
+      const current = thread.tags ?? [];
+      return {
+        ...thread,
+        tags: input.tagged
+          ? current.includes(input.tag)
+            ? current
+            : [...current, input.tag]
+          : current.filter((tag) => tag !== input.tag),
+      };
+    }),
     pin: optimistic.wrap(commands.pin, (thread, input, now) => ({
       ...thread,
       pinnedAt: thread.pinnedAt ?? now,

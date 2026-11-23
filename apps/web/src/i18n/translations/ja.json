@@ -12511,5 +12511,10 @@
   "27d76249d09eb69f": "レビューガイドの準備ができました",
   "faa3bb26abb39c93": "レビューガイドの作成に失敗しました",
   "b7df38b7d8792d78": "ガイドを開く",
-  "9e91e9a77b664e4e": "レビューガイドを開始できませんでした"
+  "9e91e9a77b664e4e": "レビューガイドを開始できませんでした",
+  "a8ba43a1e9ebaa53": "Favorites",
+  "fe440719cfeabfe2": "Favorite thread",
+  "fa5ee6cb95194239": "Unfavorite thread",
+  "71aac69d0ff3c686": "Failed to favorite thread",
+  "4eee62f8e1ff0812": "Failed to unfavorite thread"
 }

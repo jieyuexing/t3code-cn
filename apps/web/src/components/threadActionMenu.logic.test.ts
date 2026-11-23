@@ -7,6 +7,8 @@ const baseState: ThreadActionMenuState = {
   branch: null,
   projectFilter: null,
   isPinned: false,
+  isFavorited: false,
+  isArchived: false,
   isSettled: false,
   autoSettleEnabled: true,
   isSnoozed: false,
@@ -18,6 +20,7 @@ const baseState: ThreadActionMenuState = {
     autoSettleOptOut: true,
     snooze: true,
     pinning: true,
+    favorite: true,
     titleRegeneration: true,
   },
   snoozePresets: [
@@ -33,12 +36,14 @@ describe("buildThreadActionMenuItems", () => {
         ...baseState,
         canOperate: false,
         isPinned: reversed,
+        isFavorited: reversed,
         isSettled: reversed,
         isSnoozed: reversed,
       });
       const expected = reversed
         ? [
             "unpin",
+            "unfavorite",
             "unsettle",
             "unsnooze",
             "rename",
@@ -49,6 +54,7 @@ describe("buildThreadActionMenuItems", () => {
           ]
         : [
             "pin",
+            "favorite",
             "settle",
             "snooze",
             "rename",
@@ -78,5 +84,10 @@ describe("buildThreadActionMenuItems", () => {
   it("disables only rename where no inline title editor exists", () => {
     const items = buildThreadActionMenuItems({ ...baseState, canRename: false });
     expect(items.filter((item) => item.disabled).map((item) => item.id)).toEqual(["rename"]);
+  });
+
+  it("omits favorite actions for archived threads", () => {
+    const items = buildThreadActionMenuItems({ ...baseState, isArchived: true });
+    expect(items.some((item) => item.id === "favorite" || item.id === "unfavorite")).toBe(false);
   });
 });

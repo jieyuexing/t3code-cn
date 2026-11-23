@@ -12569,5 +12569,10 @@
   "27d76249d09eb69f": "Granskningsguiden är klar",
   "faa3bb26abb39c93": "Granskningsguiden misslyckades",
   "b7df38b7d8792d78": "Öppna guiden",
-  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide"
+  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide",
+  "a8ba43a1e9ebaa53": "Favorites",
+  "fe440719cfeabfe2": "Favorite thread",
+  "fa5ee6cb95194239": "Unfavorite thread",
+  "71aac69d0ff3c686": "Failed to favorite thread",
+  "4eee62f8e1ff0812": "Failed to unfavorite thread"
 }

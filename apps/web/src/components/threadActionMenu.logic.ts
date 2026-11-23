@@ -12,6 +12,8 @@ export type ThreadActionMenuId =
   | "project-settings"
   | "pin"
   | "unpin"
+  | "favorite"
+  | "unfavorite"
   | "settle"
   | "unsettle"
   | "auto-settle"
@@ -104,6 +106,8 @@ export interface ThreadActionMenuState {
     readonly isActive: boolean;
   } | null;
   readonly isPinned: boolean;
+  readonly isFavorited?: boolean;
+  readonly isArchived?: boolean;
   readonly isSettled: boolean;
   readonly autoSettleEnabled: boolean;
   readonly isSnoozed: boolean;
@@ -116,6 +120,7 @@ export interface ThreadActionMenuState {
     readonly autoSettleOptOut: boolean;
     readonly snooze: boolean;
     readonly pinning: boolean;
+    readonly favorite?: boolean;
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
@@ -163,6 +168,21 @@ export function buildThreadActionMenuItems(
           state.isPinned
             ? { id: "unpin" as const, label: resolve(msg("Unpin thread")), icon: "pin-off" }
             : { id: "pin" as const, label: resolve(msg("Pin thread")), icon: "pin" },
+        ]
+      : []),
+    ...(state.supports.favorite && state.isArchived !== true
+      ? [
+          state.isFavorited
+            ? {
+                id: "unfavorite" as const,
+                label: resolve(msg("Unfavorite thread")),
+                icon: "star-off",
+              }
+            : {
+                id: "favorite" as const,
+                label: resolve(msg("Favorite thread")),
+                icon: "star",
+              },
         ]
       : []),
     ...(state.supports.settlement

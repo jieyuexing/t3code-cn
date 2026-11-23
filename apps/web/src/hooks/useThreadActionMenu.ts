@@ -51,6 +51,11 @@ import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { canTurnThreadIntoProject, useThreadActions } from "./useThreadActions";
+import {
+  favoriteThreadErrorTitle,
+  isThreadFavorited,
+  useThreadFavorite,
+} from "./useThreadFavorite.cn";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -92,6 +97,7 @@ export function useThreadActionMenu(input: {
     markThreadUnread,
     turnThreadIntoProject,
   } = useThreadActions();
+  const setThreadFavorite = useThreadFavorite();
   const regenerateThreadTitle = useOrchestrationCommand(threadEnvironment.regenerateTitle, {
     reportFailure: false,
   });
@@ -134,6 +140,7 @@ export function useThreadActionMenu(input: {
         autoSettleOptOut: readEnvironmentSupportsAutoSettleOptOut(threadRef.environmentId),
         snooze: configLoaded,
         pinning: configLoaded,
+        favorite: configLoaded && thread.archivedAt == null,
         titleRegeneration: configLoaded,
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
@@ -144,6 +151,8 @@ export function useThreadActionMenu(input: {
         branch: thread.branch ?? null,
         projectFilter: null,
         isPinned: thread.pinnedAt != null,
+        isFavorited: isThreadFavorited(thread),
+        isArchived: thread.archivedAt != null,
         isSettled: supports.settlement && thread.settledOverride === "settled",
         autoSettleEnabled: thread.autoSettleDisabledAt == null,
         isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
@@ -244,6 +253,14 @@ export function useThreadActionMenu(input: {
         case "unpin": {
           await reportFailure(m(msg("Failed to unpin thread")), () =>
             confirmAndUnpinThread(threadRef),
+          );
+          return;
+        }
+        case "favorite":
+        case "unfavorite": {
+          const favorited = action === "favorite";
+          await reportFailure(favoriteThreadErrorTitle(favorited), () =>
+            setThreadFavorite(threadRef, favorited),
           );
           return;
         }

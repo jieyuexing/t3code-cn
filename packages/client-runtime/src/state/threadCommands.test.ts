@@ -9,6 +9,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  ThreadTag,
   type OrchestrationV2Command,
   type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
@@ -416,6 +417,7 @@ describe("remote thread lifecycle commands", () => {
     ["pin", { orderKey: "a" }, { pinnedAt: expect.any(Object), pinOrderKey: "a" }],
     ["unpin", {}, { pinnedAt: null, pinOrderKey: null }],
     ["setAutoSettle", { enabled: false }, { autoSettleDisabledAt: expect.any(Object) }],
+    ["setTag", { tag: ThreadTag.make("cn:favorite"), tagged: true }, { tags: ["cn:favorite"] }],
     ["reorderPin", { orderKey: "b" }, { pinOrderKey: "b" }],
     ["reorderActive", { orderKey: "b" }, { activeOrderKey: "b" }],
   ] as const;
@@ -455,6 +457,8 @@ describe("remote thread lifecycle commands", () => {
                 enabled: false,
                 orderKey: "a",
                 snoozedUntil: "2099-01-01T00:00:00.000Z",
+                tag: ThreadTag.make("cn:favorite"),
+                tagged: true,
                 ...input,
               },
             }),

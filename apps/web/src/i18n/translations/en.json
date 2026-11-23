@@ -12571,5 +12571,10 @@
   "27d76249d09eb69f": "Review guide ready",
   "faa3bb26abb39c93": "Review guide failed",
   "b7df38b7d8792d78": "Open guide",
-  "9e91e9a77b664e4e": "Could not start a review guide"
+  "9e91e9a77b664e4e": "Could not start a review guide",
+  "a8ba43a1e9ebaa53": "Favorites",
+  "fe440719cfeabfe2": "Favorite thread",
+  "fa5ee6cb95194239": "Unfavorite thread",
+  "71aac69d0ff3c686": "Failed to favorite thread",
+  "4eee62f8e1ff0812": "Failed to unfavorite thread"
 }
