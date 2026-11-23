@@ -1,15 +1,15 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import type { PromptAdvisorSampler } from "./promptAdvisor.cn.ts";
+import type { PromptAdvisorRuntime } from "./promptAdvisor.cn.ts";
 
 // Process-wide on purpose: drivers register at instance creation and the session manager reads it,
 // so neither needs a new service dependency in its layer.
-const registered = new Map<string, PromptAdvisorSampler>();
+const registered = new Map<string, PromptAdvisorRuntime>();
 const PREFERRED_INSTANCE_ID = "antigravity";
 
 /** Offers `sampler` as a prompt advisor until the surrounding scope closes. */
-export const registerPromptAdvisor = (instanceId: string, sampler: PromptAdvisorSampler) =>
+export const registerPromptAdvisor = (instanceId: string, sampler: PromptAdvisorRuntime) =>
   Effect.acquireRelease(
     Effect.sync(() => {
       registered.set(instanceId, sampler);
@@ -21,7 +21,7 @@ export const registerPromptAdvisor = (instanceId: string, sampler: PromptAdvisor
   );
 
 /** The default Antigravity instance when it can run, otherwise any registered one that can. */
-export const resolvePromptAdvisor: Effect.Effect<Option.Option<PromptAdvisorSampler>> = Effect.gen(
+export const resolvePromptAdvisor: Effect.Effect<Option.Option<PromptAdvisorRuntime>> = Effect.gen(
   function* () {
     const ordered = [...registered].toSorted(
       ([left], [right]) =>

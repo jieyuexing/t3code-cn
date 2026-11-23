@@ -188,6 +188,11 @@ export interface PromptAdvisorSampler {
   ) => Effect.Effect<string | null, TextGenerationError>;
 }
 
+/** The sampler plus the raw one-prompt entry other features borrow, through the same warm helper. */
+export interface PromptAdvisorRuntime extends PromptAdvisorSampler {
+  readonly runPrompt: (prompt: string) => Effect.Effect<string, TextGenerationError>;
+}
+
 type HelperRuntime = Effect.Success<ReturnType<AntigravityTextGenerationOptions["makeRuntime"]>>;
 
 interface ActivePrompt {
@@ -466,11 +471,12 @@ export const makeAntigravityPromptAdvisorSampler = Effect.fn("makeAntigravityPro
 
     return {
       available,
+      runPrompt: run,
       sample: Effect.fn("PromptAdvisorSampler.sample")(function* (input: PromptAdvisorSampleInput) {
         if (input.messages.length === 0) return null;
         const raw = yield* run(buildPromptAdvisorPrompt(input.messages, input));
         return sanitizePromptAdvisorOutput(raw, input);
       }),
-    } satisfies PromptAdvisorSampler;
+    } satisfies PromptAdvisorRuntime;
   },
 );

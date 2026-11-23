@@ -381,6 +381,20 @@ describe("上下文顾问：温进程", () => {
       }).pipe(Effect.scoped),
     );
 
+    it.effect("提示词优化与顾问采样共用同一个温进程并共享复用计数", () =>
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture({
+          outputs: [advisorJson("甲"), '{"refined":"优化稿"}'],
+        });
+        yield* fixture.ask();
+        expect(yield* fixture.advisor.runPrompt("rewrite this draft")).toBe('{"refined":"优化稿"}');
+        expect(fixture.state.workspaces).toHaveLength(1);
+        expect(fixture.state.prompts).toHaveLength(2);
+        expect(fixture.state.prompts[1]).toContain("Use only the input below");
+        expect(fixture.state.prompts[1]).toContain("rewrite this draft");
+      }).pipe(Effect.scoped),
+    );
+
     it.effect("复用满 20 次后销毁，下一次重新建进程", () =>
       Effect.gen(function* () {
         const fixture = yield* makeFixture({
