@@ -6,13 +6,18 @@ import {
   AuthOrchestrationReadScope,
   AuthSessionId,
   TextGenerationError,
+  type AuthEnvironmentScope,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { HttpRouter, HttpServer } from "effect/http";
+import type * as Scope from "effect/Scope";
+import { HttpBody, HttpRouter, HttpServer } from "effect/http";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -45,7 +50,7 @@ const reply = (refined: string) => () => Effect.succeed(JSON.stringify({ refined
 /** Serves the route with a workspace at `root` for project `p1` and for thread `t1`'s worktree. */
 const serve = (options: {
   readonly root: string;
-  readonly scopes?: ReadonlyArray<string>;
+  readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
   readonly authFails?: boolean;
 }) =>
   Effect.gen(function* () {
@@ -100,23 +105,32 @@ const serve = (options: {
     const server = Context.get(services, HttpServer.HttpServer);
     const origin = HttpServer.formatAddress(server.address);
     return (body: unknown, init?: { readonly raw?: boolean }) =>
-      Effect.promise(async () => {
-        const response = await fetch(
+      HttpClient.execute(
+        HttpClientRequest.post(
           `http://${origin.replace(/^http:\/\//, "")}${PROMPT_REFINE_PATH}`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: init?.raw === true ? String(body) : JSON.stringify(body),
-          },
-        );
-        return {
-          status: response.status,
-          json: (await response.json()) as Record<string, unknown>,
-        };
-      });
+        ).pipe(
+          HttpClientRequest.setBody(
+            HttpBody.text(
+              init?.raw === true ? String(body) : JSON.stringify(body),
+              "application/json",
+            ),
+          ),
+        ),
+      ).pipe(
+        Effect.flatMap((response) =>
+          Effect.map(response.json, (json) => ({
+            status: response.status,
+            json: json as Record<string, unknown>,
+          })),
+        ),
+        Effect.provide(FetchHttpClient.layer),
+        Effect.orDie,
+      );
   });
 
-const withWorkspace = <A, E>(body: (root: string) => Effect.Effect<A, E>) =>
+const withWorkspace = <A, E>(
+  body: (root: string) => Effect.Effect<A, E, FileSystem.FileSystem | Scope.Scope>,
+) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const root = yield* fs.realPath(

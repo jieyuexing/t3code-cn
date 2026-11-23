@@ -303,6 +303,11 @@ import { composerCommandKeyHandler } from "./composerCommandKey";
 import { promptSuggestionToAccept, usePromptSuggestion } from "./usePromptSuggestion";
 import { ComposerChoiceStrip } from "~/pluginHost/needsYou/ComposerChoiceStrip";
 import { useComposerChoices } from "~/pluginHost/needsYou/useComposerChoices";
+import {
+  PromptRefinerButton,
+  PromptRefinerCard,
+} from "~/pluginHost/promptRefiner/PromptRefinerBar";
+import { usePromptRefiner } from "~/pluginHost/promptRefiner/usePromptRefiner";
 import { isPromptAdvisorPayload } from "~/pluginHost/needsYou/promptAdvisorPayload.cn";
 import { useFreshSessionArmed } from "./freshSessionArms";
 
@@ -2566,6 +2571,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     routeThreadRef,
     promptSuggestion,
   );
+  const promptRefiner = usePromptRefiner({
+    environmentId,
+    projectId: activeProjectId,
+    threadId: activeThreadId,
+    prompt,
+    disabled: dictationDisabled || voiceInputActive,
+    readDraft: () => ({
+      text: readComposerSnapshot().value,
+      selection: composerEditorRef.current?.readSelectionRange(),
+    }),
+    replaceRange: ({ start, end, replacement, expectedText }) =>
+      applyPromptReplacement(start, end, replacement, { expectedText }),
+  });
   const showComposerChoices =
     promptSuggestionSlot !== null &&
     composerChoices.choices.length > 0 &&
@@ -3833,6 +3851,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </div>
             ) : null}
 
+            <PromptRefinerCard refiner={promptRefiner} prompt={prompt} />
             {showComposerChoices ? (
               <ComposerChoiceStrip
                 choices={composerChoices.choices}
@@ -4068,9 +4087,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     "hidden sm:flex",
                 )}
               >
-                {composerAttachButton && !dictationTakesFooter ? (
-                  <div className="me-2">{composerAttachButton}</div>
-                ) : null}
+                {dictationTakesFooter ? null : (
+                  <div className="me-2 flex items-center gap-0.5">
+                    {composerAttachButton}
+                    <PromptRefinerButton refiner={promptRefiner} />
+                  </div>
+                )}
                 <div
                   data-chat-composer-actions="right"
                   data-chat-composer-transition-actions="true"

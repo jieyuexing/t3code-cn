@@ -4,6 +4,7 @@ import { TextGenerationError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import type * as Scope from "effect/Scope";
 import { describe, expect } from "vite-plus/test";
 
 import type { PromptAdvisorRuntime } from "./promptAdvisor.cn.ts";
@@ -197,7 +198,11 @@ describe("selectThreadTail", () => {
 
 describe("collectWorkspaceFingerprint", () => {
   const withRoot = <A, E>(
-    body: (root: string, fs: FileSystem.FileSystem, path: Path.Path) => Effect.Effect<A, E>,
+    body: (
+      root: string,
+      fs: FileSystem.FileSystem,
+      path: Path.Path,
+    ) => Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Scope.Scope>,
   ) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
