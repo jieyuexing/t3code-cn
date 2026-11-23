@@ -65,7 +65,7 @@ export function ComposerChoiceStrip(props: {
               <span className="shrink-0 text-muted-foreground">{choice.badge}</span>
               <span className="min-w-0 truncate">{choice.label}</span>
             </TooltipTrigger>
-            <TooltipPopup>{choice.fill}</TooltipPopup>
+            <TooltipPopup className="whitespace-pre-line">{choice.fill}</TooltipPopup>
           </Tooltip>
         ) : (
           <Button

@@ -52,16 +52,39 @@ function advisorChoice(item: PromptAdvisorItem, beside: boolean): ComposerChoice
   };
 }
 
+/** Combine multiple advisor prompts into one numbered follow-up message. */
+export function mergedAdvisorFill(items: ReadonlyArray<PromptAdvisorItem>): string {
+  if (items.length === 0) return "";
+  return ["请逐条回应以下几点：", ...items.map((item, index) => `${index + 1}. ${item.fill}`)].join(
+    "\n",
+  );
+}
+
 /**
  * The reply's own buttons, shown at once, with the context advisor's suggestions: one blind-spot
- * or angle button beside rule buttons, all of them when the reply held no options.
+ * or angle button beside rule buttons, all of them when the reply held no options (plus a trailing
+ * merge chip when 2+ advisor items appear alone).
  */
 export function mergeComposerChoices(
   reply: string,
   advisorItems: ReadonlyArray<PromptAdvisorItem>,
 ): ReadonlyArray<ComposerChoice> {
   const rules = composerChoices(reply);
-  if (rules.length === 0) return advisorItems.map((item) => advisorChoice(item, false));
+  if (rules.length === 0) {
+    const advisors = advisorItems.map((item) => advisorChoice(item, false));
+    if (advisors.length < 2) return advisors;
+    return [
+      ...advisors,
+      {
+        source: "advisor",
+        badge: "全部",
+        // oxlint-disable-next-line t3code/no-untranslated-copy -- fork-only Chinese copy, outside the catalogs
+        label: `合并 ${advisors.length} 条`,
+        fill: mergedAdvisorFill(advisorItems),
+        detail: "",
+      },
+    ];
+  }
   const extra =
     advisorItems.find((item) => item.kind === "challenge") ??
     advisorItems.find((item) => item.kind === "angle");

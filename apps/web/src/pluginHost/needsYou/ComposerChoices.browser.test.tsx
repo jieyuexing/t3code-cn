@@ -211,3 +211,27 @@ it("普通上游灰字照旧显示，不被当成顾问串", async () => {
     .element(page.getByTestId("composer-editor"))
     .toHaveAttribute("aria-placeholder", "跑一下测试");
 });
+
+it("普通回复有 2 枚以上顾问建议时显示合并按钮，点后填入编号汇总文本且不发送", async () => {
+  await using view = await openThread(
+    "choices-advisor-merge",
+    "改完了，测试通过。",
+    advisorPayload(
+      ["challenge", "回归没验证", "你确认过回归测试覆盖了这次改动吗？"],
+      ["next", "跑完整测试", "跑一遍完整测试并贴结果"],
+    ),
+  );
+  const mergeButton = view.strip.getByRole("button", { name: /全部\s*合并 2 条/ });
+  await expect.element(mergeButton).toBeVisible();
+  await mergeButton.click();
+  await expect
+    .element(view.editor)
+    .toHaveTextContent(
+      "请逐条回应以下几点：你确认过回归测试覆盖了这次改动吗？跑一遍完整测试并贴结果",
+    );
+  const paragraphs = [...view.editor.element().querySelectorAll("p")].map((p) => p.textContent);
+  expect(paragraphs[0]).toBe("请逐条回应以下几点：");
+  const items = [...view.editor.element().querySelectorAll("ol li")].map((li) => li.textContent);
+  expect(items).toEqual(["你确认过回归测试覆盖了这次改动吗？", "跑一遍完整测试并贴结果"]);
+  expect(view.sent()).toHaveLength(0);
+});
