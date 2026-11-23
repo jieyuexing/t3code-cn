@@ -303,6 +303,7 @@ import { composerCommandKeyHandler } from "./composerCommandKey";
 import { promptSuggestionToAccept, usePromptSuggestion } from "./usePromptSuggestion";
 import { ComposerChoiceStrip } from "~/pluginHost/needsYou/ComposerChoiceStrip";
 import { useComposerChoices } from "~/pluginHost/needsYou/useComposerChoices";
+import { isPromptAdvisorPayload } from "~/pluginHost/needsYou/promptAdvisorPayload.cn";
 import { useFreshSessionArmed } from "./freshSessionArms";
 
 function consumePasteAsTextShortcut(deadline: { current: number }): boolean {
@@ -2563,15 +2564,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThread,
     activeThreadRuns,
     routeThreadRef,
+    promptSuggestion,
   );
   const showComposerChoices =
     promptSuggestionSlot !== null &&
     composerChoices.choices.length > 0 &&
     prompt.length === 0 &&
     !isComposerCollapsedMobile;
-  const offeredPromptSuggestion = showComposerChoices
-    ? null
-    : (promptSuggestionSlot?.ghost ?? null);
+  const offeredPromptSuggestion =
+    showComposerChoices || isPromptAdvisorPayload(promptSuggestionSlot?.ghost ?? null)
+      ? null
+      : (promptSuggestionSlot?.ghost ?? null);
 
   const onComposerCommandKey = (key: string, event: KeyboardEvent, isTaskItem?: boolean) => {
     if (key === "Escape" && composerSendHeld && !event.isComposing) {

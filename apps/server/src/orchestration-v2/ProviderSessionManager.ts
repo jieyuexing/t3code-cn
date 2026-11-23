@@ -77,6 +77,8 @@ import {
 } from "@t3tools/provider-core/server/subagentProjection";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import { resolvePromptAdvisor } from "../textGeneration/promptAdvisorRegistry.cn.ts";
+import { makePromptAdvisorService } from "./promptAdvisorService.cn.ts";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_IDLE_PIN_MS = 4 * 60 * 60 * 1000;
@@ -483,6 +485,28 @@ export const layerWithOptions = (
             Effect.map((settings) => settings.promptSuggestionsEnabled),
             Effect.orElseSucceed(() => false),
           );
+      const storePromptSuggestion = (
+        threadId: ThreadId,
+        suggestion: NonNullable<OrchestrationV2PromptSuggestion>,
+      ) =>
+        SubscriptionRef.update(promptSuggestionStore, (current) => {
+          const next = new Map(current);
+          next.delete(threadId);
+          next.set(threadId, suggestion);
+          for (const key of next.keys()) {
+            if (next.size <= MAX_PROMPT_SUGGESTIONS) break;
+            next.delete(key);
+          }
+          return next;
+        });
+      // With an Antigravity advisor on the machine it samples every provider's turns, so the providers' own prediction stays off.
+      const promptAdvisor = yield* makePromptAdvisorService({
+        enabled: promptSuggestionsEnabled,
+        resolveAdvisor: resolvePromptAdvisor,
+        eventSink,
+        projectionStore,
+        publish: storePromptSuggestion,
+      });
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
           if (Option.isNone(serverSettings)) return { browser: true, device: false };
@@ -3028,18 +3052,9 @@ export const layerWithOptions = (
               );
             }
             if (nativeEvent.type === "prompt_suggestion.updated") {
-              return SubscriptionRef.update(promptSuggestionStore, (current) => {
-                const next = new Map(current);
-                next.delete(nativeEvent.threadId);
-                next.set(nativeEvent.threadId, {
-                  runId: nativeEvent.runId,
-                  text: nativeEvent.text,
-                });
-                for (const threadId of next.keys()) {
-                  if (next.size <= MAX_PROMPT_SUGGESTIONS) break;
-                  next.delete(threadId);
-                }
-                return next;
+              return storePromptSuggestion(nativeEvent.threadId, {
+                runId: nativeEvent.runId,
+                text: nativeEvent.text,
               });
             }
             const tracked = retryStalls.track(nativeEvent);
@@ -3297,7 +3312,7 @@ export const layerWithOptions = (
                     providerSessionId: input.providerSessionId,
                     modelSelection: input.modelSelection,
                     runtimePolicy: input.runtimePolicy,
-                    promptSuggestions: promptSuggestionsEnabled,
+                    promptSuggestions: promptAdvisor.nativeSuggestions,
                     ...(input.resumeFromSession === undefined
                       ? {}
                       : { resumeFromSession: input.resumeFromSession }),

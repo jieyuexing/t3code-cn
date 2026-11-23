@@ -423,6 +423,7 @@ let shellSubscriber: Queue.Queue<OrchestrationV2ShellStreamItem> | null = null;
 let threads: ReadonlyArray<FakeThread> = [];
 let dispatched: OrchestrationV2Command[] = [];
 let acceptCommands = false;
+let promptSuggestion: { readonly runId: RunId; readonly text: string } | null = null;
 let projects: ReadonlyArray<OrchestrationProjectShell> = [project];
 let holdCommand: (command: OrchestrationV2Command) => boolean = () => false;
 let pendingDispatches: Array<{
@@ -539,6 +540,7 @@ const handlers: Record<string, (input: never) => unknown> = {
         : [],
     });
   },
+  [ORCHESTRATION_V2_WS_METHODS.subscribePromptSuggestion]: () => subscribe([promptSuggestion]),
   [WS_METHODS.subscribeVcsStatus]: () =>
     subscribe<VcsStatusStreamEvent>([], (queue) => {
       vcsStatusSubscriber = queue;
@@ -610,6 +612,8 @@ export function installFakeEnvironment(
     readonly providers?: ReadonlyArray<unknown>;
     /** Server settings that differ from the defaults. */
     readonly serverSettings?: object;
+    /** The next-prompt suggestion the server offers every thread. */
+    readonly promptSuggestion?: { readonly runId: RunId; readonly text: string };
   },
 ): Disposable {
   threads = fixtures;
@@ -623,6 +627,7 @@ export function installFakeEnvironment(
   };
   dispatched = [];
   acceptCommands = options?.acceptCommands === true;
+  promptSuggestion = options?.promptSuggestion ?? null;
   projects = [
     project,
     ...(options?.extraProjects ?? []).map((extra) => ({
@@ -656,6 +661,7 @@ export function installFakeEnvironment(
       baseServerConfig = makeServerConfig([CODEX_PROVIDER]);
       dispatched = [];
       acceptCommands = false;
+      promptSuggestion = null;
       projects = [project];
       holdCommand = () => false;
       pendingDispatches = [];

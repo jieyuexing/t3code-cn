@@ -36,6 +36,8 @@ import {
   makeAntigravityTextGeneration,
 } from "../../textGeneration/AntigravityTextGeneration.ts";
 import { makeAntigravityPromptSuggestionSampler } from "../../textGeneration/antigravityPromptSuggestion.cn.ts";
+import { makeAntigravityPromptAdvisorSampler } from "../../textGeneration/promptAdvisor.cn.ts";
+import { registerPromptAdvisor } from "../../textGeneration/promptAdvisorRegistry.cn.ts";
 import { makeAntigravityAuth, type AntigravityAuth } from "../AntigravityAuth.ts";
 import * as AntigravityInstallation from "../AntigravityInstallation.ts";
 import { brokenRuntimeError } from "../providerCompatibility.ts";
@@ -632,6 +634,12 @@ export const AntigravityDriver: ProviderDriver<
     };
     const samplePromptSuggestion =
       yield* makeAntigravityPromptSuggestionSampler(isolatedHelperOptions);
+    if (enabled) {
+      yield* registerPromptAdvisor(
+        instanceId,
+        yield* makeAntigravityPromptAdvisorSampler(isolatedHelperOptions),
+      );
+    }
     const orchestrationAdapter = yield* makeAntigravityAdapterV2({
       instanceId,
       selfInvocation,
