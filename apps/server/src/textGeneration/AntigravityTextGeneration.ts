@@ -136,7 +136,7 @@ function selectSavedAntigravityThinkingLevel(
   return { id: thinking.id, value: selected };
 }
 
-export const makeAntigravityIsolatedRunner = Effect.fn("makeAntigravityIsolatedRunner")(function* (
+const makeAntigravityIsolatedRunner = Effect.fn("makeAntigravityIsolatedRunner")(function* (
   options: AntigravityTextGenerationOptions,
 ) {
   const fs = yield* FileSystem.FileSystem;

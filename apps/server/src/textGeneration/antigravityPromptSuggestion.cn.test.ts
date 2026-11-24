@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { ANTIGRAVITY_DEFAULT_MODEL, ProviderInstanceId } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -10,7 +11,9 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import type * as AcpSchema from "effect-acp/compat";
+import * as EffectAcpErrors from "effect-acp/errors";
 import { describe, expect } from "vite-plus/test";
 
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
@@ -62,6 +65,7 @@ const makeSamplerFixture = Effect.fn("makeAntigravityPromptSuggestionFixture")(f
   readonly initialModel?: string;
   readonly thinkingValues?: ReadonlyArray<string>;
   readonly initialThinking?: string;
+  readonly onPrompt?: (index: number) => Effect.Effect<void, EffectAcpErrors.AcpError>;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -83,6 +87,8 @@ const makeSamplerFixture = Effect.fn("makeAntigravityPromptSuggestionFixture")(f
     promptThinkingLevels: [] as Array<string>,
   };
   const outputs = [...options.outputs];
+  let closedSignal = yield* Deferred.make<void>();
+  let promptIndex = 0;
 
   const withProcess: AntigravityTextGenerationOptions["withProcess"] = (_stop, task) =>
     Effect.gen(function* () {
@@ -101,7 +107,16 @@ const makeSamplerFixture = Effect.fn("makeAntigravityPromptSuggestionFixture")(f
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           state.closed.push(cwd);
-        }),
+        }).pipe(
+          Effect.andThen(Deferred.succeed(closedSignal, undefined)),
+          Effect.andThen(
+            Effect.flatMap(Deferred.make<void>(), (next) =>
+              Effect.sync(() => {
+                closedSignal = next;
+              }),
+            ),
+          ),
+        ),
       );
       let sessionUpdate: Parameters<TextRuntime["handleSessionUpdate"]>[0] = () => Effect.void;
       let currentModel = options.initialModel ?? options.availableModels[0] ?? "gemini-4-neon";
@@ -145,9 +160,14 @@ const makeSamplerFixture = Effect.fn("makeAntigravityPromptSuggestionFixture")(f
           }),
         prompt: (request) =>
           Effect.gen(function* () {
+            const currentPromptIndex = promptIndex;
+            promptIndex += 1;
             state.prompts.push(request);
             state.promptModels.push(currentModel);
             state.promptThinkingLevels.push(thinkingLevel);
+            if (options.onPrompt !== undefined) {
+              yield* options.onPrompt(currentPromptIndex);
+            }
             const output = outputs.shift() ?? '{"suggestion":""}';
             yield* sessionUpdate({
               sessionId: SESSION_ID,
@@ -180,14 +200,17 @@ const makeSamplerFixture = Effect.fn("makeAntigravityPromptSuggestionFixture")(f
       } satisfies TextRuntime;
     });
 
+  const samplerScope = yield* Scope.make();
+  yield* Effect.addFinalizer((exit) => Scope.close(samplerScope, exit));
   const samplePromptSuggestion = yield* makeAntigravityPromptSuggestionSampler({
     profileDirectory,
     defaultModel: Effect.succeed("gemini-instance-default"),
     makeRuntime,
     withProcess,
-  });
+  }).pipe(Effect.provideService(Scope.Scope, samplerScope));
 
   const assertCleaned = Effect.gen(function* () {
+    yield* Scope.close(samplerScope, Exit.void);
     expect(state.closed).toEqual(state.workspaces);
     for (const workspace of state.workspaces) {
       expect(yield* fs.exists(workspace)).toBe(false);
@@ -204,6 +227,7 @@ const makeSamplerFixture = Effect.fn("makeAntigravityPromptSuggestionFixture")(f
   return {
     state,
     samplePromptSuggestion,
+    awaitNextClose: () => Deferred.await(closedSignal),
     assertCleaned,
   };
 });
@@ -411,6 +435,92 @@ it.layer(NodeServices.layer)("antigravityPromptSuggestion.cn sampler", (it) => {
       });
 
       expect(suggestion).toBe(expected);
+      yield* fixture.assertCleaned;
+    }),
+  );
+
+  it.effect(
+    "reuses one warm runtime across consecutive samples, retires on idle timeout, and rebuilds on demand",
+    () =>
+      Effect.gen(function* () {
+        const fixture = yield* makeSamplerFixture({
+          outputs: [
+            '{"suggestion":"first suggestion"}',
+            '{"suggestion":"second suggestion"}',
+            '{"suggestion":"after idle rebuild"}',
+          ],
+          availableModels: ["gemini-4-hydrogen"],
+        });
+
+        const first = yield* fixture.samplePromptSuggestion({
+          modelSelection: { instanceId, model: "gemini-4-hydrogen" },
+          messages: [{ role: "user", text: "Turn 1" }],
+        });
+        const second = yield* fixture.samplePromptSuggestion({
+          modelSelection: { instanceId, model: "gemini-4-hydrogen" },
+          messages: [{ role: "user", text: "Turn 2" }],
+        });
+
+        expect(first).toBe("first suggestion");
+        expect(second).toBe("second suggestion");
+        expect(fixture.state.workspaces).toHaveLength(1);
+        expect(fixture.state.closed).toHaveLength(0);
+        expect(fixture.state.prompts).toHaveLength(2);
+
+        yield* TestClock.adjust("4 minutes");
+        expect(fixture.state.closed).toHaveLength(0);
+
+        const waitClose = fixture.awaitNextClose();
+        yield* TestClock.adjust("1 minute");
+        yield* waitClose;
+        expect(fixture.state.closed).toHaveLength(1);
+
+        const third = yield* fixture.samplePromptSuggestion({
+          modelSelection: { instanceId, model: "gemini-4-hydrogen" },
+          messages: [{ role: "user", text: "Turn 3" }],
+        });
+        expect(third).toBe("after idle rebuild");
+        expect(fixture.state.workspaces).toHaveLength(2);
+        expect(fixture.state.prompts).toHaveLength(3);
+        yield* fixture.assertCleaned;
+      }),
+  );
+
+  it.effect("discards broken warm runtime on error and creates a fresh runtime next sample", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeSamplerFixture({
+        outputs: ['{"suggestion":"recovered"}'],
+        availableModels: ["gemini-4-hydrogen"],
+        onPrompt: (index) =>
+          index === 0
+            ? Effect.fail(
+                new EffectAcpErrors.AcpTransportError({
+                  operation: "call-rpc",
+                  method: "session/prompt",
+                  detail: "simulated crash",
+                  cause: undefined,
+                }),
+              )
+            : Effect.void,
+      });
+
+      const exit = yield* fixture
+        .samplePromptSuggestion({
+          modelSelection: { instanceId, model: "gemini-4-hydrogen" },
+          messages: [{ role: "user", text: "Turn 1" }],
+        })
+        .pipe(Effect.exit);
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(fixture.state.workspaces).toHaveLength(1);
+      expect(fixture.state.closed).toHaveLength(1);
+
+      const recovered = yield* fixture.samplePromptSuggestion({
+        modelSelection: { instanceId, model: "gemini-4-hydrogen" },
+        messages: [{ role: "user", text: "Turn 2" }],
+      });
+      expect(recovered).toBe("recovered");
+      expect(fixture.state.workspaces).toHaveLength(2);
       yield* fixture.assertCleaned;
     }),
   );
