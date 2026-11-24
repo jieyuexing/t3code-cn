@@ -20,10 +20,18 @@ const SESSION_MINS = 5 * 60;
 const WEEK_MINS = 7 * 24 * 60;
 
 const WINDOWS: Readonly<
-  Record<string, Pick<ServerProviderUsageWindow, "kind" | "label" | "windowDurationMins">>
+  Record<
+    string,
+    Pick<ServerProviderUsageWindow, "kind" | "label" | "windowDurationMins" | "modelScope">
+  >
 > = {
   five_hour: { kind: "session", label: "Session", windowDurationMins: SESSION_MINS },
-  seven_day: { kind: "weekly", label: "Weekly", windowDurationMins: WEEK_MINS },
+  seven_day: {
+    kind: "weekly",
+    label: "Weekly",
+    windowDurationMins: WEEK_MINS,
+    modelScope: { kind: "all" },
+  },
 };
 
 /** Reuse probed display names for streamed bucket types so mid-turn updates target the same row. */
@@ -48,6 +56,7 @@ export const makeClaudeScopedLimitNames = Ref.make<ClaudeScopedLimitNames>({
 });
 
 const SCOPED_WINDOW_PREFIX = "seven_day_";
+const KNOWN_CLAUDE_SCOPED_FAMILIES = new Set(["fable", "opus", "sonnet", "haiku"]);
 const scopeToken = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
 function scopedWindowId(displayName: string): string {
@@ -68,10 +77,14 @@ function scopedWindow(
   usedPercent: number,
   resetsAt: string | undefined,
 ): ServerProviderUsageWindow {
+  const token = scopeToken(displayName);
   return {
     id: scopedWindowId(displayName),
     kind: "weekly",
     label: `Weekly · ${displayName}`,
+    ...(KNOWN_CLAUDE_SCOPED_FAMILIES.has(token)
+      ? { modelScope: { kind: "patterns" as const, includePrefixes: [`claude-${token}-`] } }
+      : {}),
     windowDurationMins: WEEK_MINS,
     usedPercent: clampPercent(usedPercent),
     ...(resetsAt ? { resetsAt } : {}),

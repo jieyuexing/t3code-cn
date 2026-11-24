@@ -1,6 +1,10 @@
 import * as NodeModule from "node:module";
 
-import type { AntigravitySettings, ServerProviderUsageWindow } from "@t3tools/contracts";
+import type {
+  AntigravitySettings,
+  ServerProviderUsageWindow,
+  UsageWindowModelScope,
+} from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Clock from "effect/Clock";
 import * as Digest from "effect/crypto/Digest";
@@ -100,12 +104,33 @@ function iso(value: string | undefined): string | undefined {
   return Option.isSome(parsed) ? DateTime.formatIso(parsed.value) : undefined;
 }
 
+function antigravitySummaryModelScope(bucketId: string): UsageWindowModelScope | undefined {
+  if (bucketId.startsWith("gemini-argon-")) {
+    return { kind: "patterns", includePrefixes: ["gemini-"], includeSubstrings: ["argon"] };
+  }
+  if (bucketId.startsWith("gemini-carbon-")) {
+    return { kind: "patterns", includePrefixes: ["gemini-"], includeSubstrings: ["carbon"] };
+  }
+  if (bucketId.startsWith("gemini-")) {
+    return {
+      kind: "patterns",
+      includePrefixes: ["gemini-"],
+      excludeSubstrings: ["argon", "carbon"],
+    };
+  }
+  if (bucketId.startsWith("3p-")) {
+    return { kind: "patterns", includePrefixes: ["claude-", "gpt-"] };
+  }
+  return undefined;
+}
+
 function quotaWindow(
   id: string,
   label: string,
   quota: typeof Quota.Type,
   kind: ServerProviderUsageWindow["kind"] = "other",
   windowDurationMins?: number,
+  modelScope?: UsageWindowModelScope,
 ): ServerProviderUsageWindow | undefined {
   if (quota.remainingFraction === undefined || !Number.isFinite(quota.remainingFraction)) {
     return undefined;
@@ -116,6 +141,7 @@ function quotaWindow(
     label,
     kind,
     usedPercent: (1 - Math.max(0, Math.min(1, quota.remainingFraction))) * 100,
+    ...(kind === "weekly" && modelScope !== undefined ? { modelScope } : {}),
     ...(resetsAt ? { resetsAt } : {}),
     ...(windowDurationMins === undefined ? {} : { windowDurationMins }),
   };
@@ -277,6 +303,7 @@ function summaryWindows(summary: typeof Summary.Type, requestedAt: number) {
         { ...bucket, resetTime: summaryResetTime(bucket, windowDurationMins, requestedAt) },
         weekly ? "weekly" : session ? "session" : "other",
         windowDurationMins,
+        antigravitySummaryModelScope(bucket.bucketId),
       );
       if (window) windows.set(window.id, window);
     }
@@ -308,6 +335,7 @@ function modelWindows(models: typeof Models.Type) {
         quota,
         suffix === "weekly" ? "weekly" : "other",
         suffix === "weekly" ? 7 * 24 * 60 : undefined,
+        { kind: "patterns", includePrefixes: [`${family.toLowerCase()}-`] },
       );
       if (!window) continue;
       const previous = windows.get(window.id);

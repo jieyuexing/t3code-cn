@@ -431,6 +431,10 @@
       "types": "./src/usageLimits.ts",
       "import": "./src/usageLimits.ts"
     },
+    "./usageLimitsApiEstimate.cn": {
+      "types": "./src/usageLimitsApiEstimate.cn.ts",
+      "import": "./src/usageLimitsApiEstimate.cn.ts"
+    },
     "./desktopAppControl": {
       "types": "./src/desktopAppControl.ts",
       "import": "./src/desktopAppControl.ts"

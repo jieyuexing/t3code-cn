@@ -78,6 +78,7 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { UsageLimitsSection } from "./UsageLimits";
+import { refreshWeeklyApiEstimates } from "./UsageWeeklyApiEstimate.cn";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart } from "./UsageProviderChart";
 import { SpeedPremium, UsageModelDialog } from "./UsageModelDialog";
@@ -305,7 +306,17 @@ export function UsagePage() {
     if (showingLimits) {
       refreshingRef.current = true;
       setIsRefreshing(true);
-      void refreshLimits().finally(() => {
+      void Promise.all([
+        refreshLimits(),
+        refreshWeeklyApiEstimates({
+          presentations: presentationsWithProviders,
+          selectedEnvironmentIds,
+          now: Date.now(),
+          environmentIds: selectedEnvironments
+            .filter((environment) => environment.canReadDiagnostics)
+            .map((environment) => environment.environmentId),
+        }),
+      ]).finally(() => {
         refreshingRef.current = false;
         setIsRefreshing(false);
       });

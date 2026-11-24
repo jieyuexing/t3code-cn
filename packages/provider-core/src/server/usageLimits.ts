@@ -89,22 +89,43 @@ export function applyUsageLimitsUpdate(input: {
   };
 }
 
+function stringArrayEquals(
+  a: readonly string[] | undefined,
+  b: readonly string[] | undefined,
+): boolean {
+  return (
+    a === b ||
+    (a !== undefined &&
+      b !== undefined &&
+      a.length === b.length &&
+      a.every((value, index) => value === b[index]))
+  );
+}
+
+function modelScopeEquals(
+  a: ServerProviderUsageWindow["modelScope"],
+  b: ServerProviderUsageWindow["modelScope"],
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a.kind !== b.kind) return false;
+  if (a.kind === "all") return true;
+  return (
+    b.kind === "patterns" &&
+    stringArrayEquals(a.includePrefixes, b.includePrefixes) &&
+    stringArrayEquals(a.includeSubstrings, b.includeSubstrings) &&
+    stringArrayEquals(a.excludeSubstrings, b.excludeSubstrings)
+  );
+}
+
 function usageWindowEquals(a: ServerProviderUsageWindow, b: ServerProviderUsageWindow): boolean {
   return (
     a.id === b.id &&
     a.kind === b.kind &&
     a.label === b.label &&
     a.usedPercent === b.usedPercent &&
-    (a.modelIds === b.modelIds ||
-      (a.modelIds !== undefined &&
-        b.modelIds !== undefined &&
-        a.modelIds.length === b.modelIds.length &&
-        a.modelIds.every((id, index) => id === b.modelIds?.[index]))) &&
-    (a.providerIds === b.providerIds ||
-      (a.providerIds !== undefined &&
-        b.providerIds !== undefined &&
-        a.providerIds.length === b.providerIds.length &&
-        a.providerIds.every((id, index) => id === b.providerIds?.[index]))) &&
+    stringArrayEquals(a.modelIds, b.modelIds) &&
+    modelScopeEquals(a.modelScope, b.modelScope) &&
+    stringArrayEquals(a.providerIds, b.providerIds) &&
     a.resetsAt === b.resetsAt &&
     a.windowDurationMins === b.windowDurationMins
   );

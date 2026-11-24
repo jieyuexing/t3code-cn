@@ -31,7 +31,7 @@ export interface EnvironmentUsageStatus {
   readonly summary: UsageSummary | null;
 }
 
-const usageByWindowAtom = Atom.family((windowKey: string) =>
+export const usageByWindowAtom = Atom.family((windowKey: string) =>
   Atom.make((get): readonly EnvironmentUsageStatus[] => {
     const input = JSON.parse(windowKey) as UsageSummaryInput;
     const presentations = get(environmentPresentations.presentationsAtom);

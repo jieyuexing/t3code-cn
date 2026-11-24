@@ -201,6 +201,7 @@ describe("Antigravity subscription limits", () => {
         id: "3p-weekly",
         label: "Claude & GPT (shared) · Weekly",
         kind: "weekly",
+        modelScope: { kind: "patterns", includePrefixes: ["claude-", "gpt-"] },
         usedPercent: 0,
         windowDurationMins: 10080,
       });
@@ -393,6 +394,7 @@ describe("Antigravity subscription limits", () => {
           id: "3p-weekly",
           label: "Claude & GPT (shared) · Weekly",
           kind: "weekly",
+          modelScope: { kind: "patterns", includePrefixes: ["claude-", "gpt-"] },
           usedPercent: 0,
           windowDurationMins: 10080,
         },

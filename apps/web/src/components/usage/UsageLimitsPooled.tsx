@@ -38,6 +38,9 @@ import { OpenAI } from "../Icons";
 import { Alert, AlertTitle } from "../ui/alert";
 import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { PaceIcon, ResetCreditDialog, barColor, usePaceMark, useResetCredit } from "./UsageLimits";
+import { WeeklyApiEstimateLine } from "./UsageWeeklyApiEstimate.cn";
+import { windowEstimateKey } from "./weeklyApiEstimateModel.cn";
+import type { WeeklyApiEstimateResult } from "@t3tools/shared/usageLimitsApiEstimate.cn";
 import {
   collectExternalUsageLinks,
   collectLimitNotices,
@@ -597,12 +600,14 @@ function PoolWindowCard({
   now,
   label,
   description,
+  apiEstimate,
 }: {
   readonly pool: LimitPoolWindow;
   readonly color: string;
   readonly now: number;
   readonly label?: string | null | undefined;
   readonly description?: string | undefined;
+  readonly apiEstimate?: WeeklyApiEstimateResult | undefined;
 }) {
   const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
   return (
@@ -629,6 +634,7 @@ function PoolWindowCard({
         ) : null}
       </div>
       <PoolBar pool={pool} color={color} now={now} />
+      <WeeklyApiEstimateLine estimate={apiEstimate} />
       {description ? (
         <p className="text-xs text-muted-foreground md:col-span-2">{description}</p>
       ) : null}
@@ -636,7 +642,15 @@ function PoolWindowCard({
   );
 }
 
-function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
+function PoolSection({
+  pool,
+  now,
+  weeklyEstimates,
+}: {
+  readonly pool: LimitPool;
+  readonly now: number;
+  readonly weeklyEstimates?: ReadonlyMap<string, WeeklyApiEstimateResult> | undefined;
+}) {
   const color = barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
   const windows = displayLimitWindows(pool);
@@ -664,6 +678,7 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
             now={now}
             label={details?.label}
             description={details?.description}
+            apiEstimate={weeklyEstimates?.get(windowEstimateKey(pool.driver, window))}
           />
         );
       })}
@@ -674,9 +689,11 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
 export function UsageLimitsPooled({
   presentations,
   now,
+  weeklyEstimates,
 }: {
   readonly presentations: Parameters<typeof collectLimitAccounts>[0];
   readonly now: number;
+  readonly weeklyEstimates?: ReadonlyMap<string, WeeklyApiEstimateResult> | undefined;
 }) {
   const gt = useGT();
   const m = useMessages();
@@ -695,7 +712,7 @@ export function UsageLimitsPooled({
       <SegmentPopoverContext value={segmentPopover}>
         {pools.map((pool) => (
           <Fragment key={pool.driver}>
-            <PoolSection pool={pool} now={now} />
+            <PoolSection pool={pool} now={now} weeklyEstimates={weeklyEstimates} />
           </Fragment>
         ))}
       </SegmentPopoverContext>

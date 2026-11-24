@@ -79,3 +79,39 @@ Speed 分段标题行右侧的「Share image」按钮：一键把当前排行画
 ## 未做
 
 移动端没有 Speed 分段（`UsageRouteScreen.tsx` 的视图枚举与列表要单独做 RN 界面，本机无法验证）；`usageDispatchScoresPath` 只能改 settings.json，没有设置页入口；部分扫描（`partial`）里的增补 bucket 对应的速度行不合并。
+
+---
+
+# 用量页 Limits 周满额 API 估算
+
+Limits 分段每个周窗口卡片（`PoolWindowCard`）在满足条件时追加一行估算：「满额≈$X/周 · 约$Y/月（API 估算）」（英文：`Full week ≈ $X/wk · ~$Y/mo (API est.)`），用于按本机真实用量推算该订阅周窗口打满时的 API 美元折合值。
+
+## 口径
+
+- 窗口起点 = `resetsAt − windowDurationMins`；花费 = 起点到现在该账号对应 `UsageProviderKind` 在窗口模型范围内的 `costUsd` 之和（与 Cost 分段复用同一套 buckets、定价及多环境去重）。
+- 满额/周 = `花费 ÷ (usedPercent / 100)`；月 = `周 × 30 / 7`（未舍入周值乘 `30/7` 再按整美元四舍五入）。只对 `kind === "weekly"` 的窗口计算，5 小时/月/其他窗口不算。
+- 低占用屏蔽：`usedPercent < 10` 不显示数字（避免刚重置窗口小分母放大噪声）；本机窗口内无花费（`costUsd <= 0`）也不显示数字。
+- 下限提示：分子仅来自本机扫描日志（及已连接环境），`usedPercent` 为账号级（含其他机器或官方客户端），Tooltip 写明「按本机记录估算，账号在别处也用时偏低」。
+- 11-24 本机基准：`claudeAgent`（`claude`）周窗口 `usedPercent = 21%`、花费 `$1432.22` → `≈$6,820/周 · 约$29,229/月`；`grok` 周窗口 `81%`、花费 `$35.43` → `≈$44/周 · 约$187/月`。
+
+## driver 映射、多账号与模型范围
+
+- **显式映射（`driverUsageProvider`）**：`claudeAgent → claude`、`codex → codex`、`grok → grok`、`antigravity → antigravity`、`cursor → cursor`、`opencode → opencode`、`pi → pi`、`muse → muse`；`fx` / `kiro` / `acpRegistry` 无用量来源，返回 `null`（不显示）。
+- **多账号处理**：`antigravity` 除各实例 `<stateDir>/providers/antigravity/<sha256(instanceId)>/antigravity-acp/conversations` 外，还会扫描共享 `dataRoots`（如 `~/.gemini/antigravity-cli/conversations`），且 `UsageBucket` 仅带 `sourcePath`、不含 `instanceId` 或账号标识，CLIProxyAPI 账号更无本地目录。因此同一 driver 出现多个账号/实例（`countDistinctDriverAccounts > 1`）时无法可靠归属，不显示数字，仅显示「多账号共用本机用量记录，暂不按账号估算」。
+- **窗口模型范围（`UsageWindowModelScope`）**：`packages/contracts/src/providerUsageLimits.ts` 在 `ServerProviderUsageWindow` 新增可选字段 `modelScope`（不升 `USAGE_CONTRACT_VERSION`）：
+  - `claudeUsageLimits.ts`：`seven_day` 标 `all`；`seven_day_fable`/`opus`/`sonnet`/`haiku` 标前缀匹配 `claude-<family>-`。
+  - `antigravityUsageLimits.ts`：`3p-weekly` 标 `["claude-", "gpt-"]`；`gemini-weekly` 标 `["gemini-"]` 排除 `argon`/`carbon`；`gemini-argon-*` / `gemini-carbon-*` 分别限定各自子串；`modelWindows` 降级分别限定 `gemini-` / `claude-` / `gpt-`。
+  - `opencode` 的 `go_weekly` 与其他范围不明且非账号全模型的窗口不设 `modelScope`，估算器返回 `unknownScope`、不显示数字。
+
+## 取数方式与契约边界
+
+不修改 `UsageService`、不新增服务端 RPC、不升 `USAGE_CONTRACT_VERSION`：前端 `planWeeklyWindowUsageSlices` 将 `[windowStartMs, now)` 拆成零重叠的两部分复用现有 `server.getUsageSummary`：
+
+1. 起点当天若不在本地零点，按 `resolution: "hour"` 取 `[windowStartMs, nextDayMidnightMs)`（若跨 25h DST 回退日自动按 24h 分段，恒满足服务端 `<= 24h` 校验）；
+2. 次日至今天按 `resolution: "day"` 合并为一次天粒度查询，各窗口按自身 `[nextDay, endDay]` 与模型范围累加，并经过 `mergeAnsweredUsage` 跨环境去重。
+
+## 上游改动与未做
+
+- 上游文件最小插入：`packages/contracts/src/providerUsageLimits.ts`（+13）、`packages/provider-core/src/server/usageLimits.ts`（+31/-10）、`apps/server/src/provider/{claudeUsageLimits,antigravityUsageLimits}.ts`（+15/-2 与 +29/-1）及各自单测、`apps/web/src/state/usage.ts`（+1/-1 导出 `usageByWindowAtom`）、`apps/web/src/components/usage/{UsageLimits,UsageLimitsPooled,UsagePage}.tsx`（+7/-1、+19/-2、+12/-1）。
+- 文案沿用 `usage-speed` 先例，放在 `weeklyApiEstimateModel.cn.ts` 按 `useLocale()` 切中英文，不改动 `apps/web/src/i18n/translations/*.json`，在文案分支局部加 `oxlint-disable t3code/no-untranslated-copy` 保持 `check:changed` 零报错。
+- 未做：移动端（`apps/mobile` Limits 界面）未做；订阅月费与回本倍数未做。

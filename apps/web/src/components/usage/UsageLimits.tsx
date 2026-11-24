@@ -40,6 +40,7 @@ import {
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
+import { useWeeklyApiEstimates } from "./UsageWeeklyApiEstimate.cn";
 import { formatResetsIn, resetCreditChoices } from "@t3tools/shared/usageLimitsCopy";
 import { PROVIDER_PRESENTATION } from "./usageProviders";
 
@@ -428,5 +429,10 @@ export function UsageLimitsSection({
       ];
     }),
   );
-  return <UsageLimitsPooled presentations={selected} now={now} />;
+  const weeklyEstimates = useWeeklyApiEstimates({
+    presentations: selected,
+    selectedEnvironmentIds,
+    now,
+  });
+  return <UsageLimitsPooled presentations={selected} now={now} weeklyEstimates={weeklyEstimates} />;
 }

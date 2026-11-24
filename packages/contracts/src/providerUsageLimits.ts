@@ -9,6 +9,18 @@ import {
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
 
+/** Optional model scope for family-grouped limits when exact `modelIds` are unknown. */
+export const UsageWindowModelScope = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("all") }),
+  Schema.Struct({
+    kind: Schema.Literal("patterns"),
+    includePrefixes: Schema.Array(TrimmedNonEmptyString),
+    includeSubstrings: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+    excludeSubstrings: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  }),
+]);
+export type UsageWindowModelScope = typeof UsageWindowModelScope.Type;
+
 /** Stable per-provider ids let sparse updates merge with full probes. */
 export const ServerProviderUsageWindow = Schema.Struct({
   id: TrimmedNonEmptyString,
@@ -16,6 +28,7 @@ export const ServerProviderUsageWindow = Schema.Struct({
   label: TrimmedNonEmptyString,
   /** When present, this limit applies only to these provider model IDs. */
   modelIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  modelScope: Schema.optional(UsageWindowModelScope),
   providerIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   usedPercent: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
   resetsAt: Schema.optional(IsoDateTime),
