@@ -2572,6 +2572,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadRuns,
     routeThreadRef,
     promptSuggestion,
+    prompt,
   );
   const promptRefiner = usePromptRefiner({
     environmentId,
@@ -2589,10 +2590,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       applyPromptReplacement(start, end, replacement, { expectedText }),
   });
   const showComposerChoices =
-    promptSuggestionSlot !== null &&
-    composerChoices.choices.length > 0 &&
-    prompt.length === 0 &&
-    !isComposerCollapsedMobile;
+    promptSuggestionSlot !== null && composerChoices.visible && !isComposerCollapsedMobile;
   const offeredPromptSuggestion =
     showComposerChoices || isPromptAdvisorPayload(promptSuggestionSlot?.ghost ?? null)
       ? null
@@ -3862,10 +3860,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             <PromptRefinerCard refiner={promptRefiner} prompt={prompt} />
             {showComposerChoices ? (
               <ComposerChoiceStrip
-                choices={composerChoices.choices}
-                onPick={(fill) => applyPromptReplacement(0, 0, fill)}
-                onSend={(text) => applyPromptReplacement(0, 0, text) && submitComposer()}
-                onDismiss={composerChoices.dismiss}
+                controller={composerChoices}
+                onPick={(fill) => applyPromptReplacement(0, promptRef.current.length, fill)}
+                onSend={(text) =>
+                  applyPromptReplacement(0, promptRef.current.length, text) && submitComposer()
+                }
               />
             ) : null}
 

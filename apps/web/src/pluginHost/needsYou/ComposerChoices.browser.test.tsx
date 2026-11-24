@@ -259,3 +259,157 @@ it("英文顾问建议的合并按钮显示英文标签，点后填入英文编�
   ]);
   expect(view.sent()).toHaveLength(0);
 });
+
+it("顾问按钮可多选与取消：选两条按按钮顺序编号，取消回到单条原文，再取消清空输入框", async () => {
+  await using view = await openThread(
+    "choices-advisor-multiselect",
+    "改完了，测试通过。",
+    advisorPayload(
+      ["challenge", "回归没验证", "回归测试覆盖了吗？"],
+      ["next", "跑完整测试", "跑一遍完整测试"],
+      ["angle", "收窄范围", "只改登录页会怎样？"],
+    ),
+  );
+  const first = view.strip.getByRole("button", { name: /回归没验证/ });
+  const second = view.strip.getByRole("button", { name: /跑完整测试/ });
+  const third = view.strip.getByRole("button", { name: /收窄范围/ });
+
+  await expect.element(first).toHaveAttribute("aria-pressed", "false");
+  await expect.element(third).toHaveAttribute("aria-pressed", "false");
+
+  // 先点第 3 枚再点第 1 枚：快捷条保持显示，合并编号仍按按钮显示顺序排列。
+  await third.click();
+  await expect.element(third).toHaveAttribute("aria-pressed", "true");
+  await expect.element(view.editor).toHaveTextContent("只改登录页会怎样？");
+  await expect.element(view.strip).toBeVisible();
+
+  await first.click();
+  await expect.element(first).toHaveAttribute("aria-pressed", "true");
+  await expect.element(third).toHaveAttribute("aria-pressed", "true");
+  await expect.element(second).toHaveAttribute("aria-pressed", "false");
+  await expect.element(view.strip).toBeVisible();
+  expect([...view.editor.element().querySelectorAll("p")].map((p) => p.textContent)[0]).toBe(
+    "请逐条回应以下几点：",
+  );
+  expect([...view.editor.element().querySelectorAll("ol li")].map((li) => li.textContent)).toEqual([
+    "回归测试覆盖了吗？",
+    "只改登录页会怎样？",
+  ]);
+
+  // 取消第 3 枚：回到第 1 枚的 fill 原文（不再带编号列表头）。
+  await third.click();
+  await expect.element(third).toHaveAttribute("aria-pressed", "false");
+  await expect.element(first).toHaveAttribute("aria-pressed", "true");
+  await expect.element(view.strip).toBeVisible();
+  expect(view.editor.element().querySelectorAll("ol")).toHaveLength(0);
+  await expect.element(view.editor).toHaveTextContent("回归测试覆盖了吗？");
+
+  // 取消第 1 枚：清空输入框，快捷条保持显示。
+  await first.click();
+  await expect.element(first).toHaveAttribute("aria-pressed", "false");
+  await expect.element(view.strip).toBeVisible();
+  expect(view.editor.element().textContent).toBe("");
+  expect(view.sent()).toHaveLength(0);
+});
+
+it("全部按钮支持全选与全不选切换", async () => {
+  await using view = await openThread(
+    "choices-advisor-toggle-all",
+    "改完了。",
+    advisorPayload(
+      ["challenge", "回归没验证", "回归测试覆盖了吗？"],
+      ["next", "跑完整测试", "跑一遍完整测试"],
+    ),
+  );
+  const first = view.strip.getByRole("button", { name: /回归没验证/ });
+  const second = view.strip.getByRole("button", { name: /跑完整测试/ });
+  const mergeButton = view.strip.getByRole("button", { name: /全部\s*合并 2 条/ });
+
+  // 只选 1 枚时再点「全部」：全选所有顾问按钮。
+  await first.click();
+  await expect.element(mergeButton).toHaveAttribute("aria-pressed", "false");
+  await mergeButton.click();
+  await expect.element(first).toHaveAttribute("aria-pressed", "true");
+  await expect.element(second).toHaveAttribute("aria-pressed", "true");
+  await expect.element(mergeButton).toHaveAttribute("aria-pressed", "true");
+  expect([...view.editor.element().querySelectorAll("ol li")].map((li) => li.textContent)).toEqual([
+    "回归测试覆盖了吗？",
+    "跑一遍完整测试",
+  ]);
+
+  // 已全选时再点「全部」：全部取消并清空输入框。
+  await mergeButton.click();
+  await expect.element(first).toHaveAttribute("aria-pressed", "false");
+  await expect.element(second).toHaveAttribute("aria-pressed", "false");
+  await expect.element(mergeButton).toHaveAttribute("aria-pressed", "false");
+  await expect.element(view.strip).toBeVisible();
+  expect(view.editor.element().textContent).toBe("");
+  expect(view.sent()).toHaveLength(0);
+});
+
+it("选中顾问建议后手动改动输入框文字则快捷条收起，清空后恢复未选中状态", async () => {
+  await using view = await openThread(
+    "choices-advisor-manual-edit",
+    "改完了。",
+    advisorPayload(
+      ["challenge", "回归没验证", "回归测试覆盖了吗？"],
+      ["next", "跑完整测试", "跑一遍完整测试"],
+    ),
+  );
+  const first = view.strip.getByRole("button", { name: /回归没验证/ });
+  await first.click();
+  await expect.element(view.strip).toBeVisible();
+
+  // 手动追加文字：快捷条收起；退格回退到原文本也不重开。
+  await userEvent.click(view.editor);
+  await userEvent.keyboard("补充");
+  await expect.element(view.strip).not.toBeInTheDocument();
+  await userEvent.keyboard("{Backspace}{Backspace}");
+  await expect.element(view.strip).not.toBeInTheDocument();
+
+  // 清空输入框后重新出现，且顾问按钮为未选中态。
+  await userEvent.keyboard("{ControlOrMeta>}a{/ControlOrMeta}{Backspace}");
+  await expect.element(view.strip).toBeVisible();
+  await expect.element(first).toHaveAttribute("aria-pressed", "false");
+});
+
+it("已选其他顾问按钮时按 Tab 仍只选中并填入第一枚", async () => {
+  await using view = await openThread(
+    "choices-advisor-tab-override",
+    "改完了。",
+    advisorPayload(
+      ["challenge", "回归没验证", "回归测试覆盖了吗？"],
+      ["next", "跑完整测试", "跑一遍完整测试"],
+    ),
+  );
+  const first = view.strip.getByRole("button", { name: /回归没验证/ });
+  const second = view.strip.getByRole("button", { name: /跑完整测试/ });
+
+  await second.click();
+  await expect.element(second).toHaveAttribute("aria-pressed", "true");
+  await userEvent.click(view.editor);
+  await userEvent.keyboard("{Tab}");
+
+  await expect.element(first).toHaveAttribute("aria-pressed", "true");
+  await expect.element(second).toHaveAttribute("aria-pressed", "false");
+  await expect.element(view.editor).toHaveTextContent("回归测试覆盖了吗？");
+  expect(view.sent()).toHaveLength(0);
+});
+
+it("规则按钮与顾问按钮共存时，先点顾问再点规则按钮会完整替换或发送", async () => {
+  await using view = await openThread(
+    "choices-advisor-then-rule",
+    LISTED,
+    advisorPayload(["challenge", "漏了回滚", "两个方案都没说怎么回滚？"]),
+  );
+  const blindSpot = view.strip.getByRole("button", { name: /盲点/ });
+  await blindSpot.click();
+  await expect.element(blindSpot).toHaveAttribute("aria-pressed", "true");
+  await expect.element(view.editor).toHaveTextContent("两个方案都没说怎么回滚？");
+
+  await view.strip.getByRole("button", { name: /^乙/ }).click();
+  await expect.element(view.editor).toHaveTextContent("乙");
+  expect(view.editor.element().textContent).not.toContain("回滚");
+  await expect.element(view.strip).not.toBeInTheDocument();
+  expect(view.sent()).toHaveLength(0);
+});

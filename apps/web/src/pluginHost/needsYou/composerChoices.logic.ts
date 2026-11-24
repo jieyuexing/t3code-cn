@@ -66,8 +66,29 @@ const MERGE_COPY = {
 } as const;
 
 /** Combine multiple advisor prompts into one numbered follow-up message. */
-function mergedAdvisorFill(items: ReadonlyArray<PromptAdvisorItem>, header: string): string {
+function mergedAdvisorFill(
+  items: ReadonlyArray<{ readonly fill: string }>,
+  header: string,
+): string {
   return [header, ...items.map((item, index) => `${index + 1}. ${item.fill}`)].join("\n");
+}
+
+/** Whether a choice is an individual selectable context-advisor button. */
+export function isAdvisorItemChoice(choice: ComposerChoice): boolean {
+  return choice.source === "advisor" && choice.kind !== undefined;
+}
+
+/** Whether a choice is the trailing select-all/clear-all advisor merge button. */
+export function isAdvisorMergeChoice(choice: ComposerChoice): boolean {
+  return choice.source === "advisor" && choice.kind === undefined;
+}
+
+/** Format the composer text for the selected advisor items (already in display order). */
+export function formatAdvisorSelection(selected: ReadonlyArray<{ readonly fill: string }>): string {
+  if (selected.length === 0) return "";
+  if (selected.length === 1) return selected[0]!.fill;
+  const copy = selected.some((item) => CJK.test(item.fill)) ? MERGE_COPY.zh : MERGE_COPY.en;
+  return mergedAdvisorFill(selected, copy.header);
 }
 
 /**

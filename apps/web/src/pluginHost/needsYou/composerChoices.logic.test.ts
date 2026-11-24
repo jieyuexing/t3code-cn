@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
-import { composerChoices, mergeComposerChoices } from "./composerChoices.logic";
+import {
+  composerChoices,
+  formatAdvisorSelection,
+  isAdvisorItemChoice,
+  isAdvisorMergeChoice,
+  mergeComposerChoices,
+} from "./composerChoices.logic";
 import type { PromptAdvisorItem } from "./promptAdvisorPayload.cn";
 
 const fills = (reply: string) => composerChoices(reply).map((choice) => choice.fill);
@@ -194,5 +200,37 @@ describe("规则按钮与上下文顾问的融合", () => {
         detail: "",
       },
     ]);
+  });
+
+  it("多选格式化：0 条清空，1 条返回原文，2 条及以上按入参顺序生成中英文编号列表，并可区分建议按钮与合并按钮", () => {
+    expect(formatAdvisorSelection([])).toBe("");
+    expect(formatAdvisorSelection([advisor("challenge", "盲点", "回归覆盖了吗？")])).toBe(
+      "回归覆盖了吗？",
+    );
+    expect(
+      formatAdvisorSelection([
+        advisor("challenge", "盲点", "回归覆盖了吗？"),
+        advisor("angle", "收窄", "能不能先灰度？"),
+      ]),
+    ).toBe("请逐条回应以下几点：\n1. 回归覆盖了吗？\n2. 能不能先灰度？");
+    expect(
+      formatAdvisorSelection([
+        advisor("challenge", "Gap", "Check min > max?"),
+        advisor("angle", "Narrow", "Reuse clamp in metrics?"),
+      ]),
+    ).toBe("Please respond to each point:\n1. Check min > max?\n2. Reuse clamp in metrics?");
+    expect(
+      formatAdvisorSelection([
+        advisor("challenge", "Gap", "Check min > max?"),
+        advisor("next", "验收", "跑一遍完整测试"),
+      ]),
+    ).toBe("请逐条回应以下几点：\n1. Check min > max?\n2. 跑一遍完整测试");
+
+    const merged = mergeComposerChoices("改完了。", [
+      advisor("challenge", "盲点", "问题一"),
+      advisor("next", "验收", "问题二"),
+    ]);
+    expect(merged.map((choice) => isAdvisorItemChoice(choice))).toEqual([true, true, false]);
+    expect(merged.map((choice) => isAdvisorMergeChoice(choice))).toEqual([false, false, true]);
   });
 });
