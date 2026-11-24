@@ -2584,87 +2584,84 @@ export const layerWithOptions = (
               modelFamily: normalizeModelMetricLabel(model),
             },
           });
-        // Compaction runs as a turn too, so it pins the session like any other start.
-        const startTracked =
-          (
-            start: ProviderAdapter.ProviderAdapterV2SessionRuntime["startTurn"],
-            operation: string,
-          ): ProviderAdapter.ProviderAdapterV2SessionRuntime["startTurn"] =>
-          (input) =>
-            observeActivity(
+        // A start, continuation or compaction keeps the session busy until its turn.terminal.
+        const busyTurn = <E>(
+          input: Pick<
+            ProviderAdapter.ProviderAdapterV2TurnInput,
+            "threadId" | "providerThread" | "runOrdinal" | "runId"
+          >,
+          run: () => Effect.Effect<void, E>,
+        ) =>
+          observeActivity(
+            providerSessionId,
+            ensureThreadAttached({
               providerSessionId,
-              ensureThreadAttached({
+              threadId: input.threadId,
+              providerInstanceId: runtime.instanceId,
+            }),
+          ).pipe(
+            // Failed or stopped starts may omit turn.terminal; clear their turns so sessions can idle.
+            Effect.andThen(
+              holdThreadLoaded({
                 providerSessionId,
                 threadId: input.threadId,
-                providerInstanceId: runtime.instanceId,
+                providerThread: input.providerThread,
               }),
-            ).pipe(
-              // Failed or stopped starts may omit turn.terminal; clear their turns so sessions can idle.
-              Effect.andThen(
-                holdThreadLoaded({
+            ),
+            Effect.andThen(
+              Effect.acquireUseRelease(
+                markBusy(
                   providerSessionId,
-                  threadId: input.threadId,
-                  providerThread: input.providerThread,
-                }),
-              ),
-              Effect.andThen(
-                Effect.acquireUseRelease(
-                  markBusy(
-                    providerSessionId,
-                    busyTurnKey(input.providerThread.id, input.runOrdinal),
-                    runtime,
-                  ).pipe(
-                    Effect.catchCause((cause) =>
-                      Effect.logWarning("orchestration-v2.driver-session.activity-failed", {
-                        providerSessionId,
-                        cause,
-                      }).pipe(Effect.as(true)),
-                    ),
-                    // A release between attach and markBusy leaves nothing to mark: fail the
-                    // start instead of running it on a runtime being torn down.
-                    Effect.flatMap((marked) =>
-                      marked
-                        ? Effect.void
-                        : Effect.fail(
-                            new ProviderAdapter.ProviderAdapterTurnStartError({
-                              driver: runtime.driver,
-                              threadId: input.threadId,
-                              providerThreadId: input.providerThread.id,
-                              runId: input.runId,
-                              cause: "The provider session was released while the turn started.",
-                            }),
-                          ),
-                    ),
+                  busyTurnKey(input.providerThread.id, input.runOrdinal),
+                  runtime,
+                ).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("orchestration-v2.driver-session.activity-failed", {
+                      providerSessionId,
+                      cause,
+                    }).pipe(Effect.as(true)),
                   ),
-                  () =>
-                    agentFeedbackMode.pipe(
-                      Effect.flatMap((agentFeedback) => start({ ...input, agentFeedback })),
-                      turnMetrics(operation, input.modelSelection.model),
-                    ),
-                  (_, exit) =>
-                    Exit.isFailure(exit)
-                      ? observeActivity(
-                          providerSessionId,
-                          markIdle(
-                            providerSessionId,
-                            input.providerThread.id,
-                            busyTurnKey(input.providerThread.id, input.runOrdinal),
-                          ),
-                        ).pipe(
-                          // A failed start can leave its native thread gone (Claude rejecting a
-                          // resume), so the next start must ask the adapter to resume it again.
-                          Effect.andThen(
-                            forgetProviderThreadLoaded({
-                              providerSessionId,
-                              threadId: input.threadId,
-                              runtime,
-                            }),
-                          ),
-                        )
-                      : Effect.void,
+                  // A release between attach and markBusy leaves nothing to mark: fail the
+                  // start instead of running it on a runtime being torn down.
+                  Effect.flatMap((marked) =>
+                    marked
+                      ? Effect.void
+                      : Effect.fail(
+                          new ProviderAdapter.ProviderAdapterTurnStartError({
+                            driver: runtime.driver,
+                            threadId: input.threadId,
+                            providerThreadId: input.providerThread.id,
+                            runId: input.runId,
+                            cause: "The provider session was released while the turn started.",
+                          }),
+                        ),
+                  ),
                 ),
+                run,
+                (_, exit) =>
+                  Exit.isFailure(exit)
+                    ? observeActivity(
+                        providerSessionId,
+                        markIdle(
+                          providerSessionId,
+                          input.providerThread.id,
+                          busyTurnKey(input.providerThread.id, input.runOrdinal),
+                        ),
+                      ).pipe(
+                        // A failed start can leave its native thread gone (Claude rejecting a
+                        // resume), so the next start must ask the adapter to resume it again.
+                        Effect.andThen(
+                          forgetProviderThreadLoaded({
+                            providerSessionId,
+                            threadId: input.threadId,
+                            runtime,
+                          }),
+                        ),
+                      )
+                    : Effect.void,
               ),
-            );
+            ),
+          );
         return {
           ...runtime,
           // Pi replaces its session snapshot as metadata changes.
@@ -2823,10 +2820,33 @@ export const layerWithOptions = (
                 ),
             );
           },
-          startTurn: startTracked(runtime.startTurn, "send"),
+          startTurn: (input) =>
+            busyTurn(input, () =>
+              agentFeedbackMode.pipe(
+                Effect.flatMap((agentFeedback) => runtime.startTurn({ ...input, agentFeedback })),
+                turnMetrics("send", input.modelSelection.model),
+              ),
+            ),
+          ...(runtime.resumeTurn === undefined
+            ? {}
+            : {
+                resumeTurn: (input: ProviderAdapter.ProviderAdapterV2ResumeTurnInput) =>
+                  busyTurn(input, () =>
+                    runtime.resumeTurn!(input).pipe(
+                      turnMetrics("resume", input.modelSelection.model),
+                    ),
+                  ),
+              }),
           ...(runtime.compactThread === undefined
             ? {}
-            : { compactThread: startTracked(runtime.compactThread, "compact") }),
+            : {
+                compactThread: (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
+                  busyTurn(input, () =>
+                    runtime.compactThread!(input).pipe(
+                      turnMetrics("compact", input.modelSelection.model),
+                    ),
+                  ),
+              }),
           steerTurn: (input) =>
             observeActivity(providerSessionId, touchActivity(providerSessionId)).pipe(
               Effect.andThen(runtime.steerTurn(input).pipe(turnMetrics("steer"))),
