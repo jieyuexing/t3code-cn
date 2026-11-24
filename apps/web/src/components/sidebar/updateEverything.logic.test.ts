@@ -605,6 +605,7 @@ describe("describeUpdateCapsule", () => {
     const views = run.machines.map((entry) => ({
       machine: entry,
       status: resolveUpdateRunMachineStatus(entry, run.phase, serverState),
+      restoredRetry: null,
     }));
 
     expect(views.map(({ status }) => status)).toEqual(["waiting", "providers"]);
@@ -621,7 +622,7 @@ describe("resolveRestoredRetry", () => {
   const restored = (id: string): UpdateRunMachine => ({
     environmentId: EnvironmentId.make(id),
     label: id,
-    updatesProviders: false,
+    updatingProviders: false,
     server: null,
     handedOffVersion: "0.1.12",
     startedAt: 0,

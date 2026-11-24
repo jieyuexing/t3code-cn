@@ -1772,7 +1772,7 @@ it.layer(
       expect(commands).toEqual([]);
       yield* manager.open(openInput());
       yield* manager.closeIdle({ threadId: "thread-1" });
-      expect(commands).toContain("powershell.exe");
+      expect(commands).toContainEqual(expect.stringMatching(/\\powershell\.exe$/i));
       expect(ptyAdapter.processes[0]?.killed).toBe(false);
     }),
   );

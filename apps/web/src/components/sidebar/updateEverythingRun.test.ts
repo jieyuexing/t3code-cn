@@ -77,7 +77,7 @@ describe("startDesktopUpdateLaunchNotice", () => {
         {
           environmentId,
           label: "Switching",
-          updatesProviders: false,
+          updatingProviders: false,
           server: null,
           handedOffVersion: "9.9.9",
           startedAt: now,
@@ -282,7 +282,7 @@ describe("retryFailedUpdateRunServers", () => {
         {
           environmentId,
           label: "restored",
-          updatesProviders: false,
+          updatingProviders: false,
           server: null,
           handedOffVersion: "9.9.9",
           startedAt: 0,
@@ -293,7 +293,7 @@ describe("retryFailedUpdateRunServers", () => {
         {
           environmentId: currentId,
           label: "restored-current",
-          updatesProviders: false,
+          updatingProviders: false,
           server: null,
           handedOffVersion: "9.9.9",
           startedAt: 0,
@@ -304,7 +304,7 @@ describe("retryFailedUpdateRunServers", () => {
         {
           environmentId: staleId,
           label: "restored-stale",
-          updatesProviders: false,
+          updatingProviders: false,
           server: null,
           handedOffVersion: "9.9.9",
           startedAt: 0,
