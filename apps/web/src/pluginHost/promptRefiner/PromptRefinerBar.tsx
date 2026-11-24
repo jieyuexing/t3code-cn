@@ -1,3 +1,4 @@
+import { useMessages } from "gt-react";
 import { WandIcon } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
@@ -10,10 +11,12 @@ import type { usePromptRefiner } from "./usePromptRefiner";
 
 export type PromptRefiner = ReturnType<typeof usePromptRefiner>;
 
-/** The wand beside the attach button, plus 撤销优化 until the next edit after a replacement. */
+/** The wand beside the attach button, plus Undo until the next edit after a replacement. */
 export function PromptRefinerButton(props: { readonly refiner: PromptRefiner }) {
   const { refiner } = props;
+  const resolve = useMessages();
   const shortcut = isMacPlatform(navigator.platform) ? "⌘⇧Y" : "Ctrl+Shift+Y";
+  const tooltip = PROMPT_REFINER_COPY.tooltip(shortcut, resolve);
   return (
     <>
       <Tooltip>
@@ -24,7 +27,7 @@ export function PromptRefinerButton(props: { readonly refiner: PromptRefiner }) 
               variant="ghost"
               size="icon-sm"
               disabled={!refiner.canStart}
-              aria-label={PROMPT_REFINER_COPY.tooltip(shortcut)}
+              aria-label={tooltip}
               // Keeps the editor focused, so the selection the refiner reads is still there.
               onPointerDown={(event) => event.preventDefault()}
               onClick={refiner.start}
@@ -33,7 +36,7 @@ export function PromptRefinerButton(props: { readonly refiner: PromptRefiner }) 
         >
           <WandIcon />
         </TooltipTrigger>
-        <TooltipPopup>{PROMPT_REFINER_COPY.tooltip(shortcut)}</TooltipPopup>
+        <TooltipPopup>{tooltip}</TooltipPopup>
       </Tooltip>
       {refiner.undoAvailable ? (
         <Button
@@ -43,7 +46,7 @@ export function PromptRefinerButton(props: { readonly refiner: PromptRefiner }) 
           onPointerDown={(event) => event.preventDefault()}
           onClick={refiner.undo}
         >
-          {PROMPT_REFINER_COPY.undo}
+          {resolve(PROMPT_REFINER_COPY.undo)}
         </Button>
       ) : null}
     </>
@@ -57,6 +60,7 @@ export function PromptRefinerCard(props: {
   readonly prompt: string;
 }) {
   const { refiner, prompt } = props;
+  const resolve = useMessages();
   const { state } = refiner;
   if (state.status === "idle") return null;
   const draftChanged = prompt !== state.snapshot.draft;
@@ -64,7 +68,7 @@ export function PromptRefinerCard(props: {
     <div
       data-prompt-refiner-card="true"
       role="region"
-      aria-label={PROMPT_REFINER_COPY.region}
+      aria-label={resolve(PROMPT_REFINER_COPY.region)}
       className="mx-3 mt-2 flex flex-col gap-2 rounded-xl border border-primary/40 bg-card p-2.5"
     >
       <div className="flex flex-wrap items-center gap-1">
@@ -75,28 +79,28 @@ export function PromptRefinerCard(props: {
             size="xs"
             variant={entry.mode === state.mode ? "secondary" : "ghost-muted"}
             aria-pressed={entry.mode === state.mode}
-            title={entry.hint}
+            title={resolve(entry.hint)}
             onPointerDown={(event) => event.preventDefault()}
             onClick={() => refiner.selectMode(entry.mode)}
           >
-            {entry.label}
+            {resolve(entry.label)}
           </Button>
         ))}
         {state.status === "preview" && state.result.usedWorkspaceContext ? (
           <span className="ms-auto text-xs text-muted-foreground">
-            {PROMPT_REFINER_COPY.withContext}
+            {resolve(PROMPT_REFINER_COPY.withContext)}
           </span>
         ) : null}
         {state.status === "preview" && draftChanged ? (
           <span className="ms-auto text-xs text-warning-foreground">
-            {PROMPT_REFINER_COPY.draftChanged}
+            {resolve(PROMPT_REFINER_COPY.draftChanged)}
           </span>
         ) : null}
       </div>
       {state.status === "loading" ? (
         <div className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
           <Spinner size="sm" />
-          {PROMPT_REFINER_COPY.loading}
+          {resolve(PROMPT_REFINER_COPY.loading)}
         </div>
       ) : null}
       {state.status === "error" ? (
@@ -120,15 +124,15 @@ export function PromptRefinerCard(props: {
             variant="outline"
             onClick={() => refiner.selectMode(state.mode)}
           >
-            {PROMPT_REFINER_COPY.retry}
+            {resolve(PROMPT_REFINER_COPY.retry)}
           </Button>
         ) : null}
         <Button type="button" size="xs" variant="ghost-muted" onClick={refiner.cancel}>
-          {PROMPT_REFINER_COPY.cancel}
+          {resolve(PROMPT_REFINER_COPY.cancel)}
         </Button>
         {state.status === "preview" ? (
           <Button type="button" size="xs" onClick={refiner.apply}>
-            {PROMPT_REFINER_COPY.apply}
+            {resolve(PROMPT_REFINER_COPY.apply)}
           </Button>
         ) : null}
       </div>

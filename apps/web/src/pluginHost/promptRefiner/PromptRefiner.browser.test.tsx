@@ -81,8 +81,8 @@ async function openThreads(
     router,
     threads,
     threadId: thread.id,
-    trigger: page.getByRole("button", { name: /优化提示词/ }),
-    card: page.getByRole("region", { name: "提示词优化" }),
+    trigger: page.getByRole("button", { name: /Refine prompt/ }),
+    card: page.getByRole("region", { name: "Prompt Refiner" }),
     sent: () => dispatchedCommands().filter((command) => command.type === "message.dispatch"),
     [Symbol.asyncDispose]: async () => {
       await app[Symbol.asyncDispose]();
@@ -104,7 +104,7 @@ it("触发按钮在草稿为空时不可点，有字后点它给出预览，应�
   await expect
     .element(view.card.getByTestId("prompt-refiner-result"))
     .toHaveTextContent("先核对仓库顶层结构，再逐条给出设想。");
-  await expect.element(view.card.getByText("已附带仓库上下文")).toBeVisible();
+  await expect.element(view.card.getByText("Workspace context attached")).toBeVisible();
   expect(client.requestPromptRefine).toHaveBeenCalledWith(
     ENVIRONMENT_ID,
     expect.objectContaining({ draft: "看一下架构", mode: "structured", threadId: view.threadId }),
@@ -112,13 +112,13 @@ it("触发按钮在草稿为空时不可点，有字后点它给出预览，应�
   );
   await expect.element(view.editor).toHaveTextContent("看一下架构");
 
-  await view.card.getByRole("button", { name: "应用替换" }).click();
+  await view.card.getByRole("button", { name: "Apply" }).click();
   await expect.element(view.card).not.toBeInTheDocument();
   await expect.element(view.editor).toHaveTextContent("先核对仓库顶层结构，再逐条给出设想。");
 
-  await page.getByRole("button", { name: "撤销优化" }).click();
+  await page.getByRole("button", { name: "Undo" }).click();
   await expect.element(view.editor).toHaveTextContent("看一下架构");
-  await expect.element(page.getByRole("button", { name: "撤销优化" })).not.toBeInTheDocument();
+  await expect.element(page.getByRole("button", { name: "Undo" })).not.toBeInTheDocument();
   expect(view.sent()).toHaveLength(0);
 });
 
@@ -129,11 +129,11 @@ it("切换模式用最初的草稿重新优化，并标出当前模式", async (
   await view.trigger.click();
   await expect.element(view.card.getByTestId("prompt-refiner-result")).toHaveTextContent("结构稿");
   await expect
-    .element(view.card.getByRole("button", { name: "结构清晰" }))
+    .element(view.card.getByRole("button", { name: "Structured" }))
     .toHaveAttribute("aria-pressed", "true");
   await userEvent.click(view.editor);
   await userEvent.keyboard("，又改了几个字");
-  await view.card.getByRole("button", { name: "大胆发散" }).click();
+  await view.card.getByRole("button", { name: "Divergent" }).click();
   await expect.element(view.card.getByTestId("prompt-refiner-result")).toHaveTextContent("大胆稿");
   expect(client.requestPromptRefine).toHaveBeenLastCalledWith(
     ENVIRONMENT_ID,
@@ -141,7 +141,7 @@ it("切换模式用最初的草稿重新优化，并标出当前模式", async (
     expect.any(AbortSignal),
   );
   await expect
-    .element(view.card.getByRole("button", { name: "大胆发散" }))
+    .element(view.card.getByRole("button", { name: "Divergent" }))
     .toHaveAttribute("aria-pressed", "true");
 });
 
@@ -159,7 +159,7 @@ it("选中一段时只替换选区，前后文原样保留", async () => {
     expect.objectContaining({ draft: "前文看架构后文", selection: { start: 2, end: 5 } }),
     expect.any(AbortSignal),
   );
-  await view.card.getByRole("button", { name: "应用替换" }).click();
+  await view.card.getByRole("button", { name: "Apply" }).click();
   await expect.element(view.editor).toHaveTextContent("前文替换后文");
 });
 
@@ -187,7 +187,7 @@ it("Esc 只收起预览卡，草稿保持原样", async () => {
 it("失败时显示原因，点重试再请求一次", async () => {
   await using view = await openThread(
     "refine-error",
-    { ok: false, message: "优化超时或失败了，请重试。" },
+    { ok: false, message: "Refinement timed out or failed. Try again." },
     refined("重试后的稿"),
   );
   await userEvent.click(view.editor);
@@ -195,8 +195,8 @@ it("失败时显示原因，点重试再请求一次", async () => {
   await view.trigger.click();
   await expect
     .element(view.card.getByRole("alert"))
-    .toHaveTextContent("优化超时或失败了，请重试。");
-  await view.card.getByRole("button", { name: "重试" }).click();
+    .toHaveTextContent("Refinement timed out or failed. Try again.");
+  await view.card.getByRole("button", { name: "Retry" }).click();
   await expect
     .element(view.card.getByTestId("prompt-refiner-result"))
     .toHaveTextContent("重试后的稿");
@@ -211,10 +211,10 @@ it("预览期间草稿被改动时提示，仍可确认替换当前草稿", asyn
   await expect.element(view.card.getByTestId("prompt-refiner-result")).toBeVisible();
   await userEvent.click(view.editor);
   await userEvent.keyboard("，再加一句");
-  await expect.element(view.card.getByText("草稿已改动")).toBeVisible();
-  await view.card.getByRole("button", { name: "应用替换" }).click();
+  await expect.element(view.card.getByText("Draft changed")).toBeVisible();
+  await view.card.getByRole("button", { name: "Apply" }).click();
   await expect.element(view.editor).toHaveTextContent("优化稿");
-  await page.getByRole("button", { name: "撤销优化" }).click();
+  await page.getByRole("button", { name: "Undo" }).click();
   await expect.element(view.editor).toHaveTextContent("看一下架构，再加一句");
 });
 

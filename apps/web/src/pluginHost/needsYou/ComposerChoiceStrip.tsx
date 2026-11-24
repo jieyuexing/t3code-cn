@@ -1,3 +1,4 @@
+import { useGT } from "gt-react";
 import { useEffect, useRef } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -18,6 +19,7 @@ export function ComposerChoiceStrip(props: {
   readonly onDismiss: () => void;
 }) {
   const { choices, onPick, onSend, onDismiss } = props;
+  const gt = useGT();
   const stripRef = useRef<HTMLDivElement>(null);
   const first = choices[0]?.fill;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Tab and Esc reach the editor before React, so the strip listens on the document first
@@ -45,8 +47,7 @@ export function ComposerChoiceStrip(props: {
       ref={stripRef}
       data-chat-composer-choices="true"
       role="group"
-      // oxlint-disable-next-line t3code/no-untranslated-copy -- the strip is fork-only Chinese copy, outside the catalogs
-      aria-label="回复里的选项"
+      aria-label={gt("Reply options")}
       className="flex flex-wrap items-center gap-1.5 px-4 pt-2.5"
     >
       {choices.map((choice) =>

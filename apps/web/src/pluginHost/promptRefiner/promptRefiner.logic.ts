@@ -1,3 +1,7 @@
+import { msg } from "gt-react";
+
+import { m, type MessageResolver } from "~/i18n/messages";
+
 const PROMPT_REFINE_PATH = "/prompt-refine";
 /** The fork-only route family the refiner's HTTP base path points at. */
 export const PROMPT_REFINE_BASE_PATH = "/api/cn";
@@ -5,17 +9,27 @@ export const PROMPT_REFINE_BASE_PATH = "/api/cn";
 export type PromptRefineMode = "structured" | "bold" | "scoped";
 export const DEFAULT_REFINE_MODE: PromptRefineMode = "structured";
 
-/* oxlint-disable t3code/no-untranslated-copy -- the refiner is fork-only Chinese copy, outside the catalogs */
 export const PROMPT_REFINE_MODE_META: ReadonlyArray<{
   readonly mode: PromptRefineMode;
   readonly label: string;
   readonly hint: string;
 }> = [
-  { mode: "structured", label: "结构清晰", hint: "理清目标、维度、边界与期望输出" },
-  { mode: "bold", label: "大胆发散", hint: "放大锋芒，逼出相互冲突的激进视角" },
-  { mode: "scoped", label: "工程交付", hint: "补齐范围、不做什么与验收标准" },
+  {
+    mode: "structured",
+    label: msg("Structured", { $context: "prompt refine mode" }),
+    hint: msg("Clarify goals, dimensions, boundaries, and expected output"),
+  },
+  {
+    mode: "bold",
+    label: msg("Divergent", { $context: "prompt refine mode" }),
+    hint: msg("Sharpen your stance and surface bold, conflicting angles"),
+  },
+  {
+    mode: "scoped",
+    label: msg("Scoped", { $context: "prompt refine mode" }),
+    hint: msg("Specify scope, non-goals, and acceptance criteria"),
+  },
 ];
-/* oxlint-enable t3code/no-untranslated-copy */
 
 export interface PromptRefineSelection {
   readonly start: number;
@@ -143,39 +157,40 @@ export function parseRefineResponse(value: unknown): PromptRefineResult | null {
     : null;
 }
 
-/* oxlint-disable t3code/no-untranslated-copy -- fork-only Chinese copy, outside the catalogs */
 export const PROMPT_REFINER_COPY = {
-  region: "提示词优化",
-  loading: "正在优化提示词…",
-  apply: "应用替换",
-  cancel: "取消",
-  retry: "重试",
-  undo: "撤销优化",
-  withContext: "已附带仓库上下文",
-  draftChanged: "草稿已改动",
-  selectionChanged: "选区内容已改动，请重新选择后再优化。",
-  replaceRefused: "草稿已改动，没能替换，请重新优化。",
-  failed: "优化失败，请重试。",
-  tooltip: (shortcut: string) => `优化提示词 (${shortcut})`,
+  region: msg("Prompt Refiner"),
+  loading: msg("Refining prompt…"),
+  apply: msg("Apply", { $context: "prompt refiner button" }),
+  cancel: msg("Cancel"),
+  retry: msg("Retry"),
+  undo: msg("Undo", { $context: "prompt refiner button" }),
+  withContext: msg("Workspace context attached"),
+  draftChanged: msg("Draft changed"),
+  selectionChanged: msg("Selection changed; select again and retry."),
+  replaceRefused: msg("Draft changed and could not be replaced; refine again."),
+  failed: msg("Refinement failed. Try again."),
+  tooltip: (shortcut: string, resolve: MessageResolver = m) =>
+    resolve(msg("Refine prompt ({shortcut})", { shortcut })),
 } as const;
 
-export function refineFailureMessage(status: number): string {
+export function refineFailureMessage(status: number, resolve: MessageResolver = m): string {
   switch (status) {
     case 503:
-      return "当前没有可用的提示词顾问（需要已登录的 Antigravity）。";
+      return resolve(
+        msg("No prompt advisor available (requires a signed-in Antigravity account)."),
+      );
     case 502:
-      return "优化超时或失败了，请重试。";
+      return resolve(msg("Refinement timed out or failed. Try again."));
     case 401:
-      return "登录已失效，请重新连接后再试。";
+      return resolve(msg("Session expired. Reconnect and try again."));
     case 403:
-      return "当前会话没有使用该功能的权限。";
+      return resolve(msg("This session does not have permission to refine prompts."));
     case 400:
-      return "草稿或选区不符合要求，请调整后再试。";
+      return resolve(msg("Draft or selection is invalid. Adjust and try again."));
     default:
-      return `优化失败（${status}）。`;
+      return resolve(msg("Refinement failed ({status}).", { status }));
   }
 }
-/* oxlint-enable t3code/no-untranslated-copy */
 
 export const refineUrl = (access: {
   readonly httpBase: string;

@@ -52,11 +52,22 @@ function advisorChoice(item: PromptAdvisorItem, beside: boolean): ComposerChoice
   };
 }
 
+const MERGE_COPY = {
+  zh: {
+    badge: "全部",
+    label: (count: number) => `合并 ${count} 条`,
+    header: "请逐条回应以下几点：",
+  },
+  en: {
+    badge: "All",
+    label: (count: number) => `Merge ${count}`,
+    header: "Please respond to each point:",
+  },
+} as const;
+
 /** Combine multiple advisor prompts into one numbered follow-up message. */
-function mergedAdvisorFill(items: ReadonlyArray<PromptAdvisorItem>): string {
-  return ["请逐条回应以下几点：", ...items.map((item, index) => `${index + 1}. ${item.fill}`)].join(
-    "\n",
-  );
+function mergedAdvisorFill(items: ReadonlyArray<PromptAdvisorItem>, header: string): string {
+  return [header, ...items.map((item, index) => `${index + 1}. ${item.fill}`)].join("\n");
 }
 
 /**
@@ -72,14 +83,14 @@ export function mergeComposerChoices(
   if (rules.length === 0) {
     const advisors = advisorItems.map((item) => advisorChoice(item, false));
     if (advisors.length < 2) return advisors;
+    const copy = advisorItems.some((item) => CJK.test(item.fill)) ? MERGE_COPY.zh : MERGE_COPY.en;
     return [
       ...advisors,
       {
         source: "advisor",
-        badge: "全部",
-        // oxlint-disable-next-line t3code/no-untranslated-copy -- fork-only Chinese copy, outside the catalogs
-        label: `合并 ${advisors.length} 条`,
-        fill: mergedAdvisorFill(advisorItems),
+        badge: copy.badge,
+        label: copy.label(advisors.length),
+        fill: mergedAdvisorFill(advisorItems, copy.header),
         detail: "",
       },
     ];

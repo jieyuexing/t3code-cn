@@ -497,13 +497,19 @@ async function prepareUpstreamDiscussionPage(
       if (hideRefiner !== false && !document.getElementById("hide-refiner-wand")) {
         const style = document.createElement("style");
         style.id = "hide-refiner-wand";
-        style.textContent = '[aria-label^="优化提示词"]{display:none!important}';
+        style.textContent = '[aria-label^="Refine prompt"]{display:none!important}';
         document.head.appendChild(style);
       }
 
       const load = new Function("p", "return import(p)") as (
         path: string,
       ) => Promise<Record<string, unknown>>;
+      const { persistGTLocale, whenLocaleReady } = (await load("/src/i18n/runtime.ts")) as {
+        persistGTLocale: (locale: string) => void;
+        whenLocaleReady: () => Promise<void>;
+      };
+      persistGTLocale("en");
+      await whenLocaleReady();
       const { appAtomRegistry } = (await load("/src/rpc/atomRegistry.ts")) as {
         appAtomRegistry: {
           get: (atom: unknown) => unknown;
@@ -580,7 +586,7 @@ const discussion41387: Story = {
       hold: 1.6,
       after: async ({ page }) => {
         await page.evaluate(() => document.getElementById("hide-refiner-wand")?.remove());
-        const wand = page.locator('[aria-label^="优化提示词"]').first();
+        const wand = page.locator('[aria-label^="Refine prompt"]').first();
         await wand.waitFor({ timeout: 10_000 });
         await wand.click();
         await page.locator('[data-testid="prompt-refiner-result"]').waitFor({ timeout: 10_000 });
@@ -589,11 +595,11 @@ const discussion41387: Story = {
     },
     {
       label: "after-applied",
-      target: '[data-prompt-refiner-card="true"] button:has-text("应用替换")',
+      target: '[data-prompt-refiner-card="true"] button:has-text("Apply")',
       settle: 1000,
       hold: 1.6,
       after: async ({ page }) => {
-        await page.locator('button:has-text("撤销优化")').waitFor({ timeout: 10_000 });
+        await page.locator('button:has-text("Undo")').waitFor({ timeout: 10_000 });
         await page.mouse.move(648, 30);
       },
     },
@@ -727,18 +733,18 @@ const discussion41360: Story = {
               items: [
                 {
                   kind: "challenge",
-                  label: "检查 min > max 边界",
-                  fill: "如果调用 clamp(x, min, max) 时传入 min > max 或 NaN，当前实现不会报错，是否需要补充参数断言？",
+                  label: "Check min > max",
+                  fill: "If clamp(x, min, max) is called with min > max or NaN, it returns silently today. Should it assert or throw?",
                 },
                 {
                   kind: "next",
-                  label: "补齐 math.test.ts 边界用例",
-                  fill: "在 server/src/math.test.ts 中补充负数、零长区间（min === max）与极值的单元测试并运行验证。",
+                  label: "Add math.test.ts cases",
+                  fill: "Add unit tests in server/src/math.test.ts for negative bounds, min === max, and extreme values, then run vitest.",
                 },
                 {
                   kind: "angle",
-                  label: "排查 metrics.ts 复用点",
-                  fill: "检查 server/src/metrics.ts 中的窗口计算是否可以直接复用 clamp 替代手写分支。",
+                  label: "Reuse in metrics.ts",
+                  fill: "Check whether window(n) in server/src/metrics.ts can reuse clamp instead of a separate branch.",
                 },
               ],
             });
@@ -749,7 +755,9 @@ const discussion41360: Story = {
             timestamp: Date.now(),
           });
         });
-        await page.locator('[data-chat-composer-choices="true"]').waitFor({ timeout: 10_000 });
+        await page
+          .locator('[data-chat-composer-choices="true"] button:has-text("Merge 3")')
+          .waitFor({ timeout: 10_000 });
         await page.mouse.move(648, 30);
       },
     },
@@ -759,6 +767,27 @@ const discussion41360: Story = {
       settle: 1000,
       hold: 1.6,
       after: async ({ page }) => {
+        await page.mouse.move(648, 30);
+      },
+    },
+    {
+      label: "after-merge-filled",
+      settle: 1000,
+      hold: 1.6,
+      after: async ({ page }) => {
+        const editor = page.locator('[data-chat-composer-form] [contenteditable="true"]').first();
+        await editor.click();
+        const selectAll = await page.evaluate(() =>
+          /Mac/i.test(navigator.platform) ? "Meta+a" : "Control+a",
+        );
+        await page.keyboard.press(selectAll);
+        await page.keyboard.press("Backspace");
+        const mergeBtn = page
+          .locator('[data-chat-composer-choices="true"] button:has-text("Merge 3")')
+          .first();
+        await mergeBtn.waitFor({ timeout: 10_000 });
+        await mergeBtn.click();
+        await page.locator('text="Please respond to each point:"').waitFor({ timeout: 10_000 });
         await page.mouse.move(648, 30);
       },
     },

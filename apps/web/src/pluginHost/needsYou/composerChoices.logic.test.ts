@@ -98,13 +98,13 @@ describe("规则按钮与上下文顾问的融合", () => {
         advisor("next", "Verify", "Run the full suite"),
         advisor("angle", "Narrow", "What if only the login page changes?"),
       ]).map(([, badge]) => badge),
-    ).toEqual(["Challenge", "Next", "Angle", "全部"]);
+    ).toEqual(["Challenge", "Next", "Angle", "All"]);
     expect(view(LISTED, [advisor("challenge", "Gap", "Did you check rollback?")]).at(-1)?.[1]).toBe(
       "Blind spot",
     );
   });
 
-  it("合并按钮：0 或 1 枚顾问不出，有解析选项时不出，2 或 3 枚单独顾问时追加且文本正确", () => {
+  it("合并按钮：0 或 1 枚顾问不出，有解析选项时不出，2 或 3 枚单独顾问时按建议语言输出中英文并正确拼装", () => {
     expect(mergeComposerChoices("改完了。", [])).toEqual([]);
     expect(mergeComposerChoices("改完了。", [advisor("next", "验收", "跑测试")])).toHaveLength(1);
 
@@ -135,17 +135,52 @@ describe("规则按钮与上下文顾问的融合", () => {
       detail: "",
     });
 
+    const threeEn = mergeComposerChoices("Done.", [
+      advisor("challenge", "Gap", "Did the regression suite cover this?"),
+      advisor("next", "Verify", "Run the full suite"),
+      advisor("angle", "Narrow", "What if only the login page changes?"),
+    ]);
+    expect(threeEn).toHaveLength(4);
+    expect(threeEn.at(-1)).toEqual({
+      source: "advisor",
+      badge: "All",
+      label: "Merge 3",
+      fill: [
+        "Please respond to each point:",
+        "1. Did the regression suite cover this?",
+        "2. Run the full suite",
+        "3. What if only the login page changes?",
+      ].join("\n"),
+      detail: "",
+    });
+
+    const mixed = mergeComposerChoices("Done.", [
+      advisor("challenge", "Gap", "Did the regression suite cover this?"),
+      advisor("next", "验收", "跑一遍完整测试"),
+    ]);
+    expect(mixed.at(-1)).toEqual({
+      source: "advisor",
+      badge: "全部",
+      label: "合并 2 条",
+      fill: "请逐条回应以下几点：\n1. Did the regression suite cover this?\n2. 跑一遍完整测试",
+      detail: "",
+    });
+
     const withOptions = mergeComposerChoices(LISTED, [
       advisor("challenge", "盲点", "漏了回滚？"),
       advisor("angle", "收窄", "能不能先灰度？"),
     ]);
-    expect(withOptions.some((choice) => choice.badge === "全部")).toBe(false);
+    expect(withOptions.some((choice) => choice.badge === "全部" || choice.badge === "All")).toBe(
+      false,
+    );
 
     const withPendingOnly = mergeComposerChoices("## 待你定\n1. 要不要合并？", [
       advisor("challenge", "盲点", "CI 绿了吗？"),
       advisor("angle", "收窄", "能不能拆成两步？"),
     ]);
-    expect(withPendingOnly.some((choice) => choice.badge === "全部")).toBe(false);
+    expect(
+      withPendingOnly.some((choice) => choice.badge === "全部" || choice.badge === "All"),
+    ).toBe(false);
   });
 
   it("顾问按钮保留 kind、label 与完整 fill", () => {

@@ -25,7 +25,7 @@
 ## 现行结构
 
 - 服务端：`apps/server/src/textGeneration/promptRefiner.cn.ts`（提示词、指纹、线程尾、清洗、`refinePrompt`）、`apps/server/src/http/promptRefinerHttp.cn.ts`（路由，读 `ProjectionStoreV2` 在建 layer 时完成，见下）、`promptAdvisor.cn.ts` 与 `promptAdvisorRegistry.cn.ts` 的 `PromptAdvisorRuntime` 扩充。
-- 前端：全在 `apps/web/src/pluginHost/promptRefiner/`：`promptRefiner.logic.ts`（请求体、选区切片与替换计划、撤销计划、文案、快捷键判断，单测）、`promptRefinerClient.ts`（取票、请求、401 换票重试）、`usePromptRefiner.ts`（`idle | loading | preview | error` 状态机，触发时抓草稿与选区快照，返回前切模式、取消都会中止上一次请求）、`PromptRefinerBar.tsx`（`PromptRefinerButton` 与 `PromptRefinerCard`）。
+- 前端：全在 `apps/web/src/pluginHost/promptRefiner/`：`promptRefiner.logic.ts`（请求体、选区切片与替换计划、撤销计划、i18n 词表键与快捷键判断，单测）、`promptRefinerClient.ts`（取票、请求、401 换票重试）、`usePromptRefiner.ts`（`idle | loading | preview | error` 状态机，触发时抓草稿与选区快照，返回前切模式、取消都会中止上一次请求）、`PromptRefinerBar.tsx`（`PromptRefinerButton` 与 `PromptRefinerCard`）。按钮与卡片文案以英文为源串接入上游 `gt-react` 词表，在 `apps/web/src/i18n/translations/zh.json` 补对应中文译文，随界面语言切换。
 - 预览卡与撤销入口按草稿归属（`questionAttachmentTarget ?? composerDraftTargetKey`）存放，输入框跨线程保持挂载，切线程时卡片不跟过去。助手运行中（`running` / `connecting`）触发按钮禁用。
 - 应用与撤销都经输入框自己的 `applyPromptReplacement` 并带 `expectedText`：选区模式下选区文字已变就拒绝并提示重新选择；整段模式下草稿在等待期间被改动时，预览卡标“草稿已改动”，仍可确认替换，替换的是应用那一刻的整段草稿，撤销恢复的也是它。
 

@@ -2,6 +2,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useRef, useState } from "react";
 
 import { useStableCallback } from "~/hooks/useStableCallback";
+import { m } from "~/i18n/messages";
 import { isMacPlatform } from "~/lib/utils";
 
 import { requestPromptRefine } from "./promptRefinerClient";
@@ -116,7 +117,7 @@ export function usePromptRefiner(options: {
       },
       () => {
         if (!controller.signal.aborted) {
-          setState({ status: "error", mode, snapshot, message: PROMPT_REFINER_COPY.failed });
+          setState({ status: "error", mode, snapshot, message: m(PROMPT_REFINER_COPY.failed) });
         }
       },
     );
@@ -140,11 +141,11 @@ export function usePromptRefiner(options: {
     const current = readDraft().text;
     const plan: PromptApplyPlan = planApply(state.snapshot, current, state.result.refined);
     if (plan.kind === "selection-changed") {
-      setState({ ...state, status: "error", message: PROMPT_REFINER_COPY.selectionChanged });
+      setState({ ...state, status: "error", message: m(PROMPT_REFINER_COPY.selectionChanged) });
       return;
     }
     if (!replaceRange(plan)) {
-      setState({ ...state, status: "error", message: PROMPT_REFINER_COPY.replaceRefused });
+      setState({ ...state, status: "error", message: m(PROMPT_REFINER_COPY.replaceRefused) });
       return;
     }
     setApplied({

@@ -87,7 +87,7 @@ async function waitReady(url: string, child: { exitCode: number | null }) {
   for (let i = 0; i < 600; i++) {
     if (child.exitCode !== null) throw new Error("dev 栈提前退出，见输出目录下 app.log");
     try {
-      if ((await fetch(url)).ok) return;
+      if ((await fetch(url, { signal: AbortSignal.timeout(2_000) })).ok) return;
     } catch {}
     await sleep(500);
   }
@@ -230,8 +230,19 @@ async function main() {
       }).observe(document, { subtree: true, childList: true, characterData: true });
     }, computerName);
     const page = await context.newPage();
-    await page.goto(origin + NodeFS.readFileSync(NodePath.join(home, "pairing-path"), "utf8"));
-    await page.waitForURL((url) => !/\/pair(?:[?#]|$)/.test(url.pathname), { timeout: 60_000 });
+    const credentialFile = NodePath.join(home, "browser-dev-token");
+    if (NodeFS.existsSync(credentialFile)) {
+      const credential = NodeFS.readFileSync(credentialFile, "utf8").trim();
+      const auth = await page.request.post(`${origin}/api/auth/browser-session`, {
+        data: { credential },
+      });
+      if (!auth.ok()) {
+        throw new Error(`browser-session sign-in failed: ${auth.status()} ${await auth.text()}`);
+      }
+    } else {
+      await page.goto(origin + NodeFS.readFileSync(NodePath.join(home, "pairing-path"), "utf8"));
+      await page.waitForURL((url) => !/\/pair(?:[?#]|$)/.test(url.pathname), { timeout: 60_000 });
+    }
     const { environmentId } = (await (
       await fetch(`${origin}/.well-known/t3/environment`)
     ).json()) as { environmentId: string };

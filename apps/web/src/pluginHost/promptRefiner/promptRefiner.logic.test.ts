@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { m } from "~/i18n/messages";
+
 import {
   applyRefinedText,
   buildRefineRequest,
@@ -149,12 +151,12 @@ describe("parseRefineResponse", () => {
 });
 
 describe("refineFailureMessage", () => {
-  it("explains each status in plain Chinese", () => {
-    expect(refineFailureMessage(503)).toContain("顾问");
-    expect(refineFailureMessage(502)).toContain("重试");
-    expect(refineFailureMessage(401)).toContain("登录");
-    expect(refineFailureMessage(403)).toContain("权限");
-    expect(refineFailureMessage(400)).toContain("草稿");
+  it("explains each status in plain English", () => {
+    expect(refineFailureMessage(503)).toContain("advisor");
+    expect(refineFailureMessage(502)).toContain("Try again");
+    expect(refineFailureMessage(401)).toContain("expired");
+    expect(refineFailureMessage(403)).toContain("permission");
+    expect(refineFailureMessage(400)).toContain("Draft");
     expect(refineFailureMessage(500)).toContain("500");
   });
 });
@@ -194,10 +196,10 @@ describe("isRefineShortcut", () => {
 
 describe("PROMPT_REFINE_MODE_META", () => {
   it("names the three modes in the order the card shows them", () => {
-    expect(PROMPT_REFINE_MODE_META.map((entry) => [entry.mode, entry.label])).toEqual([
-      ["structured", "结构清晰"],
-      ["bold", "大胆发散"],
-      ["scoped", "工程交付"],
+    expect(PROMPT_REFINE_MODE_META.map((entry) => [entry.mode, m(entry.label)])).toEqual([
+      ["structured", "Structured"],
+      ["bold", "Divergent"],
+      ["scoped", "Scoped"],
     ]);
   });
 });

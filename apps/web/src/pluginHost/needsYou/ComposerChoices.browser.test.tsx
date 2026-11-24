@@ -81,7 +81,7 @@ async function openThread(
     // AppRoot brings its own router.
     router: false,
   });
-  const strip = page.getByRole("group", { name: "回复里的选项" });
+  const strip = page.getByRole("group", { name: "Reply options" });
   if (options?.expectStrip !== false) await expect.element(strip).toBeVisible();
   return {
     strip,
@@ -196,7 +196,7 @@ it("编码串损坏且回复没有选项时：没有快捷条，也不把原始�
     { expectStrip: false },
   );
   await expect.element(page.getByTestId("composer-editor")).toBeVisible();
-  await expect.element(page.getByRole("group", { name: "回复里的选项" })).not.toBeInTheDocument();
+  await expect.element(page.getByRole("group", { name: "Reply options" })).not.toBeInTheDocument();
   expect(document.body.textContent).not.toContain("t3cn-advisor");
   expect(
     page.getByTestId("composer-editor").element().getAttribute("aria-placeholder"),
@@ -233,5 +233,29 @@ it("普通回复有 2 枚以上顾问建议时显示合并按钮，点后填入�
   expect(paragraphs[0]).toBe("请逐条回应以下几点：");
   const items = [...view.editor.element().querySelectorAll("ol li")].map((li) => li.textContent);
   expect(items).toEqual(["你确认过回归测试覆盖了这次改动吗？", "跑一遍完整测试并贴结果"]);
+  expect(view.sent()).toHaveLength(0);
+});
+
+it("英文顾问建议的合并按钮显示英文标签，点后填入英文编号列表且不发送", async () => {
+  await using view = await openThread(
+    "choices-advisor-merge-en",
+    "Done.",
+    advisorPayload(
+      ["challenge", "Check min > max", "Should clamp(x, min, max) assert when min > max or NaN?"],
+      ["next", "Add math tests", "Add unit tests for negative and zero-length bounds."],
+      ["angle", "Reuse in metrics", "Check whether metrics.ts can reuse clamp."],
+    ),
+  );
+  const mergeButton = view.strip.getByRole("button", { name: /All\s*Merge 3/ });
+  await expect.element(mergeButton).toBeVisible();
+  await mergeButton.click();
+  const paragraphs = [...view.editor.element().querySelectorAll("p")].map((p) => p.textContent);
+  expect(paragraphs[0]).toBe("Please respond to each point:");
+  const items = [...view.editor.element().querySelectorAll("ol li")].map((li) => li.textContent);
+  expect(items).toEqual([
+    "Should clamp(x, min, max) assert when min > max or NaN?",
+    "Add unit tests for negative and zero-length bounds.",
+    "Check whether metrics.ts can reuse clamp.",
+  ]);
   expect(view.sent()).toHaveLength(0);
 });
