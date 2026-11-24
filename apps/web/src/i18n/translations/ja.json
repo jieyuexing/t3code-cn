@@ -12920,5 +12920,9 @@
   "b1bb7c2358c67be9": "Refinement failed ({status}).",
   "7c1cd4439fb68d89": "Not connected to the environment yet. Try again shortly.",
   "1143117b45cbe72d": "Could not reach the server. Check your connection and try again.",
-  "78a509dff5319b5a": "The server returned an unrecognized response."
+  "78a509dff5319b5a": "The server returned an unrecognized response.",
+  "bd34b084ad3764f5": "Copy as plain text",
+  "b533cf57f0276d09": "copy markdown plain text formatting rich html message",
+  "6566981368c4dfbc": "Copy chat messages and selections as plain visible text without Markdown formatting or rich HTML.",
+  "56daa151b4d85393": "Reset copy as plain text to default"
 }

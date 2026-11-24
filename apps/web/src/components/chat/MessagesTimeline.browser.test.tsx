@@ -58,6 +58,8 @@ import {
   decodeComposerContextFragment,
 } from "@t3tools/shared/composerContextClipboard";
 import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { persistClientSettingsPatch } from "~/hooks/useSettings";
+import { importPastedComposerText } from "../composerInlineTokenPaste";
 
 const environmentQuery = vi.hoisted(() => ({
   error: "Pull request not found" as string | null,
@@ -2469,4 +2471,89 @@ it("keeps concurrent approvals actionable outside collapsed work and restores se
   await expect
     .element(screen.getByRole("button", { name: "Open the current tab", exact: true }))
     .toBeVisible();
+});
+
+describe("copyPlainText in MessagesTimeline", () => {
+  const setCopyPlainText = (copyPlainText: boolean) =>
+    act(() => persistClientSettingsPatch({ copyPlainText }, async () => {}));
+
+  it.each([
+    {
+      copyPlainText: false,
+      expected: "# Heading\n\nSee **important** [docs](https://example.com) and `cmd`.",
+    },
+    {
+      copyPlainText: true,
+      expected: "Heading\n\nSee important docs and cmd.",
+    },
+  ])(
+    "copies assistant message with copyPlainText=$copyPlainText",
+    async ({ copyPlainText, expected }) => {
+      const markdown = "# Heading\n\nSee **important** [docs](https://example.com) and `cmd`.";
+      const assistantEntry: Entry = {
+        id: "entry-assistant-1",
+        kind: "message",
+        createdAt: CREATED_AT,
+        message: {
+          id: MessageId.make("assistant-1"),
+          role: "assistant",
+          text: markdown,
+          runId: null,
+          createdAt: CREATED_AT,
+          updatedAt: CREATED_AT,
+          streaming: false,
+        },
+      };
+      await setCopyPlainText(copyPlainText);
+      try {
+        await using screen = await renderTimeline([assistantEntry]);
+        using writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+        await click(screen.button("Copy message"));
+        await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+        expect(writeText).toHaveBeenLastCalledWith(expected);
+      } finally {
+        await setCopyPlainText(false);
+      }
+    },
+  );
+
+  it("keeps composer context paste working when copying user selection with copyPlainText on", async () => {
+    const contextId = ComposerContextId.make("mention-app");
+    const record = {
+      version: 1 as const,
+      kind: "mention" as const,
+      contextId,
+      label: "App.tsx",
+      path: "src/App.tsx",
+    };
+    const userEntry = message(`Check [App.tsx](t3-context://v1/mention/${contextId}) **now**`, {
+      context: { version: 1, records: [record] },
+    });
+    await setCopyPlainText(true);
+    try {
+      await using screen = await renderTimeline([userEntry]);
+      const markdownRoot = screen.container.querySelector(".chat-markdown")!;
+      const range = document.createRange();
+      range.selectNodeContents(markdownRoot);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const clipboardData = new DataTransfer();
+      markdownRoot.dispatchEvent(
+        new ClipboardEvent("copy", { clipboardData, bubbles: true, cancelable: true }),
+      );
+
+      expect(clipboardData.getData(COMPOSER_CONTEXT_CLIPBOARD_MIME)).not.toBe("");
+      expect(clipboardData.getData("text/plain")).toBe(
+        `Check [App.tsx](t3-context://v1/mention/${contextId}) now`,
+      );
+      const imported = importPastedComposerText(
+        clipboardData,
+        (fragment) => new Map(fragment.records.map((item) => [item.contextId, item.contextId])),
+      );
+      expect(imported).toBe(`Check [App.tsx](t3-context://v1/mention/${contextId}) now`);
+    } finally {
+      await setCopyPlainText(false);
+    }
+  });
 });

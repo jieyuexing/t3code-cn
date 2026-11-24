@@ -130,6 +130,7 @@ import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { useRenderedAppearance } from "../hooks/useTheme";
 import { useClientSettings } from "../hooks/useSettings";
 import { chatMarkdownClipboardPayload } from "../markdown-clipboard";
+import { PLAIN_TEXT_CLIPBOARD_OPTIONS } from "../markdownPlainText.cn";
 import {
   isLocalEditorFileHref,
   resolveInlineCodeFileLinkMeta,
@@ -769,14 +770,29 @@ function useChatMarkdownState(
     });
   };
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const copyPlainText = useClientSettings((settings) => settings.copyPlainText);
   const handleCopy = (event: ReactClipboardEvent<HTMLElement>) => {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !event.clipboardData) return;
-    const payload = chatMarkdownClipboardPayload(selection);
+    const payload = chatMarkdownClipboardPayload(
+      selection,
+      copyPlainText ? PLAIN_TEXT_CLIPBOARD_OPTIONS : undefined,
+    );
     if (!payload) return;
     event.preventDefault();
     event.clipboardData.setData("text/plain", payload.text);
     const fragment = event.clipboardData.getData(COMPOSER_CONTEXT_CLIPBOARD_MIME);
+    if (copyPlainText) {
+      // Custom web MIME types on DataTransfer can be dropped across OS clipboards, so keep
+      // the minimal fragment carrier in text/html only when a context chip was copied.
+      if (fragment) {
+        event.clipboardData.setData(
+          "text/html",
+          encodeComposerContextClipboardHtml(payload.text, fragment),
+        );
+      }
+      return;
+    }
     event.clipboardData.setData(
       "text/html",
       fragment

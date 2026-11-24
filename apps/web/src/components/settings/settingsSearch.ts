@@ -406,6 +406,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("latex tex katex equations formulas markdown")],
   },
   {
+    id: "copy-plain-text",
+    title: msg("Copy as plain text"),
+    to: "/settings/appearance",
+    searchTerms: [msg("copy markdown plain text formatting rich html message")],
+  },
+  {
     id: "panel-animations",
     title: msg("Panel animations"),
     to: "/settings/appearance",

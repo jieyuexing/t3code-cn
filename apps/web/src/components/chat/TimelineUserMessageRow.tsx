@@ -76,7 +76,9 @@ import {
   encodeComposerContextClipboardHtml,
   encodeComposerContextFragment,
 } from "@t3tools/shared/composerContextClipboard";
+import { useClientSettings } from "../../hooks/useSettings";
 import { chatMarkdownClipboardPayload } from "../../markdown-clipboard";
+import { PLAIN_TEXT_CLIPBOARD_OPTIONS } from "../../markdownPlainText.cn";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import { cn } from "~/lib/utils";
 import { markdownProseDirection } from "~/textDirection";
@@ -462,6 +464,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const gt = useGT();
   const m = useMessages();
   const { onImageExpand, onFileOpen } = ctx;
+  const copyPlainText = useClientSettings((settings) => settings.copyPlainText);
   const coarsePointer = useMediaQuery({ pointer: "coarse" });
   // A linked environment's agent sent it from a thread there.
   const senderRef =
@@ -670,13 +673,18 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     if (!fragment) return;
     // Claim the copy: without preventDefault the browser default overwrites the
     // custom MIME type. The default content must then be written back explicitly.
-    const payload = chatMarkdownClipboardPayload(selection);
+    const payload = chatMarkdownClipboardPayload(
+      selection,
+      copyPlainText ? PLAIN_TEXT_CLIPBOARD_OPTIONS : undefined,
+    );
     event.preventDefault();
     event.clipboardData.setData("text/plain", payload?.text ?? selection.toString());
     if (payload) {
       event.clipboardData.setData(
         "text/html",
-        encodeComposerContextClipboardHtml(payload.text, fragment, payload.html),
+        copyPlainText
+          ? encodeComposerContextClipboardHtml(payload.text, fragment)
+          : encodeComposerContextClipboardHtml(payload.text, fragment, payload.html),
       );
     }
     event.clipboardData.setData(COMPOSER_CONTEXT_CLIPBOARD_MIME, fragment);

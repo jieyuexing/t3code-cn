@@ -361,6 +361,31 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
+        <SettingsRow
+          {...searchableSetting("copy-plain-text")}
+          description={gt(
+            "Copy chat messages and selections as plain visible text without Markdown formatting or rich HTML.",
+          )}
+          resetAction={
+            settings.copyPlainText !== DEFAULT_UNIFIED_SETTINGS.copyPlainText ? (
+              <SettingResetButton
+                ariaLabel={gt("Reset copy as plain text to default")}
+                onClick={() =>
+                  updateSettings({
+                    copyPlainText: DEFAULT_UNIFIED_SETTINGS.copyPlainText,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.copyPlainText}
+              onCheckedChange={(checked) => updateSettings({ copyPlainText: Boolean(checked) })}
+              aria-label={gt("Copy as plain text")}
+            />
+          }
+        />
         <AdvancedSettings
           targetIds={[
             searchableSetting("panel-animations").id,

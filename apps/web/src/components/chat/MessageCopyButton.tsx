@@ -18,7 +18,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({
   variant = "outline",
   className,
 }: {
-  text: string;
+  text: string | (() => string);
   label?: string;
   icon?: LucideIcon;
   extraFlavors?: Readonly<Record<string, string>>;
@@ -42,7 +42,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({
           <Button
             aria-label={label}
             disabled={isCopied}
-            onClick={() => copyToClipboard(text)}
+            onClick={() => copyToClipboard(typeof text === "function" ? text() : text)}
             ref={ref}
             type="button"
             size={size}

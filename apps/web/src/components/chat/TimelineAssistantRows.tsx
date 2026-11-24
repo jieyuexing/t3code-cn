@@ -14,6 +14,8 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { readResponseSubagents, useAssistantMessageText } from "../../state/entities";
+import { useClientSettings } from "../../hooks/useSettings";
+import { markdownToPlainText } from "../../markdownPlainText.cn";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
@@ -320,6 +322,8 @@ function AssistantCopyButton({
   showCopyButton: boolean;
   streaming: boolean;
 }) {
+  const copyPlainText = useClientSettings((settings) => settings.copyPlainText);
+  const mathEnabled = useClientSettings((settings) => settings.mathRenderingEnabled);
   const assistantCopyState = resolveAssistantMessageCopyState({
     text: message.text ?? null,
     showCopyButton,
@@ -330,7 +334,13 @@ function AssistantCopyButton({
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  const text = assistantCopyState.text ?? "";
+  return (
+    <MessageCopyButton
+      text={copyPlainText ? () => markdownToPlainText(text, { math: mathEnabled }) : text}
+      variant="ghost"
+    />
+  );
 }
 
 export function ProposedPlanTimelineRow({

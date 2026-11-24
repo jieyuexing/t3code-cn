@@ -815,7 +815,13 @@ function cloneWithListMarkers(range: Range, container: Element): void {
 
 export function chatMarkdownClipboardPayload(
   selection: Selection,
+  options?: {
+    readonly serializeFragment?: (container: Node) => string;
+    readonly includeHtml?: boolean;
+  },
 ): MarkdownClipboardPayload | null {
+  const serialize = options?.serializeFragment ?? serializeRenderedMarkdownFragment;
+  const includeHtml = options?.includeHtml ?? true;
   const texts: string[] = [];
   const htmls: string[] = [];
   for (let index = 0; index < selection.rangeCount; index += 1) {
@@ -837,15 +843,17 @@ export function chatMarkdownClipboardPayload(
       const text = diagramSource.trim();
       if (!text) continue;
       texts.push(text);
-      container.replaceChildren(mermaidSourceHtml(diagramSource));
-      htmls.push(sanitizedHtmlFrom(container));
+      if (includeHtml) {
+        container.replaceChildren(mermaidSourceHtml(diagramSource));
+        htmls.push(sanitizedHtmlFrom(container));
+      }
       continue;
     }
     // A range inside a formula would clone only KaTeX's glyphs, not the wrapper holding the TeX.
     const math = mathWrapperOf(ancestorElement);
     if (math) {
       texts.push(math.getAttribute("data-markdown-copy")?.trim() ?? "");
-      htmls.push(`<meta charset="utf-8">${mathSourceElement(math).outerHTML}`);
+      if (includeHtml) htmls.push(`<meta charset="utf-8">${mathSourceElement(math).outerHTML}`);
       continue;
     }
     // A range inside one code element clones only its text, which would otherwise be escaped as prose.
@@ -853,7 +861,7 @@ export function chatMarkdownClipboardPayload(
       const text = range.toString();
       if (text) {
         texts.push(text);
-        htmls.push(sanitizedHtmlFrom(container));
+        if (includeHtml) htmls.push(sanitizedHtmlFrom(container));
       }
       continue;
     }
@@ -864,10 +872,10 @@ export function chatMarkdownClipboardPayload(
       wrapper.append(...container.childNodes);
       container.replaceChildren(wrapper);
     }
-    const text = serializeRenderedMarkdownFragment(container);
+    const text = serialize(container);
     if (!text) continue;
     texts.push(text);
-    htmls.push(sanitizedHtmlFrom(container));
+    if (includeHtml) htmls.push(sanitizedHtmlFrom(container));
   }
   if (texts.length === 0) return null;
   return { text: texts.join("\n\n"), html: htmls.join("") };

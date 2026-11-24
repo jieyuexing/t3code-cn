@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
-import { render } from "../../../test/render";
+import { persistClientSettingsPatch } from "~/hooks/useSettings";
+import { act, render } from "../../../test/render";
+import ChatMarkdown from "../ChatMarkdown";
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock";
 import { MarkdownTable } from "./MarkdownTable";
 
@@ -150,6 +152,116 @@ describe("copying a table as HTML", () => {
       ]);
     } finally {
       write.mockRestore();
+    }
+  });
+});
+
+describe("copyPlainText setting in ChatMarkdown selection copy", () => {
+  const setCopyPlainText = (copyPlainText: boolean) =>
+    act(() => persistClientSettingsPatch({ copyPlainText }, async () => {}));
+
+  const copyWholeRenderedMarkdown = (container: HTMLElement) => {
+    const markdownRoot = container.querySelector(".chat-markdown")!;
+    const range = document.createRange();
+    range.selectNodeContents(markdownRoot);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const clipboardData = new DataTransfer();
+    const copyEvent = new ClipboardEvent("copy", {
+      clipboardData,
+      bubbles: true,
+      cancelable: true,
+    });
+    markdownRoot.dispatchEvent(copyEvent);
+    return clipboardData;
+  };
+
+  it("writes Markdown + HTML when copyPlainText is off and visible plain text only when on", async () => {
+    const source = [
+      "# Title",
+      "",
+      "Use **bold**, `npm test`, and [docs](https://example.com).",
+      "",
+      "- Alpha",
+      "- Beta",
+      "",
+      "1. First",
+      "2. Second",
+      "",
+      "```ts",
+      "const n = 1;",
+      "```",
+    ].join("\n");
+
+    await setCopyPlainText(false);
+    await using screen = await render(<ChatMarkdown cwd="/tmp/project" text={source} />);
+    await expect.element(screen.getByText("Title", { exact: true })).toBeVisible();
+    await expect.element(screen.getByText("const n = 1;")).toBeVisible();
+
+    const offClipboard = copyWholeRenderedMarkdown(screen.container);
+    expect(offClipboard.getData("text/plain")).toBe(
+      [
+        "# Title",
+        "",
+        "Use **bold**, `npm test`, and [docs](https://example.com).",
+        "",
+        "- Alpha",
+        "- Beta",
+        "",
+        "1. First",
+        "2. Second",
+        "",
+        "const n = 1;",
+      ].join("\n"),
+    );
+    expect(offClipboard.getData("text/html")).toContain("<strong>bold</strong>");
+
+    await setCopyPlainText(true);
+    try {
+      const onClipboard = copyWholeRenderedMarkdown(screen.container);
+      expect(onClipboard.getData("text/plain")).toBe(
+        [
+          "Title",
+          "",
+          "Use bold, npm test, and docs.",
+          "",
+          "• Alpha",
+          "• Beta",
+          "",
+          "1. First",
+          "2. Second",
+          "",
+          "const n = 1;",
+        ].join("\n"),
+      );
+      expect(onClipboard.getData("text/html")).toBe("");
+      expect([...onClipboard.types]).toEqual(["text/plain"]);
+    } finally {
+      await setCopyPlainText(false);
+    }
+  });
+
+  it("keeps math source when copyPlainText is on without writing text/html", async () => {
+    await act(() =>
+      persistClientSettingsPatch(
+        { copyPlainText: true, mathRenderingEnabled: true },
+        async () => {},
+      ),
+    );
+    try {
+      await using screen = await render(<ChatMarkdown cwd={undefined} text="Formula $x^2$." />);
+      await expect.element(screen.getByText("Formula", { exact: false })).toBeVisible();
+      const clipboard = copyWholeRenderedMarkdown(screen.container);
+      expect(clipboard.getData("text/plain")).toBe("Formula \\(x^2\\).");
+      expect(clipboard.getData("text/html")).toBe("");
+    } finally {
+      await act(() =>
+        persistClientSettingsPatch(
+          { copyPlainText: false, mathRenderingEnabled: false },
+          async () => {},
+        ),
+      );
     }
   });
 });
