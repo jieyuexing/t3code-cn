@@ -609,7 +609,7 @@ function PoolWindowCard({
   readonly description?: string | undefined;
   readonly apiEstimate?: WeeklyApiEstimateResult | undefined;
 }) {
-  const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
+  const nextRefill = pool.resets.find((reset) => reset.at > now && reset.restoresPercent > 0);
   return (
     <div className="grid items-center gap-x-6 gap-y-3 rounded-lg border border-border/60 p-4 md:grid-cols-[11rem_minmax(0,1fr)]">
       <div className="flex flex-col gap-1">
