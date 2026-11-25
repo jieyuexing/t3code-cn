@@ -3,13 +3,17 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildBerthView,
+  effectiveSeverity,
   emptyBerths,
   enterBerth,
+  isEtechThread,
   leaveBerth,
+  partitionBerthThreads,
   reconcileBerths,
   type BerthShell,
+  type BerthThread,
 } from "./berths.logic";
-import { parseBerths } from "./berthsStorage";
+import { parseBerths, parseEtechOverrides } from "./berthsStorage";
 
 const ENV = EnvironmentId.make("environment-a");
 const NOW = "2026-11-25T12:00:00.000Z";
@@ -58,6 +62,16 @@ const view = (shells: ReadonlyArray<BerthShell>, scheduled: ReadonlyArray<string
 
 const ids = (threads: ReadonlyArray<{ threadId: string }>) => threads.map((t) => t.threadId);
 
+const berthThread = (id: string, over: Partial<BerthThread> = {}): BerthThread => ({
+  threadId: id,
+  title: `Thread ${id}`,
+  status: "done",
+  model: "opus",
+  branch: null,
+  createdAt: "2026-11-25T08:00:00.000Z",
+  ...over,
+});
+
 describe("buildBerthView", () => {
   it("keeps only top-level threads in play and drops archived, deleted, settled, snoozed and other environments", () => {
     const result = view([
@@ -100,6 +114,48 @@ describe("buildBerthView", () => {
   });
 });
 
+describe("etech priority and severity", () => {
+  it("matches company tickets, SIR, 141, work and etech without false positives on workflow/network", () => {
+    expect(isEtechThread(berthThread("1", { title: "1125_GWH-350 work TET SIR#91" }))).toBe(true);
+    expect(isEtechThread(berthThread("2", { title: "M3台式机141与etech镜像仓连携" }))).toBe(true);
+    expect(isEtechThread(berthThread("3", { title: "Fix bug", branch: "work/nsnet-12" }))).toBe(
+      true,
+    );
+    expect(isEtechThread(berthThread("4", { title: "workflow network framework refactor" }))).toBe(
+      false,
+    );
+    expect(isEtechThread(berthThread("4", { title: "workflow network" }), { "4": true })).toBe(
+      true,
+    );
+    expect(isEtechThread(berthThread("1", { title: "1125_GWH-350" }), { "1": false })).toBe(false);
+  });
+
+  it("escalates parent severity when a subagent is critical or active", () => {
+    expect(
+      effectiveSeverity(berthThread("p", { status: "done" }), [
+        berthThread("s1", { status: "working" }),
+        berthThread("s2", { status: "failed" }),
+      ]),
+    ).toBe("critical");
+    expect(
+      effectiveSeverity(berthThread("p", { status: "done" }), [
+        berthThread("s1", { status: "working" }),
+      ]),
+    ).toBe("active");
+    expect(effectiveSeverity(berthThread("p", { status: "done" }), [])).toBe("quiet");
+  });
+
+  it("partitions etech apart and sorts each group by severity then creation", () => {
+    const gwhDone = berthThread("g1", { title: "GWH-100", status: "done" });
+    const gwhErr = berthThread("g2", { title: "etech 141", status: "failed" });
+    const pQuiet = berthThread("p1", { title: "game-planet", status: "done" });
+    const pRun = berthThread("p2", { title: "t3code-cn", status: "working" });
+    const { etech, personal } = partitionBerthThreads([gwhDone, gwhErr, pQuiet, pRun], new Map());
+    expect(ids(etech)).toEqual(["g2", "g1"]);
+    expect(ids(personal)).toEqual(["p2", "p1"]);
+  });
+});
+
 describe("berths", () => {
   const seated = ["a", "b", "c", null, "e", null];
 
@@ -138,10 +194,10 @@ describe("berths", () => {
   });
 });
 
-describe("parseBerths", () => {
+describe("storage parsers", () => {
   const empty = emptyBerths();
 
-  it("reads a saved record back", () => {
+  it("reads a saved berth record back", () => {
     expect(parseBerths(JSON.stringify(["a", null, "b", null, null, "c"]))).toEqual([
       "a",
       null,
@@ -172,5 +228,14 @@ describe("parseBerths", () => {
       "b",
       null,
     ]);
+  });
+
+  it("parses etech overrides safely and ignores invalid entries", () => {
+    expect(parseEtechOverrides(JSON.stringify({ a: true, b: false, c: "yes", "": true }))).toEqual({
+      a: true,
+      b: false,
+    });
+    expect(parseEtechOverrides("{bad")).toEqual({});
+    expect(parseEtechOverrides("[]")).toEqual({});
   });
 });

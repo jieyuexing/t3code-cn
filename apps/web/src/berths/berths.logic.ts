@@ -15,6 +15,11 @@ export const PRIMARY_BERTH_COUNT = 2;
 /** Six slots by thread id; the first two are the primary berths. A slot never shifts to fill another. */
 export type Berths = ReadonlyArray<string | null>;
 
+/** User overrides for whether a thread belongs to the top ETECH priority lane. */
+export type EtechOverrides = Readonly<Record<string, boolean>>;
+
+export type VisualSeverity = "critical" | "attention" | "active" | "quiet";
+
 export type BerthShell = PendingThreadShell &
   Pick<EnvironmentThreadShell, "createdAt" | "modelSelection" | "branch">;
 
@@ -35,7 +40,48 @@ export interface BerthView {
   readonly subagents: ReadonlyMap<string, ReadonlyArray<BerthThread>>;
 }
 
+const ETECH_PATTERN =
+  /(?:^|[^A-Za-z0-9])(?:GWH|NSNET|OSN|NCU|CJP)(?:-\d+)?(?=$|[^A-Za-z0-9])|(?:^|[^A-Za-z0-9])(?:SIR|TET|TELIN|etech|work|141)(?=$|[^A-Za-z0-9])/i;
+
+const SEVERITY_RANK: Readonly<Record<VisualSeverity, number>> = {
+  critical: 3,
+  attention: 2,
+  active: 1,
+  quiet: 0,
+};
+
 export const emptyBerths = (): Berths => Array.from({ length: BERTH_COUNT }, () => null);
+
+function statusSeverity(status: PendingThreadStatus): VisualSeverity {
+  if (status === "approval" || status === "failed") return "critical";
+  if (status === "input" || status === "request") return "attention";
+  if (status === "working") return "active";
+  return "quiet";
+}
+
+export function effectiveSeverity(
+  thread: BerthThread,
+  subagents: ReadonlyArray<BerthThread>,
+): VisualSeverity {
+  let highest = statusSeverity(thread.status);
+  for (const child of subagents) {
+    const childSeverity = statusSeverity(child.status);
+    if (SEVERITY_RANK[childSeverity] > SEVERITY_RANK[highest]) highest = childSeverity;
+  }
+  return highest;
+}
+
+export function isEtechThread(
+  thread: Pick<BerthThread, "threadId" | "title" | "branch">,
+  overrides: EtechOverrides = {},
+): boolean {
+  const override = overrides[thread.threadId];
+  if (override !== undefined) return override;
+  return (
+    ETECH_PATTERN.test(thread.title) ||
+    (thread.branch !== null && ETECH_PATTERN.test(thread.branch))
+  );
+}
 
 function toBerthThread(shell: BerthShell): BerthThread {
   return {
@@ -50,6 +96,36 @@ function toBerthThread(shell: BerthShell): BerthThread {
 
 const byCreation = (left: BerthThread, right: BerthThread) =>
   left.createdAt.localeCompare(right.createdAt) || left.threadId.localeCompare(right.threadId);
+
+function sortThreadsByPriority(
+  threads: ReadonlyArray<BerthThread>,
+  subagents: ReadonlyMap<string, ReadonlyArray<BerthThread>>,
+): ReadonlyArray<BerthThread> {
+  return [...threads].sort((left, right) => {
+    const leftRank = SEVERITY_RANK[effectiveSeverity(left, subagents.get(left.threadId) ?? [])];
+    const rightRank = SEVERITY_RANK[effectiveSeverity(right, subagents.get(right.threadId) ?? [])];
+    return rightRank - leftRank || byCreation(left, right);
+  });
+}
+
+export function partitionBerthThreads(
+  threads: ReadonlyArray<BerthThread>,
+  subagents: ReadonlyMap<string, ReadonlyArray<BerthThread>>,
+  overrides: EtechOverrides = {},
+): {
+  readonly etech: ReadonlyArray<BerthThread>;
+  readonly personal: ReadonlyArray<BerthThread>;
+} {
+  const etech: BerthThread[] = [];
+  const personal: BerthThread[] = [];
+  for (const thread of threads) {
+    (isEtechThread(thread, overrides) ? etech : personal).push(thread);
+  }
+  return {
+    etech: sortThreadsByPriority(etech, subagents),
+    personal: sortThreadsByPriority(personal, subagents),
+  };
+}
 
 function listedAncestorId(shell: BerthShell, byId: ReadonlyMap<string, BerthShell>): string | null {
   const seen = new Set<string>([shell.id]);

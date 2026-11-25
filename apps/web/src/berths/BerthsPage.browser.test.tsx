@@ -97,31 +97,45 @@ function fresh(): Disposable {
   return { [Symbol.dispose]: () => localStorage.clear() };
 }
 
-it("shows six berths, with a thread's model, branch and subagents, and the rest off berth", async () => {
+it("places etech threads in the top priority zone and keeps empty berths clean behind a picker button", async () => {
   using _fresh = fresh();
   writeBerths(environmentId, ["a", null, null, null, null, null]);
-  const view = make([thread("a", { branch: "feature/x" }), thread("b")], {
-    subagents: new Map([
-      [
-        "a",
+  const view = make(
+    [
+      thread("etech1", { title: "1125_GWH-350 work TET SIR#91", status: "input" }),
+      thread("a", { branch: "feature/x" }),
+      thread("b"),
+    ],
+    {
+      subagents: new Map([
         [
-          thread("s1", { title: "子代理一", status: "approval" }),
-          thread("s2", { title: "子代理二" }),
+          "a",
+          [
+            thread("s1", { title: "子代理一", status: "approval" }),
+            thread("s2", { title: "子代理二", status: "working" }),
+            thread("s3", { title: "子代理三", status: "failed" }),
+            thread("s4", { title: "子代理四", status: "done" }),
+          ],
         ],
-      ],
-    ]),
-  });
+      ]),
+    },
+  );
   await using _screen = await render(board(view), { router: false });
+  const etechZone = page.getByRole("region", { name: "ETECH 优先区" });
+  await expect.element(etechZone.getByText("1125_GWH-350 work TET SIR#91")).toBeVisible();
   for (let n = 1; n <= 6; n++) await expect.element(berth(n)).toBeVisible();
   await expect.element(berth(1).getByText("线程 a")).toBeVisible();
-  await expect.element(berth(1).getByText("opus · feature/x")).toBeVisible();
-  await expect.element(berth(1).getByText("待审批")).toBeVisible();
   await expect.element(berth(1).getByText("子代理一")).toBeVisible();
-  await expect.element(berth(2).getByText("泊位 2 · 空闲 · 主力")).toBeVisible();
-  await expect.element(berth(3).getByText("泊位 3 · 空闲 · 副位")).toBeVisible();
-  const off = page.getByRole("region", { name: "港外待入坞" });
-  await expect.element(off.getByText("线程 b")).toBeVisible();
-  await expect.element(off.getByText("线程 a")).not.toBeInTheDocument();
+  // Four subagents stay inside the fixed h-44 scrollable card container.
+  await expect.element(berth(1)).toHaveClass("h-44", "overflow-hidden");
+  await expect.element(berth(2)).toHaveClass("h-44", "overflow-hidden");
+  await expect.element(berth(1).getByRole("list")).toHaveClass("overflow-y-auto");
+  // Empty berths do not duplicate off-berth thread titles until the picker button is clicked.
+  await expect.element(berth(2).getByText("线程 b")).not.toBeInTheDocument();
+  await userEvent.click(berth(2).getByRole("button", { name: "选线程入坞" }));
+  await userEvent.click(berth(2).getByRole("button", { name: "线程 b" }));
+  await expect.element(berth(2).getByText("线程 b")).toBeVisible();
+  expect(readBerths(environmentId)).toEqual(["a", "b", null, null, null, null]);
 });
 
 it("seats off-berth threads in the first empty berth and leaves a berth empty without moving the others", async () => {
