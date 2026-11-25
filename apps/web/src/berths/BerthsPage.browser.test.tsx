@@ -21,11 +21,25 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 vi.mock("../state/threads", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../state/threads")>();
   const { Atom } = await import("effect/reactivity");
+  type MockShell = { readonly environmentId: string; readonly id: string };
   return {
     ...actual,
     environmentThreadShells: {
       ...actual.environmentThreadShells,
-      quietThreadShellsAtom: Atom.make(() => mocks.shells),
+      quietThreadShellsAtom: Atom.make(() => []),
+      threadRefsAtom: Atom.make(() =>
+        (mocks.shells as ReadonlyArray<MockShell>).map((shell) => ({
+          environmentId: shell.environmentId,
+          threadId: shell.id,
+        })),
+      ),
+      quietThreadShellAtom: (ref: { readonly environmentId: string; readonly threadId: string }) =>
+        Atom.make(
+          () =>
+            (mocks.shells as ReadonlyArray<MockShell>).find(
+              (shell) => shell.environmentId === ref.environmentId && shell.id === ref.threadId,
+            ) ?? null,
+        ),
     },
   };
 });
@@ -182,7 +196,7 @@ it("keeps scheduled-task threads in a folded section until asked", async () => {
   await expect.element(berth(1).getByText("每日巡检")).toBeVisible();
 });
 
-it("opens a parent thread and a subagent in the native thread route", async () => {
+it("opens a parent thread and a subagent in the native thread route even when tag filtering empties quietThreadShellsAtom", async () => {
   using _fresh = fresh();
   writeBerths(environmentId, ["a", null, null, null, null, null]);
   mocks.shells = [

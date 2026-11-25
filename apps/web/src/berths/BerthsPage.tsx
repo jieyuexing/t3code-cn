@@ -1,7 +1,10 @@
 /* oxlint-disable t3code/no-untranslated-copy -- fork-only UI copy */
 import { useAtomValue } from "@effect/atom-react";
+import { arrayElementsEqual } from "@t3tools/client-runtime/state/entities";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { ThreadId, type EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
+import { Atom } from "effect/reactivity";
 import { useState } from "react";
 
 import {
@@ -24,12 +27,27 @@ import { isThreadRouteSnapshotAuthoritative } from "../threadRoutes";
 import { buildBerthView } from "./berths.logic";
 import { BerthsBoard } from "./BerthsBoard";
 
+// Reads every thread ref without hiddenThreadKeysAtom so sidebar tag filters never empty berths.
+let previousAllQuietThreadShells: ReadonlyArray<EnvironmentThreadShell> = [];
+const allQuietThreadShellsAtom = Atom.make((get) => {
+  const next: EnvironmentThreadShell[] = [];
+  for (const ref of get(environmentThreadShells.threadRefsAtom)) {
+    const shell = get(environmentThreadShells.quietThreadShellAtom(ref));
+    if (shell !== null) next.push(shell);
+  }
+  if (arrayElementsEqual(previousAllQuietThreadShells, next)) {
+    return previousAllQuietThreadShells;
+  }
+  previousAllQuietThreadShells = next;
+  return next;
+}).pipe(Atom.withLabel("berths-all-quiet-thread-shells"));
+
 export function BerthsPage() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
   const [picked, setPicked] = useState<EnvironmentId | null>(null);
   const environmentId = picked ?? primaryEnvironmentId ?? environments[0]?.environmentId ?? null;
-  const shells = useAtomValue(environmentThreadShells.quietThreadShellsAtom);
+  const shells = useAtomValue(allQuietThreadShellsAtom);
   const tasks = useEnvironmentQuery(
     environmentId === null
       ? null
