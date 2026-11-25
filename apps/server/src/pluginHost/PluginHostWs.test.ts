@@ -39,6 +39,8 @@ import * as HostResources from "../resourceTelemetry/HostResources.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as TaskFolders from "../workspace/TaskFolders.ts";
+// oxlint-disable-next-line t3code/no-layout-command-approval-writes -- 和 ws.test.ts 一样搭整个 ws 层，只放一个空替身，不写审批。
+import * as LayoutCommandApprovalWrites from "../workspace/LayoutCommandApprovalWrites.ts";
 import * as ScratchThreadPromotion from "../project/ScratchThreadPromotion.ts";
 import * as IssueService from "../issue/IssueService.ts";
 import * as IssueTrackerConnections from "../issue/IssueTrackerConnections.ts";
@@ -228,6 +230,7 @@ const layerRpcServices = Layer.mergeAll(
   Layer.mock(PeerClientPairing.PeerClientPairing)({}),
   Layer.mock(WorkspaceFolders.WorkspaceFolders)({}),
   Layer.mock(TaskFolders.TaskFolders)({}),
+  Layer.mock(LayoutCommandApprovalWrites.LayoutCommandApprovalWrites)({}),
 );
 
 const layerConfigSources = Layer.mergeAll(
