@@ -38,7 +38,6 @@ import { HostResources } from "../resourceTelemetry/HostResources.ts";
 import { Workflows } from "../workflows/Workflows.ts";
 import { PreviewBrowser } from "../preview/PreviewBrowser.ts";
 import { ManagedProjectFolders } from "../project/ManagedProjectFolders.ts";
-import { ProjectCheckout } from "../project/ProjectCheckout.ts";
 import { ProjectCloneTracker } from "../project/ProjectCloneTracker.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { ProjectSetupScriptRunner } from "../project/ProjectSetupScriptRunner.ts";
@@ -84,7 +83,6 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(PreviewManager)({}),
   Layer.mock(Workflows)({}),
   Layer.mock(ProjectCloneTracker)({}),
-  Layer.mock(ProjectCheckout)({}),
   Layer.mock(ProjectService)({}),
   Layer.mock(ProjectSetupScriptRunner)({}),
   Layer.mock(ProviderAdapterRegistryV2)({}),

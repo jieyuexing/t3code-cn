@@ -110,8 +110,6 @@ export class PeerLinks extends Context.Service<
       input: PeerLinkCreateInput,
     ) => Effect.Effect<{ readonly link: PeerLink; readonly alreadyLinked: boolean }, PeerLinkError>;
     readonly list: Effect.Effect<ReadonlyArray<PeerLinkSummary>, PeerLinkError>;
-    /** The stored links, without asking any peer whether it answers. */
-    readonly stored: Effect.Effect<ReadonlyArray<PeerLink>, PeerLinkError>;
     /** The unexpired links' names, from what is stored, without asking any peer. */
     readonly names: Effect.Effect<ReadonlyArray<PeerLinkName>, PeerLinkError>;
     /** The stored link, without asking the peer whether it answers. */
@@ -641,12 +639,8 @@ const make = Effect.gen(function* () {
     return { ...(yield* withLabel(link, answered.value.label)), status: "reachable" };
   });
 
-  const stored: PeerLinks["Service"]["stored"] = Effect.gen(function* () {
-    return yield* Effect.forEach(yield* readRows, toLink);
-  });
-
   const list: PeerLinks["Service"]["list"] = Effect.gen(function* () {
-    const links = yield* stored;
+    const links = yield* Effect.forEach(yield* readRows, toLink);
     const now = yield* DateTime.now;
     return yield* Effect.forEach(links, (link) => statusOf(link, now), {
       concurrency: "unbounded",
@@ -824,7 +818,6 @@ const make = Effect.gen(function* () {
     link,
     linkUnlessLinked,
     list,
-    stored,
     names,
     get,
     unlink,

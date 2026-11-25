@@ -228,39 +228,6 @@ it("decodes a linked environment's read that predates host and machine resources
   expect(decode({ ...identity, hostResources }).hostResources).toEqual(hostResources);
 });
 
-it("reports a declared load balancing weight, and omits it when none is declared", () => {
-  const decode = Schema.decodeUnknownSync(
-    EnvironmentToolkit.tools.t3_environment_read.successSchema,
-  );
-  const identity = {
-    environmentId,
-    label: "Test",
-    serverVersion: "0.0.0",
-    platform: { os: "linux", arch: "x64" },
-  };
-  const declared = EnvironmentHandlers.preferences({
-    ...DEFAULT_SERVER_SETTINGS,
-    loadBalancingWeight: 0,
-  });
-  expect(declared.loadBalancingWeight).toBe(0);
-  expect(decode({ ...identity, preferences: declared }).preferences.loadBalancingWeight).toBe(0);
-  const undeclared = EnvironmentHandlers.preferences(DEFAULT_SERVER_SETTINGS);
-  expect("loadBalancingWeight" in undeclared).toBe(false);
-  expect(
-    decode({ ...identity, preferences: undeclared }).preferences.loadBalancingWeight,
-  ).toBeUndefined();
-});
-
-it("lets the update tool set, zero and clear the declared weight, within 0 to 100", () => {
-  const decode = Schema.decodeUnknownSync(
-    EnvironmentToolkit.tools.t3_environment_preferences_update.parametersSchema,
-  );
-  expect(decode({ environmentId, loadBalancingWeight: 40 }).loadBalancingWeight).toBe(40);
-  expect(decode({ environmentId, loadBalancingWeight: 0 }).loadBalancingWeight).toBe(0);
-  expect(decode({ environmentId, loadBalancingWeight: null }).loadBalancingWeight).toBeNull();
-  expect(() => decode({ environmentId, loadBalancingWeight: 101 })).toThrow();
-});
-
 it("keeps agent feedback out of the preferences agents read and write", () => {
   expect(
     EnvironmentHandlers.preferences({

@@ -40,7 +40,6 @@ import { loadBalancingSendWarning } from "./composerSend.logic";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { seedDraftModelSelection } from "../../lib/seedDraftModelSelection";
 import { draftFanoutSelectionsAtom } from "./chatViewSend";
-import { environmentLoadWeight } from "./useDraftEnvironmentRouting.logic";
 
 interface DraftEnvironmentRoutingInput {
   readonly draftId: DraftId | null;
@@ -120,10 +119,7 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
           const environment = environmentById.get(candidate.environmentId);
           return (
             environment?.connection.phase === "connected" &&
-            environmentLoadWeight(
-              environment,
-              loadBalancingSettings.loadBalancingWeights[candidate.environmentId],
-            ) > 0 &&
+            (loadBalancingSettings.loadBalancingWeights[candidate.environmentId] ?? 50) > 0 &&
             referencedThreadContexts.every(
               (record) => record.environmentId === candidate.environmentId,
             ) &&
@@ -152,16 +148,7 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
     : [];
   const loadBalancing = useLoadBalancedEnvironment(
     needsLoadBalancing ? loadBalancingCandidates : [],
-    // 权重按机器种类与自报值解析后再交给打分，发送前复查与草稿选机用同一份。
-    Object.fromEntries(
-      loadBalancingCandidates.map((environmentId) => [
-        environmentId,
-        environmentLoadWeight(
-          environmentById.get(environmentId),
-          loadBalancingSettings.loadBalancingWeights[environmentId],
-        ),
-      ]),
-    ),
+    loadBalancingSettings.loadBalancingWeights,
   );
   const readRouting = useStableCallback(() => ({ input, loadBalancingCandidates }));
   const refreshBeforeSend = () => {

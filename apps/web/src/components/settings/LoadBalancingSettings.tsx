@@ -8,7 +8,6 @@ import {
 } from "~/hooks/useSettings";
 import type { MessageResolver } from "~/i18n/messages";
 import type { EnvironmentPresentation } from "~/state/environments";
-import { environmentLoadWeight } from "../chat/useDraftEnvironmentRouting.logic";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { EnvironmentRow, EnvironmentTransportLabel } from "./EnvironmentRow";
@@ -30,23 +29,19 @@ const summaryLabels = {
 
 type LoadPreference = (typeof preferences)[number]["value"];
 
-function loadPreferenceForWeight(weight: number): LoadPreference {
-  if (weight === 50) return 50;
+function loadPreferenceForWeight(weight: number | undefined): LoadPreference {
+  if (weight === undefined || weight === 50) return 50;
   if (weight === 0) return 0;
   return weight < 50 ? 25 : 100;
 }
 
 function summarizeLoadPreferences(
-  environments: ReadonlyArray<
-    Pick<EnvironmentPresentation, "environmentId" | "label" | "serverConfig">
-  >,
+  environments: ReadonlyArray<Pick<EnvironmentPresentation, "environmentId" | "label">>,
   weights: Readonly<Record<string, number>>,
   resolve: MessageResolver,
 ): string | null {
   const parts = environments.flatMap((environment) => {
-    const preference = loadPreferenceForWeight(
-      environmentLoadWeight(environment, weights[environment.environmentId]),
-    );
+    const preference = loadPreferenceForWeight(weights[environment.environmentId]);
     return preference === 50
       ? []
       : [resolve(summaryLabels[preference], { environment: environment.label })];
@@ -106,10 +101,7 @@ export function LoadBalancingSettings({
           <Select
             items={items}
             value={loadPreferenceForWeight(
-              environmentLoadWeight(
-                environment,
-                settings.loadBalancingWeights[environment.environmentId],
-              ),
+              settings.loadBalancingWeights[environment.environmentId],
             )}
             disabled={!settingsHydrated || !settings.loadBalancingEnabled}
             onValueChange={(value) => {
