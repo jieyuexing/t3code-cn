@@ -49,18 +49,35 @@ export interface PendingThread {
 }
 
 // The sidebar's own classification; a usage limit needs the user as much as a failure does.
-const STATUS: Readonly<Record<ReturnType<typeof resolveSidebarThreadStatus>, PendingThreadStatus>> =
-  {
-    input: "input",
-    approval: "approval",
-    request: "request",
-    failed: "failed",
-    limited: "failed",
-    ready: "done",
-    waiting: "waiting",
-    working: "working",
-    preparing: "working",
-  };
+export const PENDING_STATUS: Readonly<
+  Record<ReturnType<typeof resolveSidebarThreadStatus>, PendingThreadStatus>
+> = {
+  input: "input",
+  approval: "approval",
+  request: "request",
+  failed: "failed",
+  limited: "failed",
+  ready: "done",
+  waiting: "waiting",
+  working: "working",
+  preparing: "working",
+};
+
+/** Whether the sidebar still lists the thread: top-level, not archived, deleted, settled or snoozed. */
+export function isThreadInPlay(
+  thread: PendingThreadShell,
+  environmentId: EnvironmentId,
+  now: string,
+): boolean {
+  return (
+    thread.environmentId === environmentId &&
+    thread.archivedAt === null &&
+    thread.deletedAt === null &&
+    isListedThreadLineage(thread.lineage) &&
+    thread.settledOverride !== "settled" &&
+    !effectiveSnoozed(thread, { now })
+  );
+}
 
 /** The environment's top-level threads still in play: not archived, settled or snoozed, as the sidebar lists them. */
 export function pendingThreads(input: {
@@ -70,15 +87,7 @@ export function pendingThreads(input: {
   readonly now: string;
 }): ReadonlyArray<PendingThread> {
   return input.shells
-    .filter(
-      (thread) =>
-        thread.environmentId === input.environmentId &&
-        thread.archivedAt === null &&
-        thread.deletedAt === null &&
-        isListedThreadLineage(thread.lineage) &&
-        thread.settledOverride !== "settled" &&
-        !effectiveSnoozed(thread, { now: input.now }),
-    )
+    .filter((thread) => isThreadInPlay(thread, input.environmentId, input.now))
     .map((thread) => {
       const request = thread.source.pendingRuntimeRequest;
       const lastTurnCompletedAt = thread.latestRun?.completedAt ?? null;
@@ -87,7 +96,7 @@ export function pendingThreads(input: {
         threadId: thread.id,
         title: thread.title,
         project: input.projectNames.get(thread.projectId) ?? null,
-        status: STATUS[resolveSidebarThreadStatus(thread)],
+        status: PENDING_STATUS[resolveSidebarThreadStatus(thread)],
         request:
           request === null
             ? null

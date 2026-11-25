@@ -88,6 +88,16 @@ describe("main app return location", () => {
     });
   });
 
+  it("returns from the berths page to the thread it was opened over", async () => {
+    await using screen = await render(<ReturnControls />, { router: THREAD_PATH });
+    const router = screen.router!;
+    using _tracking = { [Symbol.dispose]: startMainAppLocationTracking(router) };
+
+    await settled(router, router.navigate({ href: "/berths" }));
+    await userEvent.click(screen.getByRole("button", { name: "Back to app" }));
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe(THREAD_PATH));
+  });
+
   it("leaves no stop on Settings for history back after it closes", async () => {
     const otherThreadPath = "/environment-one/thread-two";
     await using screen = await render(<ReturnControls />, { router: THREAD_PATH });

@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
-import { GitCommitHorizontalIcon } from "lucide-react";
+import { GitCommitHorizontalIcon, LayoutGridIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { T, useGT } from "gt-react";
 import { memo } from "react";
@@ -252,6 +252,10 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     closeMobileSidebar();
     void navigate({ to: "/issues", search: readIssueListPreferences() });
   };
+  const handleBerthsClick = () => {
+    closeMobileSidebar();
+    void navigate({ to: "/berths" });
+  };
   const handleSettingsClick = () => {
     closeMobileSidebar();
     void navigate({ to: "/settings" });
@@ -301,6 +305,8 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               onClick={handleIssuesClick}
             />
           ) : null}
+          {/* oxlint-disable-next-line t3code/no-untranslated-copy -- fork-only UI copy */}
+          <SidebarUtilityItem icon={<LayoutGridIcon />} label="泊位" onClick={handleBerthsClick} />
           <SidebarUtilityItem
             icon={<ChartNoAxesColumnIcon />}
             label={gt("Usage")}
