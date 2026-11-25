@@ -1,304 +1,268 @@
 /* oxlint-disable t3code/no-untranslated-copy -- fork-only UI copy */
 import type { EnvironmentId } from "@t3tools/contracts";
-import { PlusIcon } from "lucide-react";
+import { ArrowRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
+import type { PendingThreadStatus } from "../pluginHost/pendingThreads";
 import {
-  BERTH_COUNT,
-  PRIMARY_BERTH_COUNT,
-  effectiveSeverity,
+  ETECH_SLOT_COUNT,
+  effectiveStatus,
   enterBerth,
+  formatSubagentSummary,
+  isNeedsAttention,
+  isStrictEtechCandidate,
   leaveBerth,
-  partitionBerthThreads,
+  rankCandidates,
   reconcileBerths,
+  slotCode,
   type BerthThread,
   type BerthView,
   type Berths,
-  type EtechOverrides,
-  type VisualSeverity,
 } from "./berths.logic";
-import { readBerths, readEtechOverrides, writeBerths, writeEtechOverrides } from "./berthsStorage";
-import {
-  STATUS_LABEL,
-  StatusBeacon,
-  StatusDot,
-  SubagentDotCluster,
-  TopologyStrip,
-} from "./BerthsTopology";
+import { readBerths, writeBerths } from "./berthsStorage";
 
 const SLOTS = [0, 1, 2, 3, 4, 5] as const;
 
-const CARD_TONE: Readonly<Record<VisualSeverity, string>> = {
-  critical: "border-destructive/80 border-l-4 bg-card",
-  attention: "border-warning/80 border-l-4 bg-card",
-  active: "border-info/75 border-l-4 bg-card",
-  quiet: "border-border/70 bg-card/55 opacity-75",
+const STATUS_LABEL: Readonly<Record<PendingThreadStatus, string>> = {
+  approval: "待审批",
+  input: "待回答",
+  request: "待处理",
+  failed: "失败",
+  working: "运行中",
+  waiting: "等待中",
+  done: "已完成",
 };
 
-function OpenButton({
-  thread,
-  onOpen,
-  className,
-}: {
-  thread: BerthThread;
-  onOpen: (threadId: string) => void;
-  className?: string;
-}) {
+function StatusDot({ status }: { status: PendingThreadStatus }) {
+  const tone =
+    status === "approval" || status === "failed"
+      ? "bg-destructive"
+      : status === "input" || status === "request"
+        ? "bg-warning"
+        : status === "working"
+          ? "bg-info"
+          : "bg-muted-foreground/35";
   return (
-    <button
-      type="button"
-      className={cn("min-w-0 truncate text-left outline-none hover:underline", className)}
-      onClick={() => onOpen(thread.threadId)}
-    >
-      {thread.title}
-    </button>
+    <span aria-hidden="true" className={cn("inline-block size-2 shrink-0 rounded-full", tone)} />
   );
 }
 
-function SubagentList({
-  subagents,
-  onOpen,
-}: {
-  subagents: ReadonlyArray<BerthThread>;
-  onOpen: (threadId: string) => void;
-}) {
-  if (subagents.length === 0) return null;
-  return (
-    <ul className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pr-1">
-      {subagents.map((child) => (
-        <li key={child.threadId} className="flex items-center gap-1.5 text-xs leading-5">
-          <StatusDot status={child.status} />
-          <OpenButton thread={child} onOpen={onOpen} className="flex-1" />
-          <span className="shrink-0 text-2xs text-muted-foreground">{child.model}</span>
-        </li>
-      ))}
-    </ul>
-  );
+function StatusText({ status }: { status: PendingThreadStatus }) {
+  const tone =
+    status === "approval" || status === "failed"
+      ? "font-medium text-destructive"
+      : status === "input" || status === "request"
+        ? "font-medium text-warning-foreground"
+        : "text-muted-foreground";
+  return <span className={cn("shrink-0 text-xs", tone)}>{STATUS_LABEL[status]}</span>;
 }
 
-function EtechCard({
-  thread,
-  subagents,
-  onOpen,
-  onDemote,
-}: {
-  thread: BerthThread;
-  subagents: ReadonlyArray<BerthThread>;
-  onOpen: (threadId: string) => void;
-  onDemote: () => void;
-}) {
-  const severity = effectiveSeverity(thread, subagents);
-  return (
-    <article
-      data-etech-card={thread.threadId}
-      data-severity={severity}
-      className={cn(
-        "flex h-40 min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border p-2.5",
-        CARD_TONE[severity],
-      )}
-    >
-      <div className="flex items-center gap-2">
-        <StatusBeacon severity={severity} label={STATUS_LABEL[thread.status]} />
-        <OpenButton thread={thread} onOpen={onOpen} className="flex-1 text-sm font-semibold" />
-        <Button size="xs" variant="ghost-muted" onClick={onDemote}>
-          移出优先
-        </Button>
-      </div>
-      <p className="truncate text-xs text-muted-foreground">
-        {STATUS_LABEL[thread.status]} · {thread.model}
-        {thread.branch === null ? "" : ` · ${thread.branch}`}
-      </p>
-      <TopologyStrip parentStatus={thread.status} subagents={subagents} etech onOpen={onOpen} />
-      <SubagentList subagents={subagents} onOpen={onOpen} />
-      {subagents.length === 0 && severity === "active" ? (
-        <div className="mt-auto h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-          <div className="h-full w-3/5 rounded-full bg-info" />
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-function BerthCard({
+function FocusSlotRow({
   slot,
   thread,
   subagents,
   waiting,
+  expanded,
+  dimmed,
   choosing,
-  offBerth,
-  onOpen,
-  onLeave,
-  onPromoteEtech,
+  candidates,
+  onToggleExpand,
   onToggleChoose,
+  onOpen,
   onEnter,
+  onLeave,
 }: {
   slot: number;
   thread: BerthThread | null;
   subagents: ReadonlyArray<BerthThread>;
   waiting: boolean;
+  expanded: boolean;
+  dimmed: boolean;
   choosing: boolean;
-  offBerth: ReadonlyArray<BerthThread>;
-  onOpen: (threadId: string) => void;
-  onLeave: () => void;
-  onPromoteEtech: (threadId: string) => void;
+  candidates: ReadonlyArray<BerthThread>;
+  onToggleExpand: () => void;
   onToggleChoose: () => void;
+  onOpen: (threadId: string) => void;
   onEnter: (threadId: string) => void;
+  onLeave: () => void;
 }) {
-  const tag = `泊位 ${slot + 1}`;
-  const role = slot < PRIMARY_BERTH_COUNT ? "主力" : "副位";
+  const code = slotCode(slot);
+  const isEtech = slot < ETECH_SLOT_COUNT;
+  const label = `席位 ${code}`;
 
   if (thread === null) {
     return (
       <section
-        aria-label={tag}
+        aria-label={label}
         data-berth={slot + 1}
+        data-slot-code={code}
         data-empty
-        className="flex h-44 min-w-0 flex-col gap-2 overflow-hidden rounded-lg border border-dashed border-border/80 p-3"
+        className={cn("transition-opacity", dimmed && !choosing && "opacity-35")}
       >
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">
-            {tag} · {waiting ? "读取中" : "空闲"} · {role}
-          </p>
-          {choosing ? (
-            <Button size="xs" variant="ghost-muted" onClick={onToggleChoose}>
-              取消
-            </Button>
-          ) : null}
-        </div>
-        {waiting ? null : choosing ? (
-          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-            {offBerth.length === 0 ? (
-              <p className="text-xs text-muted-foreground">没有可入坞的港外线程。</p>
-            ) : (
-              offBerth.map((candidate) => (
-                <button
-                  key={candidate.threadId}
-                  type="button"
-                  className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent"
-                  onClick={() => onEnter(candidate.threadId)}
+        {choosing ? (
+          <div className="flex flex-col gap-2 bg-card/70 px-3 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <span
+                  className={cn(
+                    "w-7 shrink-0 font-mono text-xs",
+                    isEtech ? "font-semibold text-warning-foreground" : "text-muted-foreground",
+                  )}
                 >
-                  <StatusDot status={candidate.status} />
-                  <span className="min-w-0 flex-1 truncate">{candidate.title}</span>
-                </button>
-              ))
+                  {code}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {isEtech ? "选择一条 ETECH 线程钉入此席位" : "选择一条线程钉入此席位"}
+                </span>
+              </div>
+              <Button size="xs" variant="ghost-muted" onClick={onToggleChoose}>
+                取消
+              </Button>
+            </div>
+            {candidates.length === 0 ? (
+              <p className="pl-10 text-xs text-muted-foreground">暂无可钉入的活跃线程。</p>
+            ) : (
+              <ul className="flex max-h-48 flex-col gap-0.5 overflow-y-auto pl-9">
+                {candidates.map((candidate) => (
+                  <li key={candidate.threadId}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+                      onClick={() => onEnter(candidate.threadId)}
+                    >
+                      <StatusDot status={candidate.status} />
+                      <span className="min-w-0 flex-1 truncate">{candidate.displayTitle}</span>
+                      {isEtech && isStrictEtechCandidate(candidate) ? (
+                        <span className="shrink-0 font-mono text-2xs text-warning-foreground">
+                          ETECH
+                        </span>
+                      ) : null}
+                      <StatusText status={candidate.status} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         ) : (
-          <div className="flex flex-1 items-center justify-center">
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={offBerth.length === 0}
-              onClick={onToggleChoose}
+          <button
+            type="button"
+            disabled={waiting}
+            onClick={onToggleChoose}
+            className="flex w-full items-center gap-3 px-3 py-3 text-left text-xs text-muted-foreground/70 outline-none hover:bg-accent/40 hover:text-foreground disabled:cursor-default disabled:hover:bg-transparent"
+          >
+            <span
+              className={cn(
+                "w-7 shrink-0 font-mono",
+                isEtech ? "font-semibold text-warning-foreground/80" : "text-muted-foreground/60",
+              )}
             >
-              <PlusIcon />
-              <span>{offBerth.length === 0 ? "暂无港外线程" : "选线程入坞"}</span>
-            </Button>
-          </div>
+              {code}
+            </span>
+            <span className="flex-1 truncate">
+              {waiting ? "读取中…" : isEtech ? "空席 · ETECH 优先位" : "空席"}
+            </span>
+            {waiting ? null : (
+              <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground/70">
+                <PlusIcon className="size-3" />
+                <span>钉入</span>
+              </span>
+            )}
+          </button>
         )}
       </section>
     );
   }
 
-  const severity = effectiveSeverity(thread, subagents);
+  const status = effectiveStatus(thread, subagents);
+  const subSummary = formatSubagentSummary(subagents);
+  const urgent = isNeedsAttention(status);
+
   return (
     <section
-      aria-label={tag}
+      aria-label={label}
       data-berth={slot + 1}
-      data-severity={severity}
+      data-slot-code={code}
+      data-expanded={expanded ? "true" : undefined}
       className={cn(
-        "flex h-44 min-w-0 flex-col gap-1 overflow-hidden rounded-lg border p-2.5",
-        CARD_TONE[severity],
+        "transition-opacity",
+        expanded && "bg-card/85",
+        dimmed && "opacity-40 hover:opacity-80",
       )}
     >
-      <div className="flex items-center gap-1.5">
-        <StatusBeacon severity={severity} label={STATUS_LABEL[thread.status]} />
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {tag} · {role}
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={onToggleExpand}
+        onDoubleClick={() => onOpen(thread.threadId)}
+        className="flex w-full items-center gap-3 px-3 py-3.5 text-left outline-none hover:bg-accent/35"
+      >
+        <span
+          className={cn(
+            "w-7 shrink-0 font-mono text-xs",
+            isEtech ? "font-semibold text-warning-foreground" : "text-muted-foreground",
+          )}
+        >
+          {code}
         </span>
-        <div className="min-w-0 flex-1" />
-        <Button size="xs" variant="ghost-muted" onClick={() => onPromoteEtech(thread.threadId)}>
-          置顶 ETECH
-        </Button>
-        <Button size="xs" variant="ghost-muted" onClick={onLeave}>
-          移出
-        </Button>
-      </div>
-      <OpenButton thread={thread} onOpen={onOpen} className="text-sm font-medium" />
-      <p className="truncate text-xs text-muted-foreground">
-        {STATUS_LABEL[thread.status]} · {thread.model}
-        {thread.branch === null ? "" : ` · ${thread.branch}`}
-      </p>
-      <TopologyStrip parentStatus={thread.status} subagents={subagents} onOpen={onOpen} />
-      <SubagentList subagents={subagents} onOpen={onOpen} />
-      {subagents.length === 0 && severity === "active" ? (
-        <div className="mt-auto h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-          <div className="h-full w-3/5 rounded-full bg-info" />
+        <StatusDot status={status} />
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            isEtech ? "text-base font-medium" : "text-sm font-medium",
+            !urgent && status === "done" && "text-muted-foreground",
+          )}
+        >
+          {thread.displayTitle}
+        </span>
+        {subSummary ? (
+          <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+            {subSummary}
+          </span>
+        ) : null}
+        <StatusText status={status} />
+      </button>
+
+      {expanded ? (
+        <div className="flex flex-col gap-2.5 pb-3.5 pr-3 pl-13">
+          {thread.snippet ? (
+            <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+              {thread.snippet}
+            </p>
+          ) : null}
+
+          {subagents.length > 0 ? (
+            <ul className="flex max-h-36 flex-col gap-1 overflow-y-auto border-l-2 border-border/70 pl-3">
+              {subagents.map((child) => (
+                <li key={child.threadId}>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(child.threadId)}
+                    className="flex w-full items-center gap-2 rounded py-0.5 text-left text-xs hover:underline"
+                  >
+                    <StatusDot status={child.status} />
+                    <span className="min-w-0 flex-1 truncate">{child.displayTitle}</span>
+                    <StatusText status={child.status} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          <div className="flex items-center justify-between gap-2 pt-0.5">
+            <Button size="xs" variant="outline" onClick={() => onOpen(thread.threadId)}>
+              <span>打开处理</span>
+              <ArrowRightIcon />
+            </Button>
+            <Button size="xs" variant="ghost-muted" onClick={onLeave}>
+              移出
+            </Button>
+          </div>
         </div>
       ) : null}
     </section>
-  );
-}
-
-function OffBerthRow({
-  thread,
-  subagents,
-  hasEmpty,
-  picking,
-  onOpen,
-  onEnter,
-  onPick,
-  onPromoteEtech,
-}: {
-  thread: BerthThread;
-  subagents: ReadonlyArray<BerthThread>;
-  hasEmpty: boolean;
-  picking: boolean;
-  onOpen: (threadId: string) => void;
-  onEnter: (threadId: string, slot?: number) => void;
-  onPick: () => void;
-  onPromoteEtech?: () => void;
-}) {
-  return (
-    <li className="flex flex-col gap-1">
-      <div className="flex items-center gap-2 text-sm">
-        <StatusDot status={thread.status} />
-        <OpenButton thread={thread} onOpen={onOpen} className="flex-1" />
-        <SubagentDotCluster subagents={subagents} />
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {STATUS_LABEL[thread.status]}
-        </span>
-        {onPromoteEtech ? (
-          <Button size="xs" variant="ghost-muted" onClick={onPromoteEtech}>
-            标 ETECH
-          </Button>
-        ) : null}
-        <Button
-          size="xs"
-          variant="outline"
-          onClick={hasEmpty ? () => onEnter(thread.threadId) : onPick}
-        >
-          入泊位
-        </Button>
-      </div>
-      {picking ? (
-        <div className="flex items-center gap-1 pl-4">
-          {SLOTS.map((slot) => (
-            <Button
-              key={slot}
-              size="xs"
-              variant="ghost-muted"
-              aria-label={`放入泊位 ${slot + 1}`}
-              onClick={() => onEnter(thread.threadId, slot)}
-            >
-              {slot + 1}
-            </Button>
-          ))}
-        </div>
-      ) : null}
-    </li>
   );
 }
 
@@ -307,176 +271,186 @@ export function BerthsBoard({
   view,
   ready,
   onOpen,
+  mountFamilies,
 }: {
   environmentId: EnvironmentId;
   view: BerthView;
   ready: boolean;
   onOpen: (threadId: string) => void;
+  mountFamilies?: (threadIds: ReadonlyArray<string>) => () => void;
 }) {
   const [stored, setStored] = useState(() => readBerths(environmentId));
-  const [etechOverrides, setEtechOverrides] = useState<EtechOverrides>(() =>
-    readEtechOverrides(environmentId),
-  );
-  const [picking, setPicking] = useState<string | null>(null);
+  const [expandedSlot, setExpandedSlot] = useState<number | null>(null);
   const [choosingSlot, setChoosingSlot] = useState<number | null>(null);
-  const [scheduledOpen, setScheduledOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState<"unseated" | "scheduled" | null>(null);
 
-  const { etech, personal } = partitionBerthThreads(view.threads, view.subagents, etechOverrides);
-  const personalPool = new Map([...personal, ...view.scheduled].map((t) => [t.threadId, t]));
-  // Keep saved berths until live, and drop threads that left play or were promoted to the ETECH zone.
-  const berths: Berths = ready ? reconcileBerths(stored, new Set(personalPool.keys())) : stored;
+  const pool = new Map([...view.threads, ...view.scheduled].map((t) => [t.threadId, t]));
+  const berths: Berths = ready ? reconcileBerths(stored, new Set(pool.keys())) : stored;
   if (berths !== stored) setStored(berths);
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- saves fixed berth slots to localStorage
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- persists the 6 fixed slot ids to localStorage
   useEffect(() => writeBerths(environmentId, stored), [environmentId, stored]);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- saves manual ETECH priority overrides to localStorage
-  useEffect(
-    () => writeEtechOverrides(environmentId, etechOverrides),
-    [environmentId, etechOverrides],
-  );
+
+  const seatedIds = berths.filter((id): id is string => id !== null);
+  const seatedKey = seatedIds.join(",");
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mounts thread families for seated slots so recent failed subagents surface without server shell changes
+  useEffect(() => {
+    if (!mountFamilies || seatedKey.length === 0) return;
+    return mountFamilies(seatedKey.split(","));
+  }, [mountFamilies, seatedKey]);
 
   const commit = (next: Berths) => {
     setStored(next);
-    setPicking(null);
-    setChoosingSlot(null);
-  };
-  const setEtechFlag = (threadId: string, value: boolean) => {
-    setEtechOverrides((prev) => ({ ...prev, [threadId]: value }));
-    if (value) {
-      const idx = berths.indexOf(threadId);
-      if (idx >= 0) setStored(leaveBerth(berths, idx));
-    }
-    setPicking(null);
     setChoosingSlot(null);
   };
 
-  const seated = new Set(berths);
-  const offBerth = personal.filter((thread) => !seated.has(thread.threadId));
-  const hasEmpty = berths.includes(null);
-  const alerts = view.scheduled.filter(
-    (thread) =>
-      thread.status === "approval" ||
-      thread.status === "input" ||
-      thread.status === "request" ||
-      thread.status === "failed",
+  const seated = new Set(seatedIds);
+  const unseated = view.threads.filter((thread) => !seated.has(thread.threadId));
+  const unseatedUrgent = unseated.filter((thread) =>
+    isNeedsAttention(effectiveStatus(thread, view.subagents.get(thread.threadId) ?? [])),
+  );
+  const unseatedScheduled = view.scheduled.filter((thread) => !seated.has(thread.threadId));
+  const scheduledAlerts = unseatedScheduled.filter((thread) =>
+    isNeedsAttention(effectiveStatus(thread, view.subagents.get(thread.threadId) ?? [])),
   ).length;
+  const hasEmpty = berths.includes(null);
+
+  const activeExpanded =
+    expandedSlot !== null && berths[expandedSlot] !== null ? expandedSlot : null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {etech.length > 0 ? (
-          <span className="font-medium text-warning-foreground">ETECH 优先 {etech.length}</span>
-        ) : null}
-        <span>
-          个人泊位 {berths.filter((id) => id !== null).length}/{BERTH_COUNT}（主力{" "}
-          {berths.slice(0, PRIMARY_BERTH_COUNT).filter((id) => id !== null).length}/
-          {PRIMARY_BERTH_COUNT}）
-        </span>
-        <span className={cn(personal.length > PRIMARY_BERTH_COUNT && "text-warning-foreground")}>
-          个人活跃 {personal.length}
-        </span>
-      </div>
-
-      {etech.length > 0 ? (
-        <section
-          aria-label="ETECH 优先区"
-          className="flex flex-col gap-2 rounded-lg border-2 border-warning/70 border-l-8 bg-warning/10 p-2.5"
-        >
-          <div className="flex items-center justify-between gap-2 text-xs font-semibold text-warning-foreground">
-            <span>▲ ETECH 优先区（权重最高 · 自动置顶）</span>
-            <span>{etech.length} 条活跃</span>
-          </div>
-          <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
-            {etech.map((thread) => (
-              <EtechCard
-                key={thread.threadId}
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both px-6 py-6">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
+        <div className="flex flex-col divide-y divide-border/50 border-y border-border/50">
+          {SLOTS.map((slot) => {
+            const id = berths[slot] ?? null;
+            const thread = id === null ? null : (pool.get(id) ?? null);
+            const isChoosing = choosingSlot === slot;
+            const candidates = isChoosing
+              ? rankCandidates(unseated, view.subagents, slot < ETECH_SLOT_COUNT)
+              : [];
+            return (
+              <FocusSlotRow
+                key={slot}
+                slot={slot}
                 thread={thread}
-                subagents={view.subagents.get(thread.threadId) ?? []}
+                subagents={id === null ? [] : (view.subagents.get(id) ?? [])}
+                waiting={id !== null}
+                expanded={activeExpanded === slot}
+                dimmed={activeExpanded !== null && activeExpanded !== slot}
+                choosing={isChoosing}
+                candidates={candidates}
+                onToggleExpand={() => {
+                  setChoosingSlot(null);
+                  setExpandedSlot(activeExpanded === slot ? null : slot);
+                }}
+                onToggleChoose={() => {
+                  setExpandedSlot(null);
+                  setChoosingSlot(isChoosing ? null : slot);
+                }}
                 onOpen={onOpen}
-                onDemote={() => setEtechFlag(thread.threadId, false)}
+                onEnter={(threadId) => {
+                  commit(enterBerth(berths, threadId, slot));
+                  setExpandedSlot(slot);
+                }}
+                onLeave={() => {
+                  commit(leaveBerth(berths, slot));
+                  if (activeExpanded === slot) setExpandedSlot(null);
+                }}
               />
-            ))}
-          </div>
-        </section>
-      ) : null}
+            );
+          })}
+        </div>
 
-      <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
-        {SLOTS.map((slot) => {
-          const id = berths[slot] ?? null;
-          const thread = id === null ? null : (personalPool.get(id) ?? null);
-          return (
-            <BerthCard
-              key={slot}
-              slot={slot}
-              thread={thread}
-              subagents={id === null ? [] : (view.subagents.get(id) ?? [])}
-              waiting={id !== null}
-              choosing={choosingSlot === slot}
-              offBerth={offBerth}
-              onOpen={onOpen}
-              onLeave={() => commit(leaveBerth(berths, slot))}
-              onPromoteEtech={(threadId) => setEtechFlag(threadId, true)}
-              onToggleChoose={() => setChoosingSlot(choosingSlot === slot ? null : slot)}
-              onEnter={(threadId) => commit(enterBerth(berths, threadId, slot))}
-            />
-          );
-        })}
-      </div>
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          {unseated.length > 0 ? (
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              aria-expanded={drawerOpen === "unseated"}
+              onClick={() => setDrawerOpen(drawerOpen === "unseated" ? null : "unseated")}
+            >
+              未钉线程（{unseated.length}）
+              {unseatedUrgent.length > 0 ? ` · ${unseatedUrgent.length} 条待处理` : ""}
+            </Button>
+          ) : null}
+          {unseatedScheduled.length > 0 ? (
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              aria-expanded={drawerOpen === "scheduled"}
+              onClick={() => setDrawerOpen(drawerOpen === "scheduled" ? null : "scheduled")}
+            >
+              定时任务（{unseatedScheduled.length}）
+              {scheduledAlerts > 0 ? ` · ${scheduledAlerts} 条待处理` : ""}
+            </Button>
+          ) : null}
+        </div>
 
-      <section aria-label="港外待入坞" className="flex flex-col gap-1.5">
-        <h2 className="text-xs font-medium text-muted-foreground">
-          港外待入坞（{offBerth.length}）
-        </h2>
-        {offBerth.length === 0 ? (
-          <p className="text-xs text-muted-foreground">没有港外线程。</p>
-        ) : (
-          <ul className="flex flex-col gap-1.5">
-            {offBerth.map((thread) => (
-              <OffBerthRow
-                key={thread.threadId}
-                thread={thread}
-                subagents={view.subagents.get(thread.threadId) ?? []}
-                hasEmpty={hasEmpty}
-                picking={picking === thread.threadId}
-                onOpen={onOpen}
-                onEnter={(threadId, slot) => commit(enterBerth(berths, threadId, slot))}
-                onPick={() => setPicking(picking === thread.threadId ? null : thread.threadId)}
-                onPromoteEtech={() => setEtechFlag(thread.threadId, true)}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section aria-label="定时任务线程" className="flex flex-col gap-1.5">
-        <Button
-          size="xs"
-          variant="ghost-muted"
-          className="w-fit"
-          aria-expanded={scheduledOpen}
-          onClick={() => setScheduledOpen(!scheduledOpen)}
-        >
-          定时任务线程（{view.scheduled.length}）{alerts > 0 ? ` · ${alerts} 条需要处理` : ""}
-        </Button>
-        {scheduledOpen ? (
-          <ul className="flex flex-col gap-1.5">
-            {view.scheduled
-              .filter((thread) => !seated.has(thread.threadId))
-              .map((thread) => (
-                <OffBerthRow
-                  key={thread.threadId}
-                  thread={thread}
-                  subagents={view.subagents.get(thread.threadId) ?? []}
-                  hasEmpty={hasEmpty}
-                  picking={picking === thread.threadId}
-                  onOpen={onOpen}
-                  onEnter={(threadId, slot) => commit(enterBerth(berths, threadId, slot))}
-                  onPick={() => setPicking(picking === thread.threadId ? null : thread.threadId)}
-                />
-              ))}
-          </ul>
+        {drawerOpen === "unseated" && unseated.length > 0 ? (
+          <section aria-label="未钉线程" className="flex flex-col gap-1">
+            <ul className="flex flex-col divide-y divide-border/40">
+              {rankCandidates(unseated, view.subagents, false).map((thread) => {
+                const status = effectiveStatus(thread, view.subagents.get(thread.threadId) ?? []);
+                return (
+                  <li key={thread.threadId} className="flex items-center gap-2.5 py-2 text-xs">
+                    <StatusDot status={status} />
+                    <button
+                      type="button"
+                      onClick={() => onOpen(thread.threadId)}
+                      className="min-w-0 flex-1 truncate text-left hover:underline"
+                    >
+                      {thread.displayTitle}
+                    </button>
+                    <StatusText status={status} />
+                    {hasEmpty ? (
+                      <Button
+                        size="xs"
+                        variant="ghost-muted"
+                        onClick={() => commit(enterBerth(berths, thread.threadId))}
+                      >
+                        钉入空位
+                      </Button>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
         ) : null}
-      </section>
+
+        {drawerOpen === "scheduled" && unseatedScheduled.length > 0 ? (
+          <section aria-label="定时任务" className="flex flex-col gap-1">
+            <ul className="flex flex-col divide-y divide-border/40">
+              {unseatedScheduled.map((thread) => {
+                const status = effectiveStatus(thread, view.subagents.get(thread.threadId) ?? []);
+                return (
+                  <li key={thread.threadId} className="flex items-center gap-2.5 py-2 text-xs">
+                    <StatusDot status={status} />
+                    <button
+                      type="button"
+                      onClick={() => onOpen(thread.threadId)}
+                      className="min-w-0 flex-1 truncate text-left hover:underline"
+                    >
+                      {thread.displayTitle}
+                    </button>
+                    <StatusText status={status} />
+                    {hasEmpty ? (
+                      <Button
+                        size="xs"
+                        variant="ghost-muted"
+                        onClick={() => commit(enterBerth(berths, thread.threadId))}
+                      >
+                        钉入空位
+                      </Button>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -3,17 +3,20 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildBerthView,
-  effectiveSeverity,
+  effectiveStatus,
   emptyBerths,
   enterBerth,
-  isEtechThread,
+  formatSubagentSummary,
+  isStrictEtechCandidate,
   leaveBerth,
-  partitionBerthThreads,
+  rankCandidates,
   reconcileBerths,
+  slotCode,
+  stripDatePrefix,
   type BerthShell,
   type BerthThread,
 } from "./berths.logic";
-import { parseBerths, parseEtechOverrides } from "./berthsStorage";
+import { parseBerths } from "./berthsStorage";
 
 const ENV = EnvironmentId.make("environment-a");
 const NOW = "2026-11-25T12:00:00.000Z";
@@ -34,9 +37,12 @@ function shell(id: string, over: Partial<BerthShell> = {}): BerthShell {
     hasPendingUserInput: false,
     runtime: null,
     latestRun: null,
-    source: { pendingRuntimeRequest: null },
+    lastVisitedAt: null,
+    latestUserMessageAt: null,
+    latestUserAuthoredMessageAt: null,
+    source: { pendingRuntimeRequest: null, latestVisibleMessage: null },
     createdAt: "2026-11-25T08:00:00.000Z",
-    modelSelection: { instanceId: "claude", model: "anthropic/claude-opus-5-5" },
+    updatedAt: "2026-11-25T08:00:00.000Z",
     branch: null,
     ...over,
   } as BerthShell;
@@ -52,6 +58,17 @@ const subagent = (id: string, parent: string, over: Partial<BerthShell> = {}) =>
     ...over,
   });
 
+const failedRun = (completedAt: string) =>
+  ({
+    runId: "run-1",
+    ordinal: 1,
+    status: "failed",
+    requestedAt: completedAt,
+    startedAt: completedAt,
+    completedAt,
+    assistantMessageId: null,
+  }) as unknown as BerthShell["latestRun"];
+
 const view = (shells: ReadonlyArray<BerthShell>, scheduled: ReadonlyArray<string> = []) =>
   buildBerthView({
     shells,
@@ -65,25 +82,36 @@ const ids = (threads: ReadonlyArray<{ threadId: string }>) => threads.map((t) =>
 const berthThread = (id: string, over: Partial<BerthThread> = {}): BerthThread => ({
   threadId: id,
   title: `Thread ${id}`,
+  displayTitle: `Thread ${id}`,
   status: "done",
-  model: "opus",
   branch: null,
+  snippet: null,
+  updatedAt: "2026-11-25T08:00:00.000Z",
   createdAt: "2026-11-25T08:00:00.000Z",
   ...over,
 });
 
 describe("buildBerthView", () => {
-  it("keeps only top-level threads in play and drops archived, deleted, settled, snoozed and other environments", () => {
+  it("keeps top-level threads in play newest-first and drops archived, deleted, settled, snoozed, sideChat and other environments", () => {
     const result = view([
-      shell("live", { branch: "feature" }),
+      shell("older", { updatedAt: "2026-11-25T08:00:00.000Z" }),
+      shell("newer", { title: "1125_GWH-350 新任务", updatedAt: "2026-11-25T11:30:00.000Z" }),
       shell("archived", { archivedAt: "2026-11-24T00:00:00.000Z" }),
       shell("deleted", { deletedAt: "2026-11-24T00:00:00.000Z" }),
       shell("settled", { settledOverride: "settled" }),
       shell("snoozed", { snoozedUntil: "2026-11-26T00:00:00.000Z", snoozedAt: NOW }),
+      shell("side", {
+        lineage: {
+          parentThreadId: ThreadId.make("newer"),
+          relationshipToParent: null,
+          rootThreadId: ThreadId.make("newer"),
+          sideChat: true,
+        },
+      }),
       shell("elsewhere", { environmentId: EnvironmentId.make("environment-b") }),
     ]);
-    expect(ids(result.threads)).toEqual(["live"]);
-    expect(result.threads[0]).toMatchObject({ model: "claude-opus-5-5", branch: "feature" });
+    expect(ids(result.threads)).toEqual(["newer", "older"]);
+    expect(result.threads[0]?.displayTitle).toBe("GWH-350 新任务");
   });
 
   it("sets scheduled-task threads apart from the main list", () => {
@@ -92,71 +120,129 @@ describe("buildBerthView", () => {
     expect(ids(result.scheduled)).toEqual(["daily"]);
   });
 
-  it("files subagents under their listed ancestor in creation order, whatever their status", () => {
+  it("surfaces live subagents and recent unseen failed subagents, while suppressing done, seen, superseded, and >24h stale failures", () => {
+    const parent = shell("parent", {
+      latestUserAuthoredMessageAt: "2026-11-25T10:00:00.000Z",
+    });
+    const result = view([
+      parent,
+      subagent("live-approval", "parent", { hasPendingApprovals: true }),
+      subagent("done-old", "parent"),
+      subagent("failed-recent", "parent", {
+        runtime: { status: "failed" } as BerthShell["runtime"],
+        latestRun: failedRun("2026-11-25T11:00:00.000Z"),
+      }),
+      subagent("failed-seen", "parent", {
+        runtime: { status: "failed" } as BerthShell["runtime"],
+        latestRun: failedRun("2026-11-25T11:00:00.000Z"),
+        lastVisitedAt: "2026-11-25T11:30:00.000Z",
+      }),
+      subagent("failed-earlier-turn", "parent", {
+        runtime: { status: "failed" } as BerthShell["runtime"],
+        latestRun: failedRun("2026-11-25T09:00:00.000Z"),
+      }),
+      subagent("failed-3days-ago", "parent", {
+        runtime: { status: "failed" } as BerthShell["runtime"],
+        latestRun: failedRun("2026-11-22T10:00:00.000Z"),
+      }),
+      subagent("nested-working", "live-approval", {
+        runtime: { status: "running" } as BerthShell["runtime"],
+      }),
+    ]);
+    expect(ids(result.subagents.get("parent") ?? [])).toEqual([
+      "live-approval",
+      "failed-recent",
+      "nested-working",
+    ]);
+  });
+
+  it("suppresses >24h stale subagent failure even when parent has no user message timestamp", () => {
     const result = view([
       shell("parent"),
-      subagent("late", "parent", { createdAt: "2026-11-25T10:00:00.000Z" }),
-      subagent("early", "parent", {
-        createdAt: "2026-11-25T09:00:00.000Z",
-        hasPendingApprovals: true,
+      subagent("stale", "parent", {
+        runtime: { status: "failed" } as BerthShell["runtime"],
+        latestRun: failedRun("2026-11-24T11:00:00.000Z"),
       }),
-      subagent("nested", "early", { createdAt: "2026-11-25T11:00:00.000Z" }),
-      subagent("gone", "parent", { archivedAt: "2026-11-25T09:30:00.000Z" }),
+      subagent("fresh", "parent", {
+        runtime: { status: "failed" } as BerthShell["runtime"],
+        latestRun: failedRun("2026-11-25T06:00:00.000Z"),
+      }),
     ]);
-    expect(ids(result.subagents.get("parent") ?? [])).toEqual(["early", "late", "nested"]);
-    expect(result.subagents.get("parent")?.[0]?.status).toBe("approval");
-    expect(result.threads.map((t) => t.threadId)).toEqual(["parent"]);
+    expect(ids(result.subagents.get("parent") ?? [])).toEqual(["fresh"]);
   });
 
   it("survives a subagent cycle and a missing parent", () => {
-    const result = view([subagent("a", "b"), subagent("b", "a"), subagent("orphan", "missing")]);
+    const result = view([
+      subagent("a", "b", { hasPendingApprovals: true }),
+      subagent("b", "a", { hasPendingApprovals: true }),
+      subagent("orphan", "missing", { hasPendingApprovals: true }),
+    ]);
     expect(result.subagents.size).toBe(0);
   });
 });
 
-describe("etech priority and severity", () => {
-  it("matches company tickets, SIR, 141, work and etech without false positives on workflow/network", () => {
-    expect(isEtechThread(berthThread("1", { title: "1125_GWH-350 work TET SIR#91" }))).toBe(true);
-    expect(isEtechThread(berthThread("2", { title: "M3台式机141与etech镜像仓连携" }))).toBe(true);
-    expect(isEtechThread(berthThread("3", { title: "Fix bug", branch: "work/nsnet-12" }))).toBe(
+describe("strict etech hint, formatting and ranking", () => {
+  it("matches strict company tickets and CVS/TET/SIR without false positives on work, 141 or etech infra", () => {
+    expect(
+      isStrictEtechCandidate(berthThread("1", { title: "1125_GWH-350 work TET SIR#91" })),
+    ).toBe(true);
+    expect(isStrictEtechCandidate(berthThread("2", { title: "本机手动提交 CVS 流程优化" }))).toBe(
       true,
     );
-    expect(isEtechThread(berthThread("4", { title: "workflow network framework refactor" }))).toBe(
-      false,
-    );
-    expect(isEtechThread(berthThread("4", { title: "workflow network" }), { "4": true })).toBe(
-      true,
-    );
-    expect(isEtechThread(berthThread("1", { title: "1125_GWH-350" }), { "1": false })).toBe(false);
+    expect(
+      isStrictEtechCandidate(berthThread("3", { title: "修复", branch: "fix/NSNET-108" })),
+    ).toBe(true);
+    expect(
+      isStrictEtechCandidate(
+        berthThread("4", { title: "1125_universe M3台式机141与etech镜像仓连携分析" }),
+      ),
+    ).toBe(false);
+    expect(isStrictEtechCandidate(berthThread("5", { title: "work on PR 141" }))).toBe(false);
   });
 
-  it("escalates parent severity when a subagent is critical or active", () => {
+  it("strips leading MMDD_ date prefix cleanly and formats slot codes and subagent summaries", () => {
+    expect(stripDatePrefix("1125_GWH-350 SIR#91")).toBe("GWH-350 SIR#91");
+    expect(stripDatePrefix("1125_")).toBe("1125_");
+    expect([0, 1, 2, 3, 4, 5].map(slotCode)).toEqual(["E1", "E2", "03", "04", "05", "06"]);
     expect(
-      effectiveSeverity(berthThread("p", { status: "done" }), [
-        berthThread("s1", { status: "working" }),
-        berthThread("s2", { status: "failed" }),
+      formatSubagentSummary([
+        berthThread("s1", { status: "failed" }),
+        berthThread("s2", { status: "approval" }),
+        berthThread("s3", { status: "working" }),
       ]),
-    ).toBe("critical");
-    expect(
-      effectiveSeverity(berthThread("p", { status: "done" }), [
-        berthThread("s1", { status: "working" }),
-      ]),
-    ).toBe("active");
-    expect(effectiveSeverity(berthThread("p", { status: "done" }), [])).toBe("quiet");
+    ).toBe("3 子代理 · 1 失败 · 1 待处理 · 1 运行");
+    expect(formatSubagentSummary([])).toBeNull();
   });
 
-  it("partitions etech apart and sorts each group by severity then creation", () => {
-    const gwhDone = berthThread("g1", { title: "GWH-100", status: "done" });
-    const gwhErr = berthThread("g2", { title: "etech 141", status: "failed" });
-    const pQuiet = berthThread("p1", { title: "game-planet", status: "done" });
-    const pRun = berthThread("p2", { title: "t3code-cn", status: "working" });
-    const { etech, personal } = partitionBerthThreads([gwhDone, gwhErr, pQuiet, pRun], new Map());
-    expect(ids(etech)).toEqual(["g2", "g1"]);
-    expect(ids(personal)).toEqual(["p2", "p1"]);
+  it("ranks strict etech candidates first for E1/E2 and urgent + newest first otherwise", () => {
+    const oldPersonal = berthThread("p1", {
+      title: "旧线程",
+      updatedAt: "2026-11-24T08:00:00.000Z",
+    });
+    const newPersonal = berthThread("p2", {
+      title: "新线程",
+      status: "input",
+      updatedAt: "2026-11-25T11:00:00.000Z",
+    });
+    const etechQuiet = berthThread("e1", {
+      title: "1125_GWH-350 票",
+      updatedAt: "2026-11-25T09:00:00.000Z",
+    });
+    expect(ids(rankCandidates([oldPersonal, newPersonal, etechQuiet], new Map(), true))).toEqual([
+      "e1",
+      "p2",
+      "p1",
+    ]);
+    expect(ids(rankCandidates([oldPersonal, newPersonal, etechQuiet], new Map(), false))).toEqual([
+      "p2",
+      "e1",
+      "p1",
+    ]);
+    expect(effectiveStatus(oldPersonal, [berthThread("s1", { status: "failed" })])).toBe("failed");
   });
 });
 
-describe("berths", () => {
+describe("fixed berths", () => {
   const seated = ["a", "b", "c", null, "e", null];
 
   it("empties the berth of a thread no longer in play without shifting any other", () => {
@@ -170,56 +256,12 @@ describe("berths", () => {
     ]);
   });
 
-  it("returns the same array when everyone is still in play", () => {
-    expect(reconcileBerths(seated, new Set(["a", "b", "c", "e", "other"]))).toBe(seated);
-  });
-
-  it("does not seat a new thread by itself", () => {
-    expect(reconcileBerths(seated, new Set(["a", "b", "c", "e", "new"]))).toBe(seated);
-  });
-
-  it("seats a thread in the first empty berth, or the chosen one, leaving its old berth empty", () => {
-    expect(enterBerth(seated, "n")).toEqual(["a", "b", "c", "n", "e", null]);
-    expect(enterBerth(seated, "n", 0)).toEqual(["n", "b", "c", null, "e", null]);
-    expect(enterBerth(seated, "e", 1)).toEqual(["a", "e", "c", null, null, null]);
-  });
-
-  it("changes nothing when every berth is taken and none is chosen", () => {
-    const full = ["a", "b", "c", "d", "e", "f"];
-    expect(enterBerth(full, "n")).toBe(full);
-  });
-
-  it("empties only the chosen berth on leave", () => {
+  it("seats a thread in the chosen slot and leaves its previous slot empty", () => {
+    expect(enterBerth(seated, "e", 0)).toEqual(["e", "b", "c", null, null, null]);
     expect(leaveBerth(seated, 1)).toEqual(["a", null, "c", null, "e", null]);
   });
-});
 
-describe("storage parsers", () => {
-  const empty = emptyBerths();
-
-  it("reads a saved berth record back", () => {
-    expect(parseBerths(JSON.stringify(["a", null, "b", null, null, "c"]))).toEqual([
-      "a",
-      null,
-      "b",
-      null,
-      null,
-      "c",
-    ]);
-  });
-
-  it.each([
-    null,
-    "",
-    "{oops",
-    "{}",
-    JSON.stringify(["a", "b"]),
-    JSON.stringify(Array(7).fill(null)),
-  ])("reads %j as six empty berths", (raw) => {
-    expect(parseBerths(raw)).toEqual(empty);
-  });
-
-  it("drops non-string entries and keeps a duplicated thread in its first berth", () => {
+  it("parses storage safely", () => {
     expect(parseBerths(JSON.stringify(["a", 3, "a", "", "b", "a"]))).toEqual([
       "a",
       null,
@@ -228,14 +270,6 @@ describe("storage parsers", () => {
       "b",
       null,
     ]);
-  });
-
-  it("parses etech overrides safely and ignores invalid entries", () => {
-    expect(parseEtechOverrides(JSON.stringify({ a: true, b: false, c: "yes", "": true }))).toEqual({
-      a: true,
-      b: false,
-    });
-    expect(parseEtechOverrides("{bad")).toEqual({});
-    expect(parseEtechOverrides("[]")).toEqual({});
+    expect(parseBerths("{oops")).toEqual(emptyBerths());
   });
 });

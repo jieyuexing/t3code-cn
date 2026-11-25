@@ -18,11 +18,12 @@ import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../components/WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
-import { useEnvironmentQuery } from "../state/query";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { useEnvironmentShellStatus } from "../state/shell";
-import { environmentThreadShells } from "../state/threads";
+import { environmentThreadShells, threadFamilies } from "../state/threads";
 import { isThreadRouteSnapshotAuthoritative } from "../threadRoutes";
 import { buildBerthView } from "./berths.logic";
 import { BerthsBoard } from "./BerthsBoard";
@@ -75,9 +76,9 @@ export function BerthsPage() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <div className="flex min-h-0 flex-1 flex-col bg-background">
         <WorkspacePageHeader electron={isElectron} className="relative bg-background">
-          <WorkspaceBreadcrumb ariaLabel="工作泊位">
+          <WorkspaceBreadcrumb ariaLabel="专注清单">
             <WorkspaceBreadcrumbItem current>
-              <h1 className="truncate">工作泊位（6 格）</h1>
+              <h1 className="truncate">专注清单（6 席）</h1>
             </WorkspaceBreadcrumbItem>
           </WorkspaceBreadcrumb>
           <div className="min-w-0 flex-1" />
@@ -109,6 +110,14 @@ export function BerthsPage() {
             environmentId={environmentId}
             view={view}
             ready={ready}
+            mountFamilies={(threadIds) => {
+              const releases = threadIds.map((id) =>
+                threadFamilies.mount(appAtomRegistry, environmentId, ThreadId.make(id)),
+              );
+              return () => {
+                for (const release of releases) release();
+              };
+            }}
             onOpen={(threadId) =>
               void navigate({
                 to: "/$environmentId/$threadId",

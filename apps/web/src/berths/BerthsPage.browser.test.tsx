@@ -10,6 +10,8 @@ import { readBerths, writeBerths } from "./berthsStorage";
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
+  mountRelease: vi.fn(),
+  mountFamily: vi.fn(),
   shells: [] as ReadonlyArray<unknown>,
   tasks: [] as ReadonlyArray<{ threadId: string | null }>,
 }));
@@ -24,6 +26,13 @@ vi.mock("../state/threads", async (importOriginal) => {
   type MockShell = { readonly environmentId: string; readonly id: string };
   return {
     ...actual,
+    threadFamilies: {
+      ...actual.threadFamilies,
+      mount: (...args: ReadonlyArray<unknown>) => {
+        mocks.mountFamily(...args);
+        return mocks.mountRelease;
+      },
+    },
     environmentThreadShells: {
       ...actual.environmentThreadShells,
       quietThreadShellsAtom: Atom.make(() => []),
@@ -69,9 +78,11 @@ const environmentId = EnvironmentId.make("environment-a");
 const thread = (id: string, over: Partial<BerthThread> = {}): BerthThread => ({
   threadId: id,
   title: `线程 ${id}`,
+  displayTitle: `线程 ${id}`,
   status: "working",
-  model: "opus",
   branch: null,
+  snippet: null,
+  updatedAt: "2026-11-25T08:00:00.000Z",
   createdAt: "2026-11-25T08:00:00.000Z",
   ...over,
 });
@@ -87,137 +98,118 @@ const board = (view: BerthView, ready = true) => (
   <BerthsBoard environmentId={environmentId} view={view} ready={ready} onOpen={mocks.navigate} />
 );
 
-const berth = (n: number) => page.getByRole("region", { name: `泊位 ${n}` });
+const slotRow = (code: string) => page.getByRole("region", { name: `席位 ${code}` });
 
 function fresh(): Disposable {
   localStorage.clear();
   mocks.navigate.mockReset();
+  mocks.mountFamily.mockReset();
+  mocks.mountRelease.mockReset();
   mocks.shells = [];
   mocks.tasks = [];
   return { [Symbol.dispose]: () => localStorage.clear() };
 }
 
-it("places etech threads in the top priority zone and keeps empty berths clean behind a picker button", async () => {
+it("renders 6 fixed rows (E1, E2, 03–06), expands one focus row at a time, and keeps empty slots clean behind a click", async () => {
   using _fresh = fresh();
-  writeBerths(environmentId, ["a", null, null, null, null, null]);
+  writeBerths(environmentId, ["e1", null, "p3", null, null, null]);
   const view = make(
     [
-      thread("etech1", { title: "1125_GWH-350 work TET SIR#91", status: "input" }),
-      thread("a", { branch: "feature/x" }),
-      thread("b"),
+      thread("e1", {
+        title: "1125_GWH-350 SIR#91",
+        displayTitle: "GWH-350 SIR#91",
+        status: "input",
+        snippet: "等待确认英文译法",
+      }),
+      thread("p3", { displayTitle: "轻量行为模型", status: "working" }),
+      thread("e2", {
+        title: "1125_NSNET-108 故障",
+        displayTitle: "NSNET-108 故障",
+        status: "failed",
+      }),
     ],
     {
       subagents: new Map([
         [
-          "a",
+          "e1",
           [
-            thread("s1", { title: "子代理一", status: "approval" }),
-            thread("s2", { title: "子代理二", status: "working" }),
-            thread("s3", { title: "子代理三", status: "failed" }),
-            thread("s4", { title: "子代理四", status: "done" }),
+            thread("s1", { displayTitle: "校对三栏成稿", status: "approval" }),
+            thread("s2", { displayTitle: "日志排查", status: "failed" }),
           ],
         ],
       ]),
     },
   );
   await using _screen = await render(board(view), { router: false });
-  const etechZone = page.getByRole("region", { name: "ETECH 优先区" });
-  await expect.element(etechZone.getByText("1125_GWH-350 work TET SIR#91")).toBeVisible();
-  for (let n = 1; n <= 6; n++) await expect.element(berth(n)).toBeVisible();
-  await expect.element(berth(1).getByText("线程 a")).toBeVisible();
-  await expect.element(berth(1).getByText("子代理一")).toBeVisible();
-  // Four subagents stay inside the fixed h-44 scrollable card container.
-  await expect.element(berth(1)).toHaveClass("h-44", "overflow-hidden");
-  await expect.element(berth(2)).toHaveClass("h-44", "overflow-hidden");
-  await expect.element(berth(1).getByRole("list")).toHaveClass("overflow-y-auto");
-  // Empty berths do not duplicate off-berth thread titles until the picker button is clicked.
-  await expect.element(berth(2).getByText("线程 b")).not.toBeInTheDocument();
-  await userEvent.click(berth(2).getByRole("button", { name: "选线程入坞" }));
-  await userEvent.click(berth(2).getByRole("button", { name: "线程 b" }));
-  await expect.element(berth(2).getByText("线程 b")).toBeVisible();
-  expect(readBerths(environmentId)).toEqual(["a", "b", null, null, null, null]);
+
+  for (const code of ["E1", "E2", "03", "04", "05", "06"]) {
+    await expect.element(slotRow(code)).toBeVisible();
+  }
+  // Collapsed by default: snippet and management buttons stay hidden until focused.
+  await expect.element(slotRow("E1").getByText("等待确认英文译法")).not.toBeInTheDocument();
+  await expect.element(slotRow("E1").getByRole("button", { name: "移出" })).not.toBeInTheDocument();
+
+  // Clicking E1 expands it in place and dims other slots.
+  await userEvent.click(slotRow("E1").getByRole("button", { name: /GWH-350 SIR#91/ }));
+  await expect.element(slotRow("E1").getByText("等待确认英文译法")).toBeVisible();
+  await expect.element(slotRow("E1").getByText("校对三栏成稿")).toBeVisible();
+  await expect.element(slotRow("03")).toHaveClass("opacity-40");
+
+  // Clicking empty E2 opens the inline picker and pins NSNET-108 in place.
+  await userEvent.click(slotRow("E2").getByRole("button", { name: /E2/ }));
+  await userEvent.click(slotRow("E2").getByRole("button", { name: /NSNET-108 故障/ }));
+  expect(readBerths(environmentId)).toEqual(["e1", "e2", "p3", null, null, null]);
 });
 
-it("seats off-berth threads in the first empty berth and leaves a berth empty without moving the others", async () => {
-  using _fresh = fresh();
-  writeBerths(environmentId, ["a", null, null, null, null, null]);
-  await using _screen = await render(board(make([thread("a"), thread("b"), thread("c")])), {
-    router: false,
-  });
-  const off = page.getByRole("region", { name: "港外待入坞" });
-  await userEvent.click(off.getByRole("button", { name: "入泊位" }).first());
-  await userEvent.click(
-    page.getByRole("region", { name: "港外待入坞" }).getByRole("button", { name: "入泊位" }),
-  );
-  expect(readBerths(environmentId)).toEqual(["a", "b", "c", null, null, null]);
-
-  await userEvent.click(berth(2).getByRole("button", { name: "移出" }));
-  await expect.element(berth(2).getByText("泊位 2 · 空闲 · 主力")).toBeVisible();
-  await expect.element(berth(1).getByText("线程 a")).toBeVisible();
-  await expect.element(berth(3).getByText("线程 c")).toBeVisible();
-  expect(readBerths(environmentId)).toEqual(["a", null, "c", null, null, null]);
-  await expect.element(off.getByText("线程 b")).toBeVisible();
-});
-
-it("empties the berth of a thread that left play in place, keeps it out when it returns, and never seats a new one", async () => {
+it("empties a removed or settled slot in place without shifting neighboring rows", async () => {
   using _fresh = fresh();
   writeBerths(environmentId, ["a", "b", "c", null, null, null]);
   const all = make([thread("a"), thread("b"), thread("c")]);
   await using screen = await render(board(all), { router: false });
-  await screen.rerender(board(make([thread("a"), thread("c"), thread("new")])));
-  await expect.element(berth(2).getByText("泊位 2 · 空闲 · 主力")).toBeVisible();
-  await expect.element(berth(1).getByText("线程 a")).toBeVisible();
-  await expect.element(berth(3).getByText("线程 c")).toBeVisible();
-  await expect.element(berth(4).getByText("泊位 4 · 空闲 · 副位")).toBeVisible();
-  await expect
-    .element(page.getByRole("region", { name: "港外待入坞" }).getByText("线程 new"))
-    .toBeVisible();
+
+  await userEvent.click(slotRow("E2").getByRole("button", { name: /线程 b/ }));
+  await userEvent.click(slotRow("E2").getByRole("button", { name: "移出" }));
   expect(readBerths(environmentId)).toEqual(["a", null, "c", null, null, null]);
+  await expect.element(slotRow("E1").getByText("线程 a")).toBeVisible();
+  await expect.element(slotRow("03").getByText("线程 c")).toBeVisible();
 
-  await screen.rerender(board(all));
-  await expect.element(berth(2).getByText("泊位 2 · 空闲 · 主力")).toBeVisible();
+  await screen.rerender(board(make([thread("c")])));
+  expect(readBerths(environmentId)).toEqual([null, null, "c", null, null, null]);
+  await expect.element(slotRow("03").getByText("线程 c")).toBeVisible();
 });
 
-it("keeps the saved berths while the thread list is not live yet", async () => {
+it("keeps saved slots while not authoritative and keeps unseated and scheduled threads folded until opened", async () => {
   using _fresh = fresh();
-  writeBerths(environmentId, ["a", "b", null, null, null, null]);
+  writeBerths(environmentId, ["a", null, null, null, null, null]);
   await using screen = await render(board(make([]), false), { router: false });
-  await expect.element(berth(1).getByText("泊位 1 · 读取中 · 主力")).toBeVisible();
-  expect(readBerths(environmentId)).toEqual(["a", "b", null, null, null, null]);
-  await screen.rerender(board(make([thread("a"), thread("b")]), true));
-  await expect.element(berth(2).getByText("线程 b")).toBeVisible();
-});
+  await expect.element(slotRow("E1").getByText("读取中…")).toBeVisible();
+  expect(readBerths(environmentId)).toEqual(["a", null, null, null, null, null]);
 
-it("replaces a berth through the 1–6 picker when all six are taken", async () => {
-  using _fresh = fresh();
-  writeBerths(environmentId, ["a", "b", "c", "d", "e", "f"]);
-  const view = make(["a", "b", "c", "d", "e", "f", "g"].map((id) => thread(id)));
-  await using _screen = await render(board(view), { router: false });
-  await userEvent.click(page.getByRole("button", { name: "入泊位" }));
-  await userEvent.click(page.getByRole("button", { name: "放入泊位 3" }));
-  await expect.element(berth(3).getByText("线程 g")).toBeVisible();
-  await expect.element(berth(4).getByText("线程 d")).toBeVisible();
-});
-
-it("keeps scheduled-task threads in a folded section until asked", async () => {
-  using _fresh = fresh();
-  const view = make([], { scheduled: [thread("job", { title: "每日巡检", status: "failed" })] });
-  await using _screen = await render(board(view), { router: false });
+  await screen.rerender(
+    board(
+      make([thread("a"), thread("u1", { displayTitle: "未钉急事", status: "input" })], {
+        scheduled: [thread("job", { displayTitle: "每日巡检", status: "failed" })],
+      }),
+      true,
+    ),
+  );
+  await expect.element(page.getByText("未钉急事")).not.toBeInTheDocument();
   await expect.element(page.getByText("每日巡检")).not.toBeInTheDocument();
-  await userEvent.click(page.getByRole("button", { name: /定时任务线程（1）.*1 条需要处理/ }));
+
+  await userEvent.click(page.getByRole("button", { name: /未钉线程（1）.*1 条待处理/ }));
+  await expect.element(page.getByText("未钉急事")).toBeVisible();
+  await userEvent.click(page.getByRole("button", { name: /定时任务（1）.*1 条待处理/ }));
   await expect.element(page.getByText("每日巡检")).toBeVisible();
-  await userEvent.click(page.getByRole("button", { name: "入泊位" }));
-  await expect.element(berth(1).getByText("每日巡检")).toBeVisible();
 });
 
-it("opens a parent thread and a subagent in the native thread route even when tag filtering empties quietThreadShellsAtom", async () => {
+it("mounts threadFamilies for seated threads, bypasses sidebar tag filtering, and navigates on open and subagent click", async () => {
   using _fresh = fresh();
   writeBerths(environmentId, ["a", null, null, null, null, null]);
   mocks.shells = [
     {
       environmentId,
       id: "a",
-      title: "父线程",
+      title: "1125_父线程",
       lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: "a" },
       archivedAt: null,
       deletedAt: null,
@@ -226,38 +218,50 @@ it("opens a parent thread and a subagent in the native thread route even when ta
       hasPendingApprovals: false,
       hasPendingUserInput: false,
       runtime: null,
-      source: { pendingRuntimeRequest: null },
+      latestRun: null,
+      lastVisitedAt: null,
+      latestUserMessageAt: null,
+      latestUserAuthoredMessageAt: null,
+      source: { pendingRuntimeRequest: null, latestVisibleMessage: null },
       createdAt: "2026-11-25T08:00:00.000Z",
-      modelSelection: { instanceId: "claude", model: "opus" },
+      updatedAt: "2026-11-25T08:00:00.000Z",
       branch: null,
     },
     {
       environmentId,
       id: "s",
-      title: "子代理",
+      title: "待审批子代理",
       lineage: { parentThreadId: "a", relationshipToParent: "subagent", rootThreadId: "a" },
       archivedAt: null,
       deletedAt: null,
       settledOverride: null,
       snoozedUntil: null,
-      hasPendingApprovals: false,
+      hasPendingApprovals: true,
       hasPendingUserInput: false,
       runtime: null,
-      source: { pendingRuntimeRequest: null },
+      latestRun: null,
+      lastVisitedAt: null,
+      latestUserMessageAt: null,
+      latestUserAuthoredMessageAt: null,
+      source: { pendingRuntimeRequest: null, latestVisibleMessage: null },
       createdAt: "2026-11-25T09:00:00.000Z",
-      modelSelection: { instanceId: "claude", model: "haiku" },
+      updatedAt: "2026-11-25T09:00:00.000Z",
       branch: null,
     },
   ];
   await using _screen = await render(<BerthsPage />, { router: false });
-  await userEvent.click(berth(1).getByRole("button", { name: "父线程" }));
-  expect(mocks.navigate).toHaveBeenLastCalledWith({
-    to: "/$environmentId/$threadId",
-    params: { environmentId, threadId: "a" },
-  });
-  await userEvent.click(berth(1).getByRole("button", { name: "子代理" }));
+  expect(mocks.mountFamily).toHaveBeenCalledTimes(1);
+  expect(mocks.mountFamily.mock.calls[0]?.[2]).toBe("a");
+
+  await userEvent.click(slotRow("E1").getByRole("button", { name: /父线程/ }));
+  await userEvent.click(slotRow("E1").getByRole("button", { name: /待审批子代理/ }));
   expect(mocks.navigate).toHaveBeenLastCalledWith({
     to: "/$environmentId/$threadId",
     params: { environmentId, threadId: "s" },
+  });
+  await userEvent.click(slotRow("E1").getByRole("button", { name: "打开处理" }));
+  expect(mocks.navigate).toHaveBeenLastCalledWith({
+    to: "/$environmentId/$threadId",
+    params: { environmentId, threadId: "a" },
   });
 });
