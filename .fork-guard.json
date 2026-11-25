@@ -1,0 +1,24 @@
+{
+  "upstream": {
+    "tagPattern": "v*-nightly.*",
+    "ref": "upstream/main"
+  },
+  "maxLinesPerUpstreamFile": 15,
+  "hotFiles": [
+    "apps/web/src/components/Sidebar.tsx",
+    "apps/web/src/components/ChatView.tsx",
+    "apps/server/src/mcp/OrchestratorMcpService.ts",
+    "apps/server/src/server.ts",
+    "apps/server/src/ws.ts",
+    "packages/provider-acp/src/server/adapter.ts",
+    "packages/contracts/src/settings.ts"
+  ],
+  "collapse": [
+    {
+      "name": "i18n",
+      "glob": "**/i18n/translations/*.json",
+      "note": "append keys at end only; preserve upstream key order"
+    }
+  ],
+  "ignore": []
+}

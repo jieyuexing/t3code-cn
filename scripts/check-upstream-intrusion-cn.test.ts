@@ -1,107 +1,154 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Loads the plain .mjs script by path.
-import { describe, expect, it } from "vite-plus/test";
+// @effect-diagnostics nodeBuiltinImport:off -- Loads the plain .mjs wrapper and runs real temp git repos.
+import { afterEach, describe, expect, it } from "vite-plus/test";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
-interface Lines {
-  readonly added: number;
-  readonly deleted: number;
-}
-interface Entry {
-  readonly file: string;
-  readonly now: Lines;
-  readonly total: Lines;
-}
-interface Classified {
-  readonly hot: ReadonlyArray<Entry>;
-  readonly warn: ReadonlyArray<Entry>;
-  readonly i18n: ReadonlyArray<Entry>;
-}
-interface IntrusionModule {
-  readonly parseNumstat: (text: string) => Map<string, Lines>;
-  readonly classify: (input: {
-    changed: Map<string, Lines>;
-    cumulative: Map<string, Lines>;
-    upstreamFiles: Set<string>;
-  }) => Classified;
-  readonly formatReport: (result: Classified) => ReadonlyArray<string>;
+interface Invocation {
+  readonly command: string;
+  readonly prefixArgs: ReadonlyArray<string>;
 }
 
-const script = NodeURL.pathToFileURL(
+interface IntrusionWrapperModule {
+  readonly resolveForkGuardInvocation: (options?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    disableUniverseLookup?: boolean;
+    disablePathLookup?: boolean;
+  }) => Invocation | null;
+  readonly main: (
+    argv: ReadonlyArray<string>,
+    options?: {
+      cwd?: string;
+      env?: NodeJS.ProcessEnv;
+      disableUniverseLookup?: boolean;
+      disablePathLookup?: boolean;
+      stdio?: "inherit" | "pipe";
+    },
+  ) => number;
+}
+
+const scriptUrl = NodeURL.pathToFileURL(
   NodePath.join(import.meta.dirname, "check-upstream-intrusion-cn.mjs"),
 ).href;
-const { parseNumstat, classify, formatReport }: IntrusionModule = await import(script);
+const { resolveForkGuardInvocation, main }: IntrusionWrapperModule = await import(scriptUrl);
 
-const HOT = "apps/server/src/ws.ts";
-const PLAIN = "apps/server/src/provider/Drivers/AntigravityDriver.ts";
-const TEST = "apps/server/src/textGeneration/AntigravityTextGeneration.test.ts";
-const CATALOG = "apps/web/src/i18n/translations/de.json";
-const CATALOG_2 = "apps/web/src/i18n/translations/fr.json";
-const NEW_FILE = "apps/server/src/textGeneration/promptAdvisor.cn.ts";
+const repoRoot = NodePath.resolve(import.meta.dirname, "..");
+const tempDirs: Array<string> = [];
 
-const upstream = new Set([HOT, PLAIN, TEST, CATALOG, CATALOG_2]);
-const run = (numstat: string, cumulative = numstat) =>
-  classify({
-    changed: parseNumstat(numstat),
-    cumulative: parseNumstat(cumulative),
-    upstreamFiles: upstream,
-  });
-
-describe("parseNumstat", () => {
-  it("reads added and deleted counts and treats binary files as zero", () => {
-    const stats = parseNumstat("3\t1\ta.ts\n-\t-\timg.png\n\n");
-    expect(stats.get("a.ts")).toEqual({ added: 3, deleted: 1 });
-    expect(stats.get("img.png")).toEqual({ added: 0, deleted: 0 });
-    expect(stats.size).toBe(2);
-  });
+afterEach(() => {
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop();
+    if (dir) NodeFS.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
-describe("classify and formatReport", () => {
-  it("flags a hot upstream file however small the change", () => {
-    const result = run(`1\t0\t${HOT}`, `40\t7\t${HOT}`);
-    expect(result.hot.map((entry) => entry.file)).toEqual([HOT]);
-    expect(formatReport(result)).toEqual([
-      "fork upstream-intrusion: 1 hot, 0 above 15 lines (non-test upstream files)",
-      `  [HOT]  ${HOT} +1/-0 this change, +40/-7 vs latest nightly`,
-    ]);
+function git(cwd: string, args: ReadonlyArray<string>) {
+  const res = NodeChildProcess.spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Test",
+      GIT_AUTHOR_EMAIL: "test@example.com",
+      GIT_COMMITTER_NAME: "Test",
+      GIT_COMMITTER_EMAIL: "test@example.com",
+    },
+  });
+  if (res.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${res.stderr}`);
+  }
+}
+
+describe("check-upstream-intrusion-cn fork-guard wrapper", () => {
+  it("ships a valid .fork-guard.json with upstream nightly tag and collapse rule", () => {
+    const raw = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(repoRoot, ".fork-guard.json"), "utf8"),
+    ) as {
+      upstream?: { tagPattern?: string; ref?: string };
+      maxLinesPerUpstreamFile?: number;
+      hotFiles?: Array<string>;
+      collapse?: Array<{ name: string; glob: string }>;
+    };
+    expect(raw.upstream?.tagPattern).toBe("v*-nightly.*");
+    expect(raw.maxLinesPerUpstreamFile).toBe(15);
+    expect(raw.hotFiles).toContain("apps/server/src/ws.ts");
+    expect(raw.collapse?.some((c) => c.name === "i18n")).toBe(true);
   });
 
-  it("warns only when an upstream file changes by more than 15 lines", () => {
-    expect(run(`10\t5\t${PLAIN}`).warn).toEqual([]);
-    const result = run(`10\t6\t${PLAIN}`, `30\t6\t${PLAIN}`);
-    expect(result.warn).toHaveLength(1);
-    expect(formatReport(result)[1]).toBe(
-      `  [WARN] ${PLAIN} +10/-6 this change, +30/-6 vs latest nightly`,
+  it("prefers FORK_GUARD_BIN when explicitly provided and skips cleanly when unavailable", () => {
+    const viaEnv = resolveForkGuardInvocation({
+      cwd: repoRoot,
+      env: { FORK_GUARD_BIN: "/custom/fork-guard.mjs" },
+    });
+    expect(viaEnv).toEqual({
+      command: process.execPath,
+      prefixArgs: ["/custom/fork-guard.mjs"],
+    });
+
+    const missing = resolveForkGuardInvocation({
+      cwd: NodeOS.tmpdir(),
+      env: {},
+      disableUniverseLookup: true,
+      disablePathLookup: true,
+    });
+    expect(missing).toBeNull();
+    expect(
+      main([], {
+        cwd: NodeOS.tmpdir(),
+        env: {},
+        disableUniverseLookup: true,
+        disablePathLookup: true,
+      }),
+    ).toBe(0);
+  });
+
+  it("delegates to fork-guard check and enforces HOT vs SHRINK semantics", () => {
+    const invocation = resolveForkGuardInvocation({ cwd: repoRoot });
+    expect(invocation).not.toBeNull();
+
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-fg-"));
+    tempDirs.push(dir);
+
+    git(dir, ["init", "-b", "upstream-main"]);
+    NodeFS.mkdirSync(NodePath.join(dir, "src"), { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(dir, "src/hot.ts"), "export const a = 1;\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "upstream"]);
+
+    git(dir, ["checkout", "-b", "main"]);
+    NodeFS.writeFileSync(
+      NodePath.join(dir, ".fork-guard.json"),
+      JSON.stringify({
+        upstream: { ref: "upstream-main" },
+        hotFiles: ["src/hot.ts"],
+      }),
     );
-  });
+    NodeFS.writeFileSync(
+      NodePath.join(dir, "src/hot.ts"),
+      "export const a = 1;\nexport const f1 = 1;\nexport const f2 = 2;\n",
+    );
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "fork baseline"]);
+    git(dir, ["branch", "base-main"]);
 
-  it("exempts test files and files the fork added", () => {
-    const result = run(`200\t50\t${TEST}\n300\t0\t${NEW_FILE}`);
-    expect(result.hot).toEqual([]);
-    expect(result.warn).toEqual([]);
-    expect(formatReport(result)).toEqual([
-      "fork upstream-intrusion: ok (0 upstream files above threshold)",
-    ]);
-  });
+    const bin = invocation!.prefixArgs[0] ?? invocation!.command;
+    const env = { ...process.env, FORK_GUARD_BIN: bin };
 
-  it("folds translation catalogs into one line instead of listing them", () => {
-    const result = run(`50\t0\t${CATALOG}\n50\t0\t${CATALOG_2}`);
-    expect(result.warn).toEqual([]);
-    expect(formatReport(result)).toEqual([
-      "fork upstream-intrusion: ok (0 upstream files above threshold)",
-      "i18n catalogs: 2 files (remember: append at end only, preserve upstream key order)",
-    ]);
-  });
+    // Shrinking a hot file passes --strict
+    NodeFS.writeFileSync(
+      NodePath.join(dir, "src/hot.ts"),
+      "export const a = 1;\nexport const f1 = 1;\n",
+    );
+    expect(main(["--base", "base-main", "--strict"], { cwd: dir, env, stdio: "pipe" })).toBe(0);
 
-  it("ignores upstream files that are back to the upstream version", () => {
-    const result = run(`3\t90\t${HOT}\n20\t20\t${PLAIN}`, `0\t0\t${HOT}`);
-    expect(result.hot).toEqual([]);
-    expect(result.warn).toEqual([]);
-  });
-
-  it("prints the clean line when nothing upstream changed", () => {
-    expect(formatReport(run(""))).toEqual([
-      "fork upstream-intrusion: ok (0 upstream files above threshold)",
-    ]);
+    // Expanding a hot file fails --strict
+    NodeFS.writeFileSync(
+      NodePath.join(dir, "src/hot.ts"),
+      "export const a = 1;\nexport const f1 = 1;\nexport const f2 = 2;\nexport const f3 = 3;\n",
+    );
+    expect(main(["--base", "base-main", "--strict"], { cwd: dir, env, stdio: "pipe" })).toBe(1);
   });
 });
