@@ -42,7 +42,7 @@ const accessAtom = Atom.family((environmentId: EnvironmentId) =>
     .pipe(Atom.setIdleTTL(60_000), Atom.withLabel(`prompt-refiner-access:${environmentId}`)),
 );
 
-function readAccess(
+export function readAccess(
   environmentId: EnvironmentId,
   refresh: boolean,
 ): Promise<DeviceHubAccess | null> {

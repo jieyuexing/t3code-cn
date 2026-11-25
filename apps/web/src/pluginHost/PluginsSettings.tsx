@@ -1,3 +1,4 @@
+/* oxlint-disable t3code/no-untranslated-copy -- the plugin host UI is English-only for now (fork-notes/plugin-host.md) */
 import type { EnvironmentId, PluginHostEntry, PluginHostSnapshot } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -14,6 +15,7 @@ import {
 } from "../components/settings/settingsLayout";
 import { useSettingsScope } from "../components/settings/SettingsScopeContext";
 import { PluginSettingsForm } from "./PluginSettingsForm";
+import { PromptAdvisorSettingsSection } from "./promptAdvisorSettings/PromptAdvisorSettingsSection";
 import { useRailConfig } from "./rail/useRailConfig";
 import {
   clearPluginSettingsReveal,
@@ -73,6 +75,7 @@ function PluginsSettingsBody(props: { readonly environmentId: EnvironmentId }) {
           }
         />
       </SettingsSection>
+      <PromptAdvisorSettingsSection environmentId={environmentId} />
       <SettingsSection title="Plugins">
         <SettingsRow
           title="Enable plugins"

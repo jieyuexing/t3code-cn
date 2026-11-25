@@ -17,6 +17,7 @@ import {
   selectThreadTail,
   threadMessages,
 } from "./promptRefiner.cn.ts";
+import { stubPromptAdvisorRuntime } from "./promptAdvisor.testkit.cn.ts";
 
 // Real first drafts from refiner-test-cases.md.
 const SAMPLE_REVIEW =
@@ -25,11 +26,10 @@ const SAMPLE_ARCHITECTURE = "看一下本仓库架构的意识形态  尽最大�
 const FINGERPRINT =
   "Top-level entries: AGENTS.md, host/, wiki/\nAGENTS.md (excerpt):\n本总仓拥有产品结构";
 
-const sampler = (reply: string | TextGenerationError): PromptAdvisorRuntime => ({
-  available: Effect.succeed(true),
-  sample: () => Effect.succeed(null),
-  runPrompt: () => (typeof reply === "string" ? Effect.succeed(reply) : Effect.fail(reply)),
-});
+const sampler = (reply: string | TextGenerationError): PromptAdvisorRuntime =>
+  stubPromptAdvisorRuntime({
+    runPrompt: () => (typeof reply === "string" ? Effect.succeed(reply) : Effect.fail(reply)),
+  });
 
 describe("buildPromptRefinerPrompt", () => {
   it.each(

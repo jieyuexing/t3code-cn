@@ -55,6 +55,12 @@ vi.mock("../components/settings/SettingsScopeSentence", () => ({
 vi.mock("../confirmDialog", () => ({
   requestConfirmDialog: async () => fixture.confirm,
 }));
+// The advisor settings own their tests; this page only has to mount them for its environment.
+vi.mock("./promptAdvisorSettings/PromptAdvisorSettingsSection", () => ({
+  PromptAdvisorSettingsSection: (props: { readonly environmentId: string }) => (
+    <div data-testid="prompt-advisor-settings" data-environment={props.environmentId} />
+  ),
+}));
 
 const entry = (
   name: string,
@@ -238,6 +244,17 @@ it("shows only the rail switch, the plugin switch and the registered count while
   await vi.waitFor(() =>
     expect(fixture.actions.at(-1)).toEqual({ _tag: "setHostEnabled", enabled: true }),
   );
+});
+
+it("mounts the prompt advisor settings for the current environment between the rail and the plugins", async () => {
+  setup();
+  await using screen = await render(settings, { router: "/" });
+  const mounted = screen.container.querySelector("[data-testid=prompt-advisor-settings]");
+  expect(mounted?.getAttribute("data-environment")).toBe("environment-a");
+  const sections = [...screen.container.querySelectorAll("section, [data-testid]")].map(
+    (node) => node.getAttribute("data-testid") ?? node.querySelector("h2")?.textContent,
+  );
+  expect(sections).toEqual(["App rail", "prompt-advisor-settings", "Plugins"]);
 });
 
 it("leaves every action disabled for a connection without the grant", async () => {
