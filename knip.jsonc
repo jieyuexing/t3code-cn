@@ -46,8 +46,10 @@
         "smoke-desktop-app.ts",
         "verify-windows-desktop-artifact.ts",
         // Fork release tooling: build-desktop-cn.mjs spawns the CLI build by path, and the
-        // candidate verifier runs directly from the command line.
+        // candidate verifier runs directly from the command line. check-changed-cn.mjs
+        // spawns the intrusion report by path.
         "build-cli-cn.mjs",
+        "check-upstream-intrusion-cn.mjs",
         "verify-release-candidate-cn.mjs",
       ],
       "ignoreDependencies": ["esbuild"],

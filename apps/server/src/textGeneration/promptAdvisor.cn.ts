@@ -15,7 +15,6 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { AcpRequestError } from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
-import type { AcpPromptSuggestionMessage } from "@t3tools/provider-acp/server/adapter";
 import { collectSessionConfigOptionValues } from "@t3tools/provider-acp/server/runtimeModel";
 
 import {
@@ -41,6 +40,11 @@ import {
   type RoleModelSelection,
   targetSignature,
 } from "./promptAdvisorConfig.cn.ts";
+
+export interface PromptAdvisorMessage {
+  readonly role: "user" | "assistant";
+  readonly text: string;
+}
 
 /** Wire format shared with apps/web/src/pluginHost/needsYou/promptAdvisorPayload.cn.ts. */
 export const PROMPT_ADVISOR_PREFIX = "\u001et3cn-advisor:v1:";
@@ -194,7 +198,7 @@ function advisorPromptAround(transcript: string, options: PromptAdvisorPromptOpt
 }
 
 export function buildPromptAdvisorPrompt(
-  messages: ReadonlyArray<AcpPromptSuggestionMessage>,
+  messages: ReadonlyArray<PromptAdvisorMessage>,
   options: PromptAdvisorPromptOptions,
 ): string {
   const recent = messages.slice(-MAX_MESSAGES);
@@ -300,7 +304,7 @@ export function decodePromptAdvisorItems(encoded: string | null): ReadonlyArray<
 }
 
 export interface PromptAdvisorSampleInput {
-  readonly messages: ReadonlyArray<AcpPromptSuggestionMessage>;
+  readonly messages: ReadonlyArray<PromptAdvisorMessage>;
   readonly hasExplicitChoices: boolean;
 }
 

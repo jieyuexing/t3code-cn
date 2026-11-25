@@ -35,7 +35,6 @@ import {
   isAntigravityTextGenerationAvailable,
   makeAntigravityTextGeneration,
 } from "../../textGeneration/AntigravityTextGeneration.ts";
-import { makeAntigravityPromptSuggestionSampler } from "../../textGeneration/antigravityPromptSuggestion.cn.ts";
 import { makeAntigravityPromptAdvisorSampler } from "../../textGeneration/promptAdvisor.cn.ts";
 import { registerPromptAdvisor } from "../../textGeneration/promptAdvisorRegistry.cn.ts";
 import { makeAntigravityAuth, type AntigravityAuth } from "../AntigravityAuth.ts";
@@ -632,8 +631,6 @@ export const AntigravityDriver: ProviderDriver<
           mcpServers: [],
         }),
     };
-    const samplePromptSuggestion =
-      yield* makeAntigravityPromptSuggestionSampler(isolatedHelperOptions);
     if (enabled) {
       yield* registerPromptAdvisor(
         instanceId,
@@ -646,7 +643,6 @@ export const AntigravityDriver: ProviderDriver<
       makeRuntime,
       withProcess: authFlow.withProcess,
       defaultModel,
-      samplePromptSuggestion,
       supportsNativeGoals: provider.snapshot.getSnapshot.pipe(
         Effect.map(
           (snapshot) => snapshot.slashCommands?.some((command) => command.name === "goal") === true,

@@ -29,7 +29,7 @@
     "build:resource-monitor": "cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml",
     "typecheck": "vp run -r --cache --concurrency-limit 4 typecheck",
     "tc": "vp run -r --cache --concurrency-limit 4 typecheck",
-    "check:changed": "node scripts/check-changed.ts",
+    "check:changed": "node scripts/check-changed-cn.mjs",
     "test:classify": "node scripts/classify-test-failures-cn.mjs",
     "report:renders": "node scripts/render-metrics.ts",
     "report:server": "node scripts/server-metrics.ts",

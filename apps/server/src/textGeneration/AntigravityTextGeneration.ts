@@ -1,4 +1,4 @@
-import { type ModelSelection, ProviderSetupError, TextGenerationError } from "@t3tools/contracts";
+import { ProviderSetupError, TextGenerationError } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -10,7 +10,6 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { type AcpError, AcpRequestError } from "effect-acp/errors";
-import type * as EffectAcpSchema from "effect-acp/compat";
 
 import {
   antigravityThinkingConfig,
@@ -105,38 +104,7 @@ export const isAntigravityTextGenerationAvailable = Effect.fn(
   return true;
 });
 
-export interface AntigravityIsolatedPromptInput {
-  readonly operation: string;
-  readonly prompt: string;
-  readonly modelSelection: ModelSelection;
-  readonly timeoutMs: number;
-  readonly resolveModel?: (
-    configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
-  ) => string | null | undefined;
-  readonly selectThinking?: (
-    configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
-  ) => { readonly id: string; readonly value: string } | undefined;
-}
-
-function selectSavedAntigravityThinkingLevel(
-  configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
-  savedOptions: ModelSelection["options"],
-): { readonly id: string; readonly value: string } | undefined {
-  if (!savedOptions?.length) return undefined;
-  const thinking = antigravityThinkingConfig(configOptions);
-  const selected = savedOptions.find((option) => option.id === thinking?.id)?.value;
-  if (
-    thinking === undefined ||
-    typeof selected !== "string" ||
-    selected === thinking.currentValue ||
-    !collectSessionConfigOptionValues(thinking).includes(selected)
-  ) {
-    return undefined;
-  }
-  return { id: thinking.id, value: selected };
-}
-
-const makeAntigravityIsolatedRunner = Effect.fn("makeAntigravityIsolatedRunner")(function* (
+export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGeneration")(function* (
   options: AntigravityTextGenerationOptions,
 ) {
   const fs = yield* FileSystem.FileSystem;
@@ -174,8 +142,8 @@ const makeAntigravityIsolatedRunner = Effect.fn("makeAntigravityIsolatedRunner")
     Effect.provideService(Path.Path, path),
   );
 
-  return Effect.fn("AntigravityTextGeneration.runIsolatedPrompt")(
-    function* (input: AntigravityIsolatedPromptInput) {
+  const runAntigravityJson = Effect.fn("AntigravityTextGeneration.runJson")(
+    function* <S extends Schema.Top>(input: TextGenerationOperations.Request<S>) {
       const { operation } = input;
       const scope = yield* Scope.make();
       yield* Effect.addFinalizer((exit) => Scope.close(scope, exit));
@@ -285,13 +253,9 @@ const makeAntigravityIsolatedRunner = Effect.fn("makeAntigravityIsolatedRunner")
               });
             }
             yield* runtime.setMode("default");
-            const selectedModel =
-              input.resolveModel !== undefined
-                ? input.resolveModel(yield* runtime.getConfigOptions)
-                : input.modelSelection.model;
             yield* applyAntigravityAcpModelSelection({
               runtime,
-              model: selectedModel,
+              model: input.modelSelection.model,
               defaultModel: yield* options.defaultModel ?? Effect.undefined,
               mapError: (cause) =>
                 new TextGenerationError({
@@ -300,23 +264,28 @@ const makeAntigravityIsolatedRunner = Effect.fn("makeAntigravityIsolatedRunner")
                   cause,
                 }),
             });
-            const configOptions = yield* runtime.getConfigOptions;
-            const thinkingUpdate =
-              input.selectThinking !== undefined
-                ? input.selectThinking(configOptions)
-                : selectSavedAntigravityThinkingLevel(configOptions, input.modelSelection.options);
-            if (thinkingUpdate !== undefined) {
-              yield* runtime.setConfigOption(thinkingUpdate.id, thinkingUpdate.value).pipe(
-                Effect.catchTags({
-                  AcpRequestError: (error) =>
-                    error.code === -32602
-                      ? Effect.logDebug("Antigravity rejected the thinking level", {
-                          optionId: thinkingUpdate.id,
-                          value: thinkingUpdate.value,
-                        })
-                      : Effect.fail(error),
-                }),
-              );
+            const savedOptions = input.modelSelection.options;
+            if (savedOptions?.length) {
+              const thinking = antigravityThinkingConfig(yield* runtime.getConfigOptions);
+              const selected = savedOptions.find((option) => option.id === thinking?.id)?.value;
+              if (
+                thinking !== undefined &&
+                typeof selected === "string" &&
+                selected !== thinking.currentValue &&
+                collectSessionConfigOptionValues(thinking).includes(selected)
+              ) {
+                yield* runtime.setConfigOption(thinking.id, selected).pipe(
+                  Effect.catchTags({
+                    AcpRequestError: (error) =>
+                      error.code === -32602
+                        ? Effect.logDebug("Antigravity rejected the saved thinking level", {
+                            optionId: thinking.id,
+                            value: selected,
+                          })
+                        : Effect.fail(error),
+                  }),
+                );
+              }
             }
 
             const result = yield* runtime.prompt({
@@ -362,10 +331,10 @@ const makeAntigravityIsolatedRunner = Effect.fn("makeAntigravityIsolatedRunner")
             detail: "Antigravity returned empty text generation output.",
           });
         }
-        return rawResult;
+        return yield* TextGenerationOperations.decodeJsonReply(input, "Antigravity", rawResult);
       }).pipe(
         Effect.scoped,
-        Effect.timeoutOption(input.timeoutMs),
+        Effect.timeoutOption(ANTIGRAVITY_TIMEOUT_MS),
         Effect.flatMap(
           Option.match({
             onNone: () =>
@@ -402,23 +371,6 @@ const makeAntigravityIsolatedRunner = Effect.fn("makeAntigravityIsolatedRunner")
         Effect.scoped,
       ),
   );
-});
-
-export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGeneration")(function* (
-  options: AntigravityTextGenerationOptions,
-) {
-  const runIsolatedPrompt = yield* makeAntigravityIsolatedRunner(options);
-  const runAntigravityJson: TextGenerationOperations.Runner = Effect.fn(
-    "AntigravityTextGeneration.runJson",
-  )(function* <S extends Schema.Top>(input: TextGenerationOperations.Request<S>) {
-    const rawResult = yield* runIsolatedPrompt({
-      operation: input.operation,
-      prompt: input.prompt,
-      modelSelection: input.modelSelection,
-      timeoutMs: ANTIGRAVITY_TIMEOUT_MS,
-    });
-    return yield* TextGenerationOperations.decodeJsonReply(input, "Antigravity", rawResult);
-  });
 
   return TextGenerationOperations.fromRunner(
     "AntigravityTextGeneration",
