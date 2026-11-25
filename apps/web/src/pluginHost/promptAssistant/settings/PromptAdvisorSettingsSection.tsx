@@ -3,20 +3,24 @@ import { ChevronRightIcon } from "lucide-react";
 import { useGT, useMessages } from "gt-react";
 import { type ReactNode, useState } from "react";
 
-import { Badge } from "../../components/ui/badge";
-import { Button } from "../../components/ui/button";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../components/ui/collapsible";
-import { RefreshIcon } from "../../components/ui/refresh-icon";
+import { Badge } from "../../../components/ui/badge";
+import { Button } from "../../../components/ui/button";
+import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "../../../components/ui/collapsible";
+import { RefreshIcon } from "../../../components/ui/refresh-icon";
 import {
   Select,
   SelectItem,
   SelectPopup,
   SelectTrigger,
   SelectValue,
-} from "../../components/ui/select";
-import { Switch } from "../../components/ui/switch";
-import { Textarea } from "../../components/ui/textarea";
-import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
+} from "../../../components/ui/select";
+import { Switch } from "../../../components/ui/switch";
+import { Textarea } from "../../../components/ui/textarea";
+import { SettingsRow, SettingsSection } from "../../../components/settings/settingsLayout";
 import {
   ADVISOR_TEST_SCENARIOS,
   type AdvisorTestScenario,

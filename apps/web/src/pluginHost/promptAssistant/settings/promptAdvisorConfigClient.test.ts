@@ -5,7 +5,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { advisorPayload, advisorStatus, DEFAULT_CONFIG } from "./promptAdvisorSettings.testing";
 
 const access = vi.hoisted(() => ({ readAccess: vi.fn() }));
-vi.mock("../promptRefiner/promptRefinerClient", () => ({ readAccess: access.readAccess }));
+vi.mock("../refiner/promptRefinerClient", () => ({ readAccess: access.readAccess }));
 
 import {
   loadPromptAdvisorConfig,

@@ -56,7 +56,7 @@ vi.mock("../confirmDialog", () => ({
   requestConfirmDialog: async () => fixture.confirm,
 }));
 // The advisor settings own their tests; this page only has to mount them for its environment.
-vi.mock("./promptAdvisorSettings/PromptAdvisorSettingsSection", () => ({
+vi.mock("./promptAssistant/settings/PromptAdvisorSettingsSection", () => ({
   PromptAdvisorSettingsSection: (props: { readonly environmentId: string }) => (
     <div data-testid="prompt-advisor-settings" data-environment={props.environmentId} />
   ),

@@ -1,9 +1,9 @@
 import type { OrchestrationV2ProjectedTurnItem, RunId } from "@t3tools/contracts";
 
-import { FOLLOW_RECOMMENDATION } from "./needsYou.logic";
+import { FOLLOW_RECOMMENDATION } from "../../needsYou/needsYou.logic";
 import { replyOptions } from "./replyOptions";
 import type { PromptAdvisorItem, PromptAdvisorKind } from "./promptAdvisorPayload.cn";
-import { pendingItems } from "./replyPending";
+import { pendingItems } from "../../needsYou/replyPending";
 
 export interface ComposerChoice {
   /** What lands in the composer. */

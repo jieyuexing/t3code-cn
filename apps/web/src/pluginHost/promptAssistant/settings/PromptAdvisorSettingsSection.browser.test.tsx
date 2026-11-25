@@ -2,7 +2,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 
 import "~/index.css";
-import { render } from "../../../test/render";
+import { render } from "../../../../test/render";
 import type { PromptAdvisorOutcome } from "./promptAdvisorConfigClient";
 import type {
   PromptAdvisorConfig,
@@ -23,11 +23,11 @@ const client = vi.hoisted(() => ({
   runPromptAdvisorTest: vi.fn(),
 }));
 vi.mock("./promptAdvisorConfigClient", () => client);
-vi.mock("../../components/settings/SettingsScopeContext", () => ({
+vi.mock("../../../components/settings/SettingsScopeContext", () => ({
   useSettingsScope: () => ({ environment: { environmentId: "environment-a" } }),
   useOptionalSettingsScope: () => null,
 }));
-vi.mock("../../components/settings/SettingsScopeSentence", () => ({
+vi.mock("../../../components/settings/SettingsScopeSentence", () => ({
   SettingsScopeSentence: () => null,
 }));
 

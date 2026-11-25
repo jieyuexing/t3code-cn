@@ -15,7 +15,7 @@ import {
 } from "../components/settings/settingsLayout";
 import { useSettingsScope } from "../components/settings/SettingsScopeContext";
 import { PluginSettingsForm } from "./PluginSettingsForm";
-import { PromptAdvisorSettingsSection } from "./promptAdvisorSettings/PromptAdvisorSettingsSection";
+import { PromptAdvisorSettingsSection } from "./promptAssistant/settings/PromptAdvisorSettingsSection";
 import { useRailConfig } from "./rail/useRailConfig";
 import {
   clearPluginSettingsReveal,

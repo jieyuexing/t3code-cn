@@ -306,14 +306,14 @@ import { HELD_COMPOSER_SEND_BANNER_ID } from "./ComposerHeldSendBanner";
 import { ComposerControlsBar } from "./ComposerControlsBar";
 import { composerCommandKeyHandler } from "./composerCommandKey";
 import { promptSuggestionToAccept, usePromptSuggestion } from "./usePromptSuggestion";
-import { ComposerChoiceStrip } from "~/pluginHost/needsYou/ComposerChoiceStrip";
-import { useComposerChoices } from "~/pluginHost/needsYou/useComposerChoices";
+import { ComposerChoiceStrip } from "~/pluginHost/promptAssistant/choices/ComposerChoiceStrip";
+import { useComposerChoices } from "~/pluginHost/promptAssistant/choices/useComposerChoices";
 import {
   PromptRefinerButton,
   PromptRefinerCard,
-} from "~/pluginHost/promptRefiner/PromptRefinerBar";
-import { usePromptRefiner } from "~/pluginHost/promptRefiner/usePromptRefiner";
-import { isPromptAdvisorPayload } from "~/pluginHost/needsYou/promptAdvisorPayload.cn";
+} from "~/pluginHost/promptAssistant/refiner/PromptRefinerBar";
+import { usePromptRefiner } from "~/pluginHost/promptAssistant/refiner/usePromptRefiner";
+import { isPromptAdvisorPayload } from "~/pluginHost/promptAssistant/choices/promptAdvisorPayload.cn";
 import { useFreshSessionArmed } from "./freshSessionArms";
 
 function consumePasteAsTextShortcut(deadline: { current: number }): boolean {

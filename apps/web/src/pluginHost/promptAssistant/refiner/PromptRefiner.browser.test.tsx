@@ -16,8 +16,8 @@ import {
   installFakeEnvironment,
   threadWithHistory,
   type FakeDriver,
-} from "../../../test/fakeEnvironment";
-import { render } from "../../../test/render";
+} from "../../../../test/fakeEnvironment";
+import { render } from "../../../../test/render";
 import type { PromptRefineOutcome } from "./promptRefinerClient";
 
 const client = vi.hoisted(() => ({ requestPromptRefine: vi.fn() }));
@@ -25,11 +25,11 @@ vi.mock("./promptRefinerClient", () => ({ requestPromptRefine: client.requestPro
 
 // The socket is the only fake layer, so a send lands in `dispatchedCommands` and goes nowhere else.
 vi.mock(
-  "../../../../../packages/client-runtime/src/connection/driver.ts",
+  "../../../../../../packages/client-runtime/src/connection/driver.ts",
   async (importOriginal) => {
     const [actual, { fakeDriver }, Layer] = await Promise.all([
       importOriginal<{ readonly ConnectionDriver: Context.Key<unknown, FakeDriver> }>(),
-      import("../../../test/fakeEnvironment"),
+      import("../../../../test/fakeEnvironment"),
       import("effect/Layer"),
     ]);
     return { ...actual, layer: Layer.succeed(actual.ConnectionDriver, fakeDriver) };

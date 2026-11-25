@@ -1,7 +1,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { m } from "~/i18n/messages";
 
-import { readAccess } from "../promptRefiner/promptRefinerClient";
+import { readAccess } from "../refiner/promptRefinerClient";
 import {
   configFailureMessage,
   PROMPT_ADVISOR_COPY,

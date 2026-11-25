@@ -46,7 +46,7 @@ export interface PromptAdvisorMessage {
   readonly text: string;
 }
 
-/** Wire format shared with apps/web/src/pluginHost/needsYou/promptAdvisorPayload.cn.ts. */
+/** Wire format shared with apps/web/src/pluginHost/promptAssistant/choices/promptAdvisorPayload.cn.ts. */
 export const PROMPT_ADVISOR_PREFIX = "\u001et3cn-advisor:v1:";
 
 const PROMPT_ADVISOR_MODEL_PREFERENCE = [

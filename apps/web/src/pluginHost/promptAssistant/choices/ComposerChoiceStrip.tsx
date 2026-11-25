@@ -5,7 +5,7 @@ import { Button } from "~/components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
 import { isAdvisorItemChoice, isAdvisorMergeChoice } from "./composerChoices.logic";
-import { FOLLOW_RECOMMENDATION } from "./needsYou.logic";
+import { FOLLOW_RECOMMENDATION } from "../../needsYou/needsYou.logic";
 import type { ComposerChoicesController } from "./useComposerChoices";
 
 const ADVISOR_BUTTON_CLASS =

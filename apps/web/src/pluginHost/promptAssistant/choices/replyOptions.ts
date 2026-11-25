@@ -1,4 +1,4 @@
-import { stripMarkdown } from "./replyPending";
+import { stripMarkdown } from "../../needsYou/replyPending";
 
 export interface ReplyOption {
   /** 甲乙丙丁 or A–D. */
