@@ -87,7 +87,6 @@ export function useHostApi(options: {
             .filter((project) => project.environmentId === environmentId)
             .map((project) => [project.id, project.title]),
         ),
-        // oxlint-disable-next-line react/purity -- runs when the view calls, not during render (oxc#27309)
         now: new Date().toISOString(),
       }),
     lastReply: async (threadId) => {
