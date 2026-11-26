@@ -14,7 +14,7 @@
 | --------------------------- | ------------------------------- |
 | `promptAssistant/choices/`  | 快捷条与上下文顾问（10 个文件） |
 | `promptAssistant/refiner/`  | 提示词优化（6 个文件）          |
-| `promptAssistant/settings/` | 统一设置面板（8 个文件）        |
+| `promptAssistant/settings/` | 统一设置面板（10 个文件）       |
 
 ## 输入框快捷条与上下文顾问
 
@@ -90,6 +90,20 @@
 - **前端**（`promptAssistant/settings/`）：`promptAdvisorConfig.logic.ts` 类型、校验、状态文案；`promptAdvisorConfigClient.ts` 取票并在 401 时换票重试一次，复用 `refiner/promptRefinerClient.ts` 的 `readAccess`；`usePromptAdvisorSettings.ts` 加载、保存排队与试跑；`PromptAdvisorSettingsSection.tsx` 只收 `environmentId`；`promptAdvisorSettings.testing.ts` 为测试夹具。挂在 fork 自有的 `apps/web/src/pluginHost/PluginsSettings.tsx` 的「App rail」之后、「Plugins」之前，不碰上游 `LabsSettingsPanel.tsx`、`SettingsSidebarNav.tsx` 与 `packages/contracts/src/settings.ts`。
 - **面板行为**：分上下两块：「上下文顾问」（实时状态条、实例/模型/思考档、三个镜片开关、补充指令、全文覆盖、当前完整生效提示词、用示例对话试跑）与「提示词优化」（实时状态条并标明共用还是独立温槽、跟随顾问开关，关闭后才出现独立选择器、三档提示词查看与微调、用示例草稿试跑）。所有改动先进表单草稿，底部浮出「未保存」栏（保存 / 放弃），点保存才整份 `PUT`；保存期间控件禁用；有草稿时「用示例试跑」仍可点，直接把草稿作为 `config` 传给 `test-run`，结果旁标注“按你尚未保存的草稿试跑”，满意后再保存；提示词预览与实时状态在保存前仍显示已保存的设置。覆盖框下写明 JSON 输出格式、长度上限与定界符由应用固定，不用自己写。只在挂载、保存后和点刷新时拉状态，不轮询。日后迁入 `#40222` 插件时整块搬走，只要把 `PromptAdvisorSettingsSection` 注册成设置位置的页面。
 - **未覆盖**：真实 Neon 采样与真实设置页走查没有在自动测试里做（只用替身运行时与 mock 客户端）；手机端未接入；`evals/` 目前没有覆盖顾问与优化提示词的用例，改措辞靠单测里的断言（优化的 `promptRefiner.cn.test.ts` 断言反八股禁令、语言跟随、独立请求声明与选区切分）与设置页的试跑。
+
+## 会话推进小精灵（影子观察模式）
+
+- **现行形态**：Phase 1 为纯影子观察模式（`mode: "shadow"`），默认关闭（`sprite.enabled = false`）。在上下文顾问完成采样并登记内存快照（128 条 LRU `sessionSpriteRegistry.cn.ts`）后，后台 60s 轮询按 `scanIntervalMinutes` / `idleMinutes` 评估闲置线程，仅产出结构化判定与非授权草稿写入 `<stateDir>/cn-session-sprite.jsonl`，物理只读、绝不发送消息或修改任何线程状态。
+- **四道闸门与确定性二次护栏**：
+  1. **闸门 1（全局静默与小时限流）**：`quietHoursEnabled` 启用时按本地时钟检查 `quietStartHour`..`quietEndHour`（支持跨午夜）；近 1 小时 `would_advance` 达 `maxGlobalPerHour` 时跳过。
+  2. **闸门 2（13 项线程硬门）**：`evaluateThreadEligibility` 检查线程有效性、静止时长、标题屏蔽关键词（`blockedTitleKeywords`，含 `GWH-`、`NSNET-`、`ETECH`、`SIR`、`work`、`141`、`CostMan`、`台式机`、`定时任务`、`巡检`、`每周维护`、`每日同步`）、工作区路径是否命中 `work/`、`scheduledTaskId`、子会话/委派、已有活跃 run、待确认输入、`needsYou`、已由本次人类回合推进达 `maxPerThreadPerHumanTurn` 等条件，拦截即记 `blocked_thread`，零模型调用。
+  3. **闸门 3（Neon 分级与二次护栏）**：仅对通过闸门 2 的线程调 `PromptAdvisorRuntime.runPrompt` 按 A/B/C 分级，并过确定性正则 `matchesAuthOrWriteGuard` 二次降级（即使模型误标 A，命中决策/立项/建仓/推送/改 hosts/删除等模式仍强行降为 C 拦截）。
+  4. **非授权协议头**：放行条目（`keptItems`）拼装 `draftMessage` 时强制带前缀 `SESSION_SPRITE_NON_AUTH_HEADER`（`[自动推进·只读核验｜非用户授权，禁做方向拍板/写操作/推送/公司侧改动]`），提示仅记录观察结果。
+- **账本与 HTTP 端点**：
+  - `GET /api/cn/prompt-advisor/sprite/ledger`：返回 `{ summary, entries, ledgerPath }`（最新 30 条倒序）。
+  - `POST /api/cn/prompt-advisor/sprite/scan`：接收可选 `{ bypassQuietHours?, bypassIdle? }`，手动触发扫描（与后台扫描共用 `scanLock` 互斥）并返回 `{ scanned, wouldAdvance, blocked, errors, summary, entries }`。
+  - 前端在 `promptAssistant/settings/` 拆出独立 `SessionSpriteSettingsBlock.tsx` 与 `useSessionSpriteLedger.ts`，在 `PromptAdvisorSettingsSection.tsx` 底部极薄挂载，沿用统一草稿保存与 `cn-prompt-advisor.json`（缺失 `sprite` 字段向后兼容回退默认值）。
+- **零上游逻辑改动与未覆盖项**：服务端逻辑全在 `.cn.ts` / `.cn.test.ts` 中，前端设置全在 `pluginHost/promptAssistant/settings/` 下（仅同步多语言词表 `apps/web/src/i18n/translations/*.json`）；未在自动测试中连接真实 Antigravity/Neon 进程或启动真实桌面端走查。
 
 ## 上游薄接线与同步清单
 

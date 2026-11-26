@@ -2,15 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import type { EnvironmentId } from "@t3tools/contracts";
 
-import { advisorPayload, advisorStatus, DEFAULT_CONFIG } from "./promptAdvisorSettings.testing";
+import {
+  advisorPayload,
+  advisorStatus,
+  DEFAULT_CONFIG,
+  spriteLedgerPayload,
+  spriteLedgerSummary,
+} from "./promptAdvisorSettings.testing";
 
 const access = vi.hoisted(() => ({ readAccess: vi.fn() }));
 vi.mock("../refiner/promptRefinerClient", () => ({ readAccess: access.readAccess }));
 
 import {
   loadPromptAdvisorConfig,
+  loadSessionSpriteLedger,
   runPromptAdvisorTest,
   savePromptAdvisorConfig,
+  triggerSessionSpriteScan,
 } from "./promptAdvisorConfigClient";
 
 const ENVIRONMENT = "environment-a" as EnvironmentId;
@@ -128,5 +136,53 @@ describe("prompt advisor client", () => {
     controller.abort();
     fetchMock.mockRejectedValue(new DOMException("aborted", "AbortError"));
     await expect(loadPromptAdvisorConfig(ENVIRONMENT, controller.signal)).rejects.toThrow();
+  });
+
+  it("loads the session sprite ledger and renews an expired ticket once", async () => {
+    const ledger = spriteLedgerPayload();
+    access.readAccess.mockResolvedValueOnce(ticket("old")).mockResolvedValueOnce(ticket("new"));
+    fetchMock
+      .mockResolvedValueOnce(json(401, { error: "expired" }))
+      .mockResolvedValueOnce(json(200, ledger));
+    const outcome = await loadSessionSpriteLedger(ENVIRONMENT, signal());
+    expect(outcome).toEqual({ ok: true, value: ledger });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "http://host/prompt-advisor/sprite/ledger?wsTicket=old",
+      "http://host/prompt-advisor/sprite/ledger?wsTicket=new",
+    ]);
+  });
+
+  it("triggers a manual session sprite scan and reports server or parse errors", async () => {
+    const scanResult = {
+      scanned: 1,
+      wouldAdvance: 1,
+      blocked: 0,
+      errors: 0,
+      summary: spriteLedgerSummary(),
+      entries: spriteLedgerPayload().entries,
+    };
+    access.readAccess.mockResolvedValue(ticket("t1"));
+    fetchMock.mockResolvedValueOnce(json(200, scanResult));
+    const outcome = await triggerSessionSpriteScan(
+      ENVIRONMENT,
+      { bypassQuietHours: true, bypassIdle: true },
+      signal(),
+    );
+    expect(outcome).toEqual({ ok: true, value: scanResult });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://host/prompt-advisor/sprite/scan?wsTicket=t1");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      bypassQuietHours: true,
+      bypassIdle: true,
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      json(400, { error: "The sprite scan request body is not valid." }),
+    );
+    const failed = await triggerSessionSpriteScan(ENVIRONMENT, {}, signal());
+    expect(failed).toEqual({
+      ok: false,
+      message: "The sprite scan request body is not valid.",
+      status: undefined,
+    });
   });
 });

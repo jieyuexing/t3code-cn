@@ -12,9 +12,14 @@ import {
   type PromptAdvisorStatus,
   type PromptAdvisorTestRequest,
   type PromptAdvisorTestRun,
+  type SessionSpriteLedgerPayload,
+  type SessionSpriteScanRequest,
+  type SessionSpriteScanResult,
   parsePromptAdvisorFailure,
   parsePromptAdvisorPayload,
   parsePromptAdvisorTestRun,
+  parseSessionSpriteLedger,
+  parseSessionSpriteScan,
   promptAdvisorUrl,
 } from "./promptAdvisorConfig.logic";
 
@@ -105,5 +110,28 @@ export const runPromptAdvisorTest = (
     environmentId,
     { method: "POST", path: PROMPT_ADVISOR_PATHS.testRun, body },
     parsePromptAdvisorTestRun,
+    signal,
+  );
+
+export const loadSessionSpriteLedger = (
+  environmentId: EnvironmentId,
+  signal: AbortSignal,
+): Promise<PromptAdvisorOutcome<SessionSpriteLedgerPayload>> =>
+  call(
+    environmentId,
+    { method: "GET", path: PROMPT_ADVISOR_PATHS.spriteLedger },
+    parseSessionSpriteLedger,
+    signal,
+  );
+
+export const triggerSessionSpriteScan = (
+  environmentId: EnvironmentId,
+  body: SessionSpriteScanRequest,
+  signal: AbortSignal,
+): Promise<PromptAdvisorOutcome<SessionSpriteScanResult>> =>
+  call(
+    environmentId,
+    { method: "POST", path: PROMPT_ADVISOR_PATHS.spriteScan, body },
+    parseSessionSpriteScan,
     signal,
   );

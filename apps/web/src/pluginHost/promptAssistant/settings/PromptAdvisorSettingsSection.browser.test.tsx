@@ -15,12 +15,17 @@ import {
   advisorStatus,
   DEFAULT_CONFIG,
   roleStatus,
+  spriteLedgerEntry,
+  spriteLedgerPayload,
+  spriteLedgerSummary,
 } from "./promptAdvisorSettings.testing";
 
 const client = vi.hoisted(() => ({
   loadPromptAdvisorConfig: vi.fn(),
   savePromptAdvisorConfig: vi.fn(),
   runPromptAdvisorTest: vi.fn(),
+  loadSessionSpriteLedger: vi.fn(),
+  triggerSessionSpriteScan: vi.fn(),
 }));
 vi.mock("./promptAdvisorConfigClient", () => client);
 vi.mock("../../../components/settings/SettingsScopeContext", () => ({
@@ -47,6 +52,19 @@ function serve(initial: PromptAdvisorPayload = advisorPayload()) {
       return ok(current);
     });
   client.runPromptAdvisorTest.mockReset();
+  client.loadSessionSpriteLedger.mockReset().mockResolvedValue(
+    ok(
+      spriteLedgerPayload({
+        entries: [],
+        summary: spriteLedgerSummary({
+          totalEvaluated: 0,
+          wouldAdvance: 0,
+          lastScanAt: null,
+        }),
+      }),
+    ),
+  );
+  client.triggerSessionSpriteScan.mockReset();
   return {
     saved: () => client.savePromptAdvisorConfig.mock.calls.map(([, config]) => config),
   };
@@ -491,4 +509,136 @@ it("runs the refiner sample in the chosen mode and shows the rewrite", async () 
     role: "refiner",
     mode: "scoped",
   });
+});
+
+it("saves session sprite toggle, scan cadence and quiet hours edits in the unified draft", async () => {
+  const server = serve();
+  await using screen = await open();
+  await expect.element(screen.getByText("Session sprite (shadow observation)")).toBeVisible();
+  await expect.element(screen.getByText("No observations recorded yet.")).toBeVisible();
+
+  const toggle = screen.getByRole("switch", { name: "Enable shadow observation" });
+  await expect.element(toggle).not.toBeChecked();
+  await toggle.click();
+
+  await screen.getByRole("combobox", { name: "Scan interval" }).click();
+  await screen.getByRole("option", { name: "Every 15m" }).click();
+
+  await screen.getByRole("switch", { name: "Quiet hours" }).click();
+  await expect
+    .element(screen.getByRole("combobox", { name: "Quiet start" }))
+    .not.toBeInTheDocument();
+
+  await save(screen).click();
+  await vi.waitFor(() => expect(server.saved()).toHaveLength(1));
+  expect(server.saved()[0]?.sprite).toMatchObject({
+    enabled: true,
+    mode: "shadow",
+    scanIntervalMinutes: 15,
+    quietHoursEnabled: false,
+  });
+});
+
+it("triggers a manual shadow scan, refreshes the ledger summary and expands draft and blocked item details", async () => {
+  serve();
+  const wouldEntry = spriteLedgerEntry();
+  const blockedEntry = spriteLedgerEntry({
+    runId: "run-2",
+    threadId: "thread-2",
+    threadTitle: "部署上线确认",
+    decision: "blocked_items",
+    blockReason: "All items dropped by triage.",
+    keptItems: [],
+    droppedItems: [
+      {
+        kind: "next",
+        label: "按推荐执行",
+        fill: "就按推荐方案正式立项。",
+        grade: "C",
+        reason: "Requires human authorization",
+      },
+      {
+        kind: "angle",
+        label: "换个写法",
+        fill: "改一下按钮颜色。",
+        grade: "B",
+        reason: "Low value cosmetic change",
+      },
+    ],
+    draftMessage: null,
+  });
+  client.triggerSessionSpriteScan.mockResolvedValue(
+    ok({
+      scanned: 2,
+      wouldAdvance: 1,
+      blocked: 1,
+      errors: 0,
+      summary: spriteLedgerSummary({
+        totalEvaluated: 2,
+        wouldAdvance: 1,
+        blockedThread: 0,
+        blockedItems: 1,
+        errors: 0,
+      }),
+      entries: [wouldEntry, blockedEntry],
+    }),
+  );
+
+  await using screen = await open();
+  await screen.getByRole("button", { name: "Scan now" }).click();
+  await vi.waitFor(() => expect(client.triggerSessionSpriteScan).toHaveBeenCalledTimes(1));
+  expect(client.triggerSessionSpriteScan.mock.calls[0]?.[1]).toEqual({
+    bypassQuietHours: true,
+    bypassIdle: true,
+  });
+  await expect
+    .element(
+      screen.getByText("Evaluated 2 · Would advance 1 · Blocked 1 · Errors 0", { exact: false }),
+    )
+    .toBeVisible();
+  await expect
+    .element(screen.getByText("Last scan: evaluated 2, would advance 1, blocked 1, errors 0."))
+    .toBeVisible();
+  await expect.element(screen.getByText("/state/cn-session-sprite.jsonl")).toBeVisible();
+
+  await screen.getByRole("button", { name: "View recent observations (2)" }).click();
+  await expect.element(screen.getByText("登录页校验优化")).toBeVisible();
+  await expect.element(screen.getByText("部署上线确认")).toBeVisible();
+
+  await screen.getByRole("button", { name: "Details" }).first().click();
+  await expect.element(screen.getByText("[自动推进·只读核验", { exact: false })).toBeVisible();
+
+  await screen.getByRole("button", { name: "Details" }).nth(1).click();
+  await expect.element(screen.getByText("[C] 按推荐执行")).toBeVisible();
+  await expect.element(screen.getByText("Requires human authorization")).toBeVisible();
+  await expect.element(screen.getByText("[B] 换个写法")).toBeVisible();
+});
+
+it("edits blocked keywords on blur and restores defaults cleanly", async () => {
+  const server = serve();
+  await using screen = await open();
+  await screen.getByRole("button", { name: /Edit blocked keywords/ }).click();
+  const box = screen.getByRole("textbox", { name: "Blocked title keywords" });
+  await box.fill("CUSTOM-1, CUSTOM-2\nCUSTOM-1");
+  await screen.getByRole("textbox", { name: "Extra instructions" }).click();
+  await expect.element(unsavedBar(screen)).toBeVisible();
+
+  await screen.getByRole("button", { name: "Restore default blocked keywords" }).click();
+  await vi.waitFor(() => expect(screen.container.querySelector("[role=group]")).toBeNull());
+  expect(server.saved()).toHaveLength(0);
+});
+
+it("surfaces ledger load errors and refreshes on request", async () => {
+  serve();
+  client.loadSessionSpriteLedger
+    .mockReset()
+    .mockResolvedValueOnce(fails("Ledger unavailable."))
+    .mockResolvedValueOnce(ok(spriteLedgerPayload()));
+  await using screen = await open();
+  await expect.element(screen.getByText("Ledger unavailable.")).toBeVisible();
+  await screen.getByRole("button", { name: "Refresh ledger" }).click();
+  await expect
+    .element(screen.getByText("Evaluated 1 · Would advance 1 · Blocked 0 · Errors 0"))
+    .toBeVisible();
+  expect(client.loadSessionSpriteLedger).toHaveBeenCalledTimes(2);
 });

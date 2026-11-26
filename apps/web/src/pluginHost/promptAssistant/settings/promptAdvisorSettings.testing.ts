@@ -1,8 +1,13 @@
-import type {
-  PromptAdvisorConfig,
-  PromptAdvisorPayload,
-  PromptAdvisorStatus,
-  RoleStatus,
+/* oxlint-disable t3code/no-untranslated-copy -- test fixtures mimicking server-authored Chinese ledger entries */
+import {
+  DEFAULT_SESSION_SPRITE_CONFIG,
+  type PromptAdvisorConfig,
+  type PromptAdvisorPayload,
+  type PromptAdvisorStatus,
+  type RoleStatus,
+  type SessionSpriteLedgerEntry,
+  type SessionSpriteLedgerPayload,
+  type SessionSpriteLedgerSummary,
 } from "./promptAdvisorConfig.logic";
 
 export const DEFAULT_CONFIG: PromptAdvisorConfig = {
@@ -18,6 +23,7 @@ export const DEFAULT_CONFIG: PromptAdvisorConfig = {
     runtime: { instanceId: null, model: null, thinking: null },
     modeOverrides: { structured: "", bold: "", scoped: "" },
   },
+  sprite: DEFAULT_SESSION_SPRITE_CONFIG,
 };
 
 export const roleStatus = (patch: Partial<RoleStatus> = {}): RoleStatus => ({
@@ -69,5 +75,45 @@ export const advisorPayload = (
     },
   },
   defaults: DEFAULT_CONFIG,
+  ...patch,
+});
+
+export const spriteLedgerEntry = (
+  patch: Partial<SessionSpriteLedgerEntry> = {},
+): SessionSpriteLedgerEntry => ({
+  ts: "2026-11-26T11:20:00.000Z",
+  mode: "shadow",
+  trigger: "manual",
+  threadId: "thread-1",
+  threadTitle: "登录页校验优化",
+  runId: "run-1",
+  decision: "would_advance",
+  blockReason: null,
+  keptItems: [{ kind: "next", label: "跑回归测试", fill: "跑一遍登录页测试并确认通过。" }],
+  droppedItems: [],
+  draftMessage:
+    "[自动推进·只读核验｜非用户授权，禁做方向拍板/写操作/推送/公司侧改动]\n跑一遍登录页测试并确认通过。",
+  durationMs: 420,
+  ...patch,
+});
+
+export const spriteLedgerSummary = (
+  patch: Partial<SessionSpriteLedgerSummary> = {},
+): SessionSpriteLedgerSummary => ({
+  totalEvaluated: 1,
+  wouldAdvance: 1,
+  blockedThread: 0,
+  blockedItems: 0,
+  errors: 0,
+  lastScanAt: "2026-11-26T11:20:00.000Z",
+  ...patch,
+});
+
+export const spriteLedgerPayload = (
+  patch: Partial<SessionSpriteLedgerPayload> = {},
+): SessionSpriteLedgerPayload => ({
+  summary: spriteLedgerSummary(),
+  entries: [spriteLedgerEntry()],
+  ledgerPath: "/state/cn-session-sprite.jsonl",
   ...patch,
 });

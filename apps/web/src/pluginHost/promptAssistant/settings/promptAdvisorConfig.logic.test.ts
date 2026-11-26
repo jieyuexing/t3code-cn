@@ -3,13 +3,21 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   choicesWith,
   configFailureMessage,
+  DEFAULT_SESSION_SPRITE_CONFIG,
   describeRan,
   describeRoleStatus,
   describeSlotSharing,
+  formatKeywordsInput,
   fromSelectValue,
+  MAX_SPRITE_BLOCKED_KEYWORDS,
+  MAX_SPRITE_KEYWORD_CHARS,
+  numberChoicesWith,
+  parseKeywordsInput,
   parsePromptAdvisorFailure,
   parsePromptAdvisorPayload,
   parsePromptAdvisorTestRun,
+  parseSessionSpriteLedger,
+  parseSessionSpriteScan,
   promptAdvisorUrl,
   sameConfig,
   PROMPT_ADVISOR_PATHS,
@@ -21,8 +29,16 @@ import {
   withLens,
   withModeOverride,
   withRuntime,
+  withSprite,
 } from "./promptAdvisorConfig.logic";
-import { advisorPayload, DEFAULT_CONFIG, roleStatus } from "./promptAdvisorSettings.testing";
+import {
+  advisorPayload,
+  DEFAULT_CONFIG,
+  roleStatus,
+  spriteLedgerEntry,
+  spriteLedgerPayload,
+  spriteLedgerSummary,
+} from "./promptAdvisorSettings.testing";
 
 const RAN = {
   resolvedInstanceId: "antigravity",
@@ -187,6 +203,7 @@ describe("draft comparison and where a run ran", () => {
   it("compares configs by content, not key order", () => {
     const reordered: PromptAdvisorConfig = JSON.parse(
       JSON.stringify({
+        sprite: DEFAULT_CONFIG.sprite,
         refiner: DEFAULT_CONFIG.refiner,
         advisor: DEFAULT_CONFIG.advisor,
         version: 1,
@@ -226,5 +243,97 @@ describe("urls and failures", () => {
     expect(configFailureMessage(400)).toContain("rejected");
     expect(configFailureMessage(503)).toContain("No prompt advisor available");
     expect(configFailureMessage(500)).toBe("Request failed (500).");
+  });
+});
+
+describe("session sprite config, ledger and keywords", () => {
+  it("fills default sprite settings when a server payload omits sprite, and rejects invalid sprite values", () => {
+    const valid = advisorPayload();
+    const { sprite: _omitted, ...legacyConfig } = valid.config;
+    const { sprite: _omittedDefault, ...legacyDefaults } = valid.defaults;
+    expect(
+      parsePromptAdvisorPayload({
+        ...valid,
+        config: legacyConfig,
+        defaults: legacyDefaults,
+      })?.config.sprite,
+    ).toEqual(DEFAULT_SESSION_SPRITE_CONFIG);
+
+    for (const badSprite of [
+      null,
+      { ...DEFAULT_SESSION_SPRITE_CONFIG, mode: "auto" },
+      { ...DEFAULT_SESSION_SPRITE_CONFIG, scanIntervalMinutes: 1 },
+      { ...DEFAULT_SESSION_SPRITE_CONFIG, idleMinutes: 99 },
+      { ...DEFAULT_SESSION_SPRITE_CONFIG, maxPerThreadPerHumanTurn: 3 },
+      { ...DEFAULT_SESSION_SPRITE_CONFIG, blockedTitleKeywords: [""] },
+    ]) {
+      expect(
+        parsePromptAdvisorPayload({
+          ...valid,
+          config: { ...valid.config, sprite: badSprite },
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("parses session sprite ledger and scan payloads and rejects malformed entries", () => {
+    const ledger = spriteLedgerPayload();
+    expect(parseSessionSpriteLedger(ledger)).toEqual(ledger);
+    expect(
+      parseSessionSpriteLedger({
+        ...ledger,
+        entries: [{ ...spriteLedgerEntry(), mode: "auto" }],
+      }),
+    ).toBeNull();
+
+    const scan = {
+      scanned: 2,
+      wouldAdvance: 1,
+      blocked: 1,
+      errors: 0,
+      summary: spriteLedgerSummary({ totalEvaluated: 2, blockedItems: 1 }),
+      entries: [spriteLedgerEntry()],
+    };
+    expect(parseSessionSpriteScan(scan)).toEqual(scan);
+    expect(parseSessionSpriteScan({ ...scan, scanned: "two" })).toBeNull();
+  });
+
+  it("updates only sprite fields via withSprite", () => {
+    const updated = withSprite(DEFAULT_CONFIG, { enabled: true, scanIntervalMinutes: 15 });
+    expect(updated.sprite.enabled).toBe(true);
+    expect(updated.sprite.scanIntervalMinutes).toBe(15);
+    expect(updated.sprite.idleMinutes).toBe(DEFAULT_CONFIG.sprite.idleMinutes);
+    expect(updated.advisor).toEqual(DEFAULT_CONFIG.advisor);
+    expect(DEFAULT_CONFIG.sprite.enabled).toBe(false);
+  });
+
+  it("parses, deduplicates, trims and bounds blocked keywords", () => {
+    expect(parseKeywordsInput("  GWH-, NSNET-\n141，GWH-\n\n  work  ")).toEqual([
+      "GWH-",
+      "NSNET-",
+      "141",
+      "work",
+    ]);
+    const overLong = "a".repeat(MAX_SPRITE_KEYWORD_CHARS + 10);
+    const dupAfterSlice = "a".repeat(MAX_SPRITE_KEYWORD_CHARS);
+    expect(parseKeywordsInput(`${overLong}\n${dupAfterSlice}`)).toEqual([
+      "a".repeat(MAX_SPRITE_KEYWORD_CHARS),
+    ]);
+    const many = Array.from({ length: MAX_SPRITE_BLOCKED_KEYWORDS + 10 }, (_, idx) => `kw-${idx}`);
+    expect(parseKeywordsInput(many.join(","))).toHaveLength(MAX_SPRITE_BLOCKED_KEYWORDS);
+    expect(formatKeywordsInput(["GWH-", "141"])).toBe("GWH-\n141");
+    expect(numberChoicesWith([5, 10, 15], 12)).toEqual([5, 10, 12, 15]);
+  });
+
+  it("builds urls for sprite ledger and scan paths", () => {
+    expect(
+      promptAdvisorUrl(
+        { httpBase: "/api/cn", query: { wsTicket: "t2" } },
+        PROMPT_ADVISOR_PATHS.spriteLedger,
+      ),
+    ).toBe("/api/cn/prompt-advisor/sprite/ledger?wsTicket=t2");
+    expect(
+      promptAdvisorUrl({ httpBase: "/api/cn", query: {} }, PROMPT_ADVISOR_PATHS.spriteScan),
+    ).toBe("/api/cn/prompt-advisor/sprite/scan");
   });
 });

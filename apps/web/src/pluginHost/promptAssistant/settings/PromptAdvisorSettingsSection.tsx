@@ -47,6 +47,7 @@ import {
   withRuntime,
 } from "./promptAdvisorConfig.logic";
 import { type TestState, usePromptAdvisorSettings } from "./usePromptAdvisorSettings";
+import { SessionSpriteSettingsBlock } from "./SessionSpriteSettingsBlock";
 
 /** Saves when the box loses focus, so typing never round-trips to the server. */
 function DraftTextarea(props: {
@@ -670,6 +671,12 @@ export function PromptAdvisorSettingsSection(props: { readonly environmentId: En
         onEdit={settings.edit}
         onRefresh={() => settings.refresh()}
         onTest={(mode) => test({ role: "refiner", mode })}
+      />
+      <SessionSpriteSettingsBlock
+        environmentId={props.environmentId}
+        payload={view}
+        disabled={settings.saving}
+        onEdit={settings.edit}
       />
       {settings.dirty || settings.saveError !== null ? (
         <div
