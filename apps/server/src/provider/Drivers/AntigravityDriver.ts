@@ -36,6 +36,7 @@ import {
 } from "../../textGeneration/AntigravityTextGeneration.ts";
 import { makeAntigravityPromptAdvisorSampler } from "../../textGeneration/promptAdvisor.cn.ts";
 import { registerPromptAdvisor } from "../../textGeneration/promptAdvisorRegistry.cn.ts";
+import { withAntigravityUsageLimits } from "../antigravityUsageLimits.cn.ts";
 import { makeAntigravityAuth, type AntigravityAuth } from "../AntigravityAuth.ts";
 import * as AntigravityInstallation from "../AntigravityInstallation.ts";
 import { brokenRuntimeError } from "../providerCompatibility.ts";
@@ -705,7 +706,7 @@ export const AntigravityDriver: ProviderDriver<
       ),
     );
 
-    return {
+    const baseInstance = {
       instanceId,
       driverKind: DRIVER,
       continuationIdentity,
@@ -735,5 +736,13 @@ export const AntigravityDriver: ProviderDriver<
       auth: authFlow.controller,
       refreshModels,
     } satisfies ProviderInstance;
+    return yield* withAntigravityUsageLimits(baseInstance, {
+      auth,
+      binaryPath: settings.binaryPath,
+      profileDirectory,
+      runtimeTempDirectory: directories.runtimeTemp,
+      processEnvironment,
+      withProcess: authFlow.withProcess,
+    });
   }),
 };
