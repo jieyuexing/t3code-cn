@@ -10,6 +10,7 @@ import type { PromptAdvisorInspection } from "./promptAdvisor.cn.ts";
 import { IDLE_INSPECTION, stubPromptAdvisorRuntime } from "./promptAdvisor.testkit.cn.ts";
 import {
   DEFAULT_PROMPT_ADVISOR_CONFIG,
+  DEFAULT_SESSION_SPRITE_CONFIG,
   decodePromptAdvisorConfig,
   loadPromptAdvisorConfig,
   type PromptAdvisorConfig,
@@ -69,11 +70,30 @@ describe("提示词顾问配置：结构与目标解析", () => {
         ...base,
         refiner: { ...base.refiner, modeOverrides: { ...base.refiner.modeOverrides, bold: 1 } },
       },
+      { ...base, sprite: null },
+      { ...base, sprite: {} },
+      { ...base, sprite: { ...base.sprite, mode: "auto" } },
+      { ...base, sprite: { ...base.sprite, scanIntervalMinutes: 1 } },
+      { ...base, sprite: { ...base.sprite, scanIntervalMinutes: 61 } },
+      { ...base, sprite: { ...base.sprite, idleMinutes: 0 } },
+      { ...base, sprite: { ...base.sprite, maxPerThreadPerHumanTurn: 3 } },
+      { ...base, sprite: { ...base.sprite, maxGlobalPerHour: 13 } },
+      { ...base, sprite: { ...base.sprite, quietStartHour: 25 } },
+      { ...base, sprite: { ...base.sprite, quietEndHour: -1 } },
+      { ...base, sprite: { ...base.sprite, blockedTitleKeywords: [""] } },
+      { ...base, sprite: { ...base.sprite, blockedTitleKeywords: Array(65).fill("kw") } },
     ]) {
       expect(Option.isNone(decodePromptAdvisorConfig(candidate)), JSON.stringify(candidate)).toBe(
         true,
       );
     }
+  });
+
+  it("旧配置缺少 sprite 字段时向后兼容补全默认值", () => {
+    const { sprite: _omitted, ...legacy } = DEFAULT_PROMPT_ADVISOR_CONFIG;
+    expect(decodePromptAdvisorConfig(legacy)).toEqual(
+      Option.some({ ...legacy, sprite: DEFAULT_SESSION_SPRITE_CONFIG }),
+    );
   });
 
   it("跟随时优化沿用顾问的目标，不跟随时用自己的", () => {

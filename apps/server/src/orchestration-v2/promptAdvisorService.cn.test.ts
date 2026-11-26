@@ -18,6 +18,10 @@ import {
   type PromptAdvisorSampler,
 } from "../textGeneration/promptAdvisor.cn.ts";
 import {
+  listAdvisorSnapshots,
+  resetAdvisorSnapshotsForTest,
+} from "../textGeneration/sessionSpriteRegistry.cn.ts";
+import {
   type PromptAdvisorServiceDeps,
   hasExplicitReplyChoices,
   makePromptAdvisorService,
@@ -359,6 +363,30 @@ describe("上下文顾问服务", () => {
       expect(yield* native({ enabled: true, advisor: false })).toBe(true);
       expect(yield* native({ enabled: true, advisor: true })).toBe(false);
       expect(yield* native({ enabled: false, advisor: false })).toBe(false);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("发布建议后登记小精灵快照并截断末条回复，新 run 开始时清理快照", () =>
+    Effect.gen(function* () {
+      resetAdvisorSnapshotsForTest();
+      const longReply = `${"前".repeat(400)}${"尾".repeat(1_500)}`;
+      const harness = yield* makeHarness({
+        rows: [userItem("run-1", "改一下"), assistantItem(longReply)],
+      });
+      yield* harness.emit(run("run-1", "thread-snap"));
+      yield* Queue.take(harness.published);
+      const saved = listAdvisorSnapshots().find((entry) => entry.threadId === "thread-snap");
+      expect(saved).toMatchObject({
+        threadId: "thread-snap",
+        runId: "run-1",
+        encoded: ENCODED,
+        hasExplicitChoices: false,
+        lastReplyExcerpt: "尾".repeat(1_500),
+      });
+      yield* harness.emit(run("run-2", "thread-snap", { status: "running" }));
+      yield* settle(harness);
+      expect(listAdvisorSnapshots().some((entry) => entry.threadId === "thread-snap")).toBe(false);
+      resetAdvisorSnapshotsForTest();
     }).pipe(Effect.scoped),
   );
 });

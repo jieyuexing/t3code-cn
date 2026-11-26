@@ -20,6 +20,11 @@ import * as ServerConfig from "../config.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { threadWorkspaceRoot } from "../project/threadWorkspaceRoot.ts";
+import {
+  makeSessionSpriteBackgroundLayer,
+  runSessionSpriteScan,
+  type SessionSpriteServiceDeps,
+} from "../orchestration-v2/sessionSpriteService.cn.ts";
 import { hasExplicitReplyChoices } from "../orchestration-v2/promptAdvisorService.cn.ts";
 import {
   buildPromptAdvisorPrompt,
@@ -60,11 +65,15 @@ import {
   selectThreadTail,
   threadMessages,
 } from "../textGeneration/promptRefiner.cn.ts";
+import { readSessionSpriteLedger } from "../textGeneration/sessionSprite.cn.ts";
 
 export const PROMPT_REFINE_PATH = "/api/cn/prompt-refine";
 export const PROMPT_ADVISOR_CONFIG_PATH = "/api/cn/prompt-advisor/config";
 export const PROMPT_ADVISOR_TEST_RUN_PATH = "/api/cn/prompt-advisor/test-run";
 export const PROMPT_ADVISOR_CONFIG_FILE = "cn-prompt-advisor.json";
+export const SESSION_SPRITE_LEDGER_FILE = "cn-session-sprite.jsonl";
+export const SESSION_SPRITE_LEDGER_PATH = "/api/cn/prompt-advisor/sprite/ledger";
+export const SESSION_SPRITE_SCAN_PATH = "/api/cn/prompt-advisor/sprite/scan";
 
 const MAX_DRAFT_CHARS = 20_000;
 // A draft of CJK text takes three bytes a character, plus the JSON around it.
@@ -386,21 +395,81 @@ const handleTestRun = Effect.fn("PromptAdvisorConfigHttp.testRun")(function* () 
   );
 });
 
+const SpriteScanRequest = Schema.Struct({
+  bypassQuietHours: Schema.optional(Schema.Boolean),
+  bypassIdle: Schema.optional(Schema.Boolean),
+});
+const decodeSpriteScanJson = Schema.decodeUnknownOption(Schema.fromJsonString(SpriteScanRequest));
+
+const readSpriteScanOptions = Effect.fn("SessionSpriteHttp.readScanOptions")(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  if (Number(request.headers["content-length"] ?? "0") > MAX_BODY_BYTES) {
+    return Option.none();
+  }
+  const text = yield* request.text.pipe(
+    Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_BODY_BYTES)),
+    Effect.orElseSucceed(() => null),
+  );
+  if (text === null) return Option.none();
+  if (text.trim() === "") return Option.some<typeof SpriteScanRequest.Type>({});
+  return decodeSpriteScanJson(text);
+});
+
+const handleGetSpriteLedger = Effect.fn("SessionSpriteHttp.getLedger")(function* (
+  ledgerPath: string,
+) {
+  yield* authenticateMediaRequest(AuthOrchestrationOperateScope);
+  const { summary, entries } = yield* readSessionSpriteLedger(ledgerPath);
+  return HttpServerResponse.jsonUnsafe({ summary, entries, ledgerPath }, { headers: NO_STORE });
+});
+
+const handlePostSpriteScan = Effect.fn("SessionSpriteHttp.postScan")(function* (
+  deps: SessionSpriteServiceDeps,
+  scanLock: Semaphore.Semaphore,
+) {
+  yield* authenticateMediaRequest(AuthOrchestrationOperateScope);
+  const options = yield* readSpriteScanOptions();
+  if (Option.isNone(options)) return refusal(400, "The sprite scan request body is not valid.");
+  const result = yield* scanLock.withPermits(1)(
+    runSessionSpriteScan(deps, {
+      trigger: "manual",
+      bypassQuietHours: options.value.bypassQuietHours,
+      bypassIdle: options.value.bypassIdle,
+    }),
+  );
+  return HttpServerResponse.jsonUnsafe(result, { headers: NO_STORE });
+});
+
 // The store is read at layer build time so the server provides it beside the other route layers.
 // The saved prompt advisor config is loaded here too, so it is in force from server start.
 export const promptRefinerRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const projection = yield* ProjectionStore.ProjectionStoreV2;
+    const projects = yield* ProjectService.ProjectService;
     const { stateDir } = yield* ServerConfig.ServerConfig;
     const path = yield* Path.Path;
     const filePath = path.join(stateDir, PROMPT_ADVISOR_CONFIG_FILE);
+    const ledgerPath = path.join(stateDir, SESSION_SPRITE_LEDGER_FILE);
     setPromptAdvisorConfig(yield* loadPromptAdvisorConfig(filePath));
     const writing = yield* Semaphore.make(1);
+    const scanLock = yield* Semaphore.make(1);
+    const spriteDeps: SessionSpriteServiceDeps = {
+      projectionStore: projection,
+      ledgerPath,
+      getProjectRoot: (projectId) =>
+        projects.getById(projectId).pipe(
+          Effect.map((project) => Option.getOrUndefined(project)?.workspaceRoot),
+          Effect.orElseSucceed(() => undefined),
+        ),
+    };
     return Layer.mergeAll(
       HttpRouter.add("POST", PROMPT_REFINE_PATH, handle(projection)),
       HttpRouter.add("GET", PROMPT_ADVISOR_CONFIG_PATH, handleGetConfig()),
       HttpRouter.add("PUT", PROMPT_ADVISOR_CONFIG_PATH, handlePutConfig(filePath, writing)),
       HttpRouter.add("POST", PROMPT_ADVISOR_TEST_RUN_PATH, handleTestRun()),
+      HttpRouter.add("GET", SESSION_SPRITE_LEDGER_PATH, handleGetSpriteLedger(ledgerPath)),
+      HttpRouter.add("POST", SESSION_SPRITE_SCAN_PATH, handlePostSpriteScan(spriteDeps, scanLock)),
+      makeSessionSpriteBackgroundLayer({ ...spriteDeps, scanLock }),
     );
   }),
 );

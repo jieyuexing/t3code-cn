@@ -5,12 +5,17 @@ import type {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as FiberMap from "effect/FiberMap";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import type { PromptAdvisorSampler } from "../textGeneration/promptAdvisor.cn.ts";
+import {
+  clearAdvisorSnapshot,
+  recordAdvisorSnapshot,
+} from "../textGeneration/sessionSpriteRegistry.cn.ts";
 import { forkParked } from "../serverActivation.ts";
 import type { EventSinkV2Shape } from "./EventSink.ts";
 import type { ProjectionStoreV2Shape } from "./ProjectionStore.ts";
@@ -121,17 +126,31 @@ export const makePromptAdvisorService = Effect.fn("PromptAdvisorService.make")(f
     }
     const reply = messages.at(-1);
     if (reply?.role !== "assistant") return;
+    const hasExplicitChoices = hasExplicitReplyChoices(reply.text);
     const text = yield* advisor.value.sample({
       messages,
-      hasExplicitChoices: hasExplicitReplyChoices(reply.text),
+      hasExplicitChoices,
     });
     if (text === null || !(yield* deps.enabled) || !(yield* isLatest)) return;
     yield* deps.publish(threadId, { runId: run.id, text });
+    recordAdvisorSnapshot({
+      threadId,
+      runId: run.id,
+      encoded: text,
+      hasExplicitChoices,
+      lastReplyExcerpt: reply.text.slice(-1_500),
+      sampledAt: yield* Clock.currentTimeMillis,
+      ...(trigger.scheduledTaskId === undefined
+        ? {}
+        : { scheduledTaskId: trigger.scheduledTaskId }),
+    });
   });
 
   const onRunUpdated = (run: OrchestrationV2Run) => {
     if (run.status !== "completed") {
-      return FiberMap.remove(sampling, run.threadId);
+      return Effect.sync(() => clearAdvisorSnapshot(run.threadId)).pipe(
+        Effect.andThen(FiberMap.remove(sampling, run.threadId)),
+      );
     }
     if (
       handled.has(run.id) ||

@@ -18,6 +18,19 @@ export interface PromptAdvisorLensesConfig {
   readonly blastRadius: boolean;
 }
 
+export interface SessionSpriteConfig {
+  readonly enabled: boolean;
+  readonly mode: "shadow";
+  readonly scanIntervalMinutes: number;
+  readonly idleMinutes: number;
+  readonly maxPerThreadPerHumanTurn: number;
+  readonly maxGlobalPerHour: number;
+  readonly quietHoursEnabled: boolean;
+  readonly quietStartHour: number;
+  readonly quietEndHour: number;
+  readonly blockedTitleKeywords: ReadonlyArray<string>;
+}
+
 export interface PromptAdvisorConfig {
   readonly version: 1;
   readonly advisor: {
@@ -35,11 +48,38 @@ export interface PromptAdvisorConfig {
       readonly scoped: string;
     };
   };
+  readonly sprite: SessionSpriteConfig;
 }
 
 export type PromptAdvisorRole = "advisor" | "refiner";
 
 const AUTOMATIC: RoleModelSelection = { instanceId: null, model: null, thinking: null };
+
+export const DEFAULT_SESSION_SPRITE_CONFIG: SessionSpriteConfig = {
+  enabled: false,
+  mode: "shadow",
+  scanIntervalMinutes: 10,
+  idleMinutes: 5,
+  maxPerThreadPerHumanTurn: 1,
+  maxGlobalPerHour: 3,
+  quietHoursEnabled: true,
+  quietStartHour: 22,
+  quietEndHour: 8,
+  blockedTitleKeywords: [
+    "GWH-",
+    "NSNET-",
+    "ETECH",
+    "SIR",
+    "work",
+    "141",
+    "CostMan",
+    "台式机",
+    "定时任务",
+    "巡检",
+    "每周维护",
+    "每日同步",
+  ],
+};
 
 export const DEFAULT_PROMPT_ADVISOR_CONFIG: PromptAdvisorConfig = {
   version: 1,
@@ -54,11 +94,14 @@ export const DEFAULT_PROMPT_ADVISOR_CONFIG: PromptAdvisorConfig = {
     runtime: AUTOMATIC,
     modeOverrides: { structured: "", bold: "", scoped: "" },
   },
+  sprite: DEFAULT_SESSION_SPRITE_CONFIG,
 };
 
 const MAX_ID_CHARS = 128;
 const MAX_APPENDIX_CHARS = 2_000;
 const MAX_PROMPT_CHARS = 8_000;
+const MAX_BLOCKED_KEYWORDS = 64;
+const MAX_KEYWORD_CHARS = 64;
 
 const Identifier = Schema.NullOr(
   Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_ID_CHARS)),
@@ -69,6 +112,25 @@ const RoleModelSelectionSchema = Schema.Struct({
   thinking: Identifier,
 });
 const Prompt = Schema.String.check(Schema.isMaxLength(MAX_PROMPT_CHARS));
+const BlockedKeyword = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_KEYWORD_CHARS),
+);
+
+const SessionSpriteConfigSchema = Schema.Struct({
+  enabled: Schema.Boolean,
+  mode: Schema.Literal("shadow"),
+  scanIntervalMinutes: Schema.Int.check(Schema.isBetween({ minimum: 5, maximum: 60 })),
+  idleMinutes: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 60 })),
+  maxPerThreadPerHumanTurn: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 2 })),
+  maxGlobalPerHour: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 12 })),
+  quietHoursEnabled: Schema.Boolean,
+  quietStartHour: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 23 })),
+  quietEndHour: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 23 })),
+  blockedTitleKeywords: Schema.Array(BlockedKeyword).check(
+    Schema.isMaxLength(MAX_BLOCKED_KEYWORDS),
+  ),
+});
 
 const PromptAdvisorConfigSchema = Schema.Struct({
   version: Schema.Literal(1),
@@ -87,6 +149,9 @@ const PromptAdvisorConfigSchema = Schema.Struct({
     runtime: RoleModelSelectionSchema,
     modeOverrides: Schema.Struct({ structured: Prompt, bold: Prompt, scoped: Prompt }),
   }),
+  sprite: SessionSpriteConfigSchema.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_SESSION_SPRITE_CONFIG)),
+  ),
 });
 const decodeConfig = Schema.decodeUnknownOption(PromptAdvisorConfigSchema);
 const ConfigJson = Schema.fromJsonString(PromptAdvisorConfigSchema);

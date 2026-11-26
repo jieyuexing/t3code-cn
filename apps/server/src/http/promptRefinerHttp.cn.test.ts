@@ -9,7 +9,9 @@ import {
   TextGenerationError,
   type AuthEnvironmentScope,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -39,10 +41,17 @@ import {
 import { stubPromptAdvisorRuntime } from "../textGeneration/promptAdvisor.testkit.cn.ts";
 import { registerPromptAdvisor } from "../textGeneration/promptAdvisorRegistry.cn.ts";
 import {
+  recordAdvisorSnapshot,
+  resetAdvisorSnapshotsForTest,
+} from "../textGeneration/sessionSpriteRegistry.cn.ts";
+import {
   PROMPT_ADVISOR_CONFIG_FILE,
   PROMPT_ADVISOR_TEST_RUN_PATH,
   PROMPT_ADVISOR_CONFIG_PATH,
   PROMPT_REFINE_PATH,
+  SESSION_SPRITE_LEDGER_FILE,
+  SESSION_SPRITE_LEDGER_PATH,
+  SESSION_SPRITE_SCAN_PATH,
   promptRefinerRouteLayer,
 } from "./promptRefinerHttp.cn.ts";
 
@@ -72,6 +81,8 @@ const serve = (options: {
   readonly authFails?: boolean;
   /** Written to the state directory before the routes start, as if saved by an earlier run. */
   readonly savedConfig?: string;
+  readonly findThread?: (threadId: string) => unknown;
+  readonly getThreadShell?: (threadId: string) => unknown;
 }) =>
   Effect.gen(function* () {
     const serverConfig = yield* Layer.build(
@@ -79,6 +90,7 @@ const serve = (options: {
     );
     const { stateDir } = Context.get(serverConfig, ServerConfig.ServerConfig);
     const configFile = `${stateDir}/${PROMPT_ADVISOR_CONFIG_FILE}`;
+    const ledgerFile = `${stateDir}/${SESSION_SPRITE_LEDGER_FILE}`;
     if (options.savedConfig !== undefined) {
       yield* (yield* FileSystem.FileSystem).writeFileString(configFile, options.savedConfig);
     }
@@ -120,6 +132,10 @@ const serve = (options: {
         ),
         Layer.provide(
           Layer.mock(ProjectionStore.ProjectionStoreV2, {
+            findThread: (threadId) =>
+              Effect.succeed((options.findThread?.(threadId) ?? null) as never),
+            getThreadShell: (threadId) =>
+              Effect.succeed((options.getThreadShell?.(threadId) ?? null) as never),
             getTimelinePage: () =>
               Effect.succeed({
                 items: [{ item: { type: "user_message", text: "先看下 server.ts" } }],
@@ -166,6 +182,7 @@ const serve = (options: {
       {
         request,
         configFile,
+        ledgerFile,
       },
     );
   });
@@ -934,6 +951,126 @@ describe("test runs tell broken output from an empty answer", () => {
           scenario: "vague",
         });
         expect(result.json).toMatchObject({ items: [], dropped: 0 });
+      }),
+    ),
+  );
+});
+
+describe("session sprite HTTP routes and config compatibility", () => {
+  it.live("enforces authentication and rejects invalid sprite config updates", () =>
+    withWorkspace((root) =>
+      Effect.gen(function* () {
+        const denied = yield* serve({ root, authFails: true });
+        expect((yield* denied.request("GET", SESSION_SPRITE_LEDGER_PATH)).status).toBe(401);
+        expect((yield* denied.request("POST", SESSION_SPRITE_SCAN_PATH, {})).status).toBe(401);
+
+        const readOnly = yield* serve({ root, scopes: [AuthOrchestrationReadScope] });
+        expect((yield* readOnly.request("GET", SESSION_SPRITE_LEDGER_PATH)).status).toBe(403);
+        expect((yield* readOnly.request("POST", SESSION_SPRITE_SCAN_PATH, {})).status).toBe(403);
+
+        const api = yield* serve({ root });
+        const invalidMode = yield* api.request("PUT", PROMPT_ADVISOR_CONFIG_PATH, {
+          config: {
+            ...DEFAULT_PROMPT_ADVISOR_CONFIG,
+            sprite: { ...DEFAULT_PROMPT_ADVISOR_CONFIG.sprite, mode: "auto" },
+          },
+        });
+        expect(invalidMode.status).toBe(400);
+      }),
+    ),
+  );
+
+  it.live("loads legacy config without sprite and runs manual sprite scan into the ledger", () =>
+    withWorkspace((root) =>
+      Effect.gen(function* () {
+        resetAdvisorSnapshotsForTest();
+        const { sprite: _omitted, ...legacy } = DEFAULT_PROMPT_ADVISOR_CONFIG;
+        yield* registerPromptAdvisor(
+          "test",
+          advisor(() =>
+            Effect.succeed(
+              JSON.stringify({
+                decisions: [{ index: 0, grade: "A", reason: "只读核验" }],
+              }),
+            ),
+          ),
+        );
+        const now = yield* Clock.currentTimeMillis;
+        recordAdvisorSnapshot({
+          threadId: "t1" as never,
+          runId: "r1" as never,
+          encoded: encodedItems({
+            kind: "challenge",
+            label: "查影响面",
+            fill: "请只读核验 diff 之外的调用方。",
+          }),
+          hasExplicitChoices: false,
+          lastReplyExcerpt: "已完成修改。",
+          sampledAt: now,
+        });
+        const api = yield* serve({
+          root,
+          savedConfig: JSON.stringify(legacy),
+          findThread: (id) =>
+            id === "t1"
+              ? {
+                  id: "t1",
+                  projectId: "p1",
+                  title: "个人仓优化",
+                  worktreePath: root,
+                  deletedAt: null,
+                  archivedAt: null,
+                  settledOverride: null,
+                  settledAt: null,
+                  snoozedUntil: null,
+                  lineage: { relationshipToParent: null },
+                }
+              : null,
+          getThreadShell: (id) =>
+            id === "t1"
+              ? {
+                  activeRunId: null,
+                  deletedAt: null,
+                  pendingRuntimeRequest: null,
+                  latestUserAuthoredMessageAt: DateTime.makeUnsafe(now - 60_000),
+                  latestUserMessageAt: DateTime.makeUnsafe(now - 60_000),
+                }
+              : null,
+        });
+
+        const cfg = yield* api.request("GET", PROMPT_ADVISOR_CONFIG_PATH);
+        expect(cfg.status).toBe(200);
+        expect(cfg.json.config).toEqual(DEFAULT_PROMPT_ADVISOR_CONFIG);
+
+        const initialLedger = yield* api.request("GET", SESSION_SPRITE_LEDGER_PATH);
+        expect(initialLedger.status).toBe(200);
+        expect(initialLedger.json).toMatchObject({
+          entries: [],
+          ledgerPath: api.ledgerFile,
+          summary: { totalEvaluated: 0 },
+        });
+
+        expect(
+          (yield* api.request("POST", SESSION_SPRITE_SCAN_PATH, "{bad", { raw: true })).status,
+        ).toBe(400);
+
+        const scanned = yield* api.request("POST", SESSION_SPRITE_SCAN_PATH, {
+          bypassQuietHours: true,
+          bypassIdle: true,
+        });
+        expect(scanned.status).toBe(200);
+        expect(scanned.json).toMatchObject({
+          scanned: 1,
+          wouldAdvance: 1,
+          blocked: 0,
+          errors: 0,
+          summary: { totalEvaluated: 1, wouldAdvance: 1 },
+        });
+
+        const afterLedger = yield* api.request("GET", SESSION_SPRITE_LEDGER_PATH);
+        expect(afterLedger.status).toBe(200);
+        expect(afterLedger.json.summary).toMatchObject({ totalEvaluated: 1, wouldAdvance: 1 });
+        resetAdvisorSnapshotsForTest();
       }),
     ),
   );
