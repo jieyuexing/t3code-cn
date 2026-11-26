@@ -100,7 +100,7 @@ Limits 分段每个周窗口卡片（`PoolWindowCard`）在满足条件时追加
 - **多账号处理**：`antigravity` 除各实例 `<stateDir>/providers/antigravity/<sha256(instanceId)>/antigravity-acp/conversations` 外，还会扫描共享 `dataRoots`（如 `~/.gemini/antigravity-cli/conversations`），且 `UsageBucket` 仅带 `sourcePath`、不含 `instanceId` 或账号标识，CLIProxyAPI 账号更无本地目录。因此同一 driver 出现多个账号/实例（`countDistinctDriverAccounts > 1`）时无法可靠归属，不显示数字，仅显示「多账号共用本机用量记录，暂不按账号估算」。
 - **窗口模型范围（`UsageWindowModelScope`）**：`packages/contracts/src/providerUsageLimits.ts` 在 `ServerProviderUsageWindow` 新增可选字段 `modelScope`（不升 `USAGE_CONTRACT_VERSION`）：
   - `claudeUsageLimits.ts`：`seven_day` 标 `all`；`seven_day_fable`/`opus`/`sonnet`/`haiku` 标前缀匹配 `claude-<family>-`。
-  - `antigravityUsageLimits.ts`：`3p-weekly` 标 `["claude-", "gpt-"]`；`gemini-weekly` 标 `["gemini-"]` 排除 `argon`/`carbon`；`gemini-argon-*` / `gemini-carbon-*` 分别限定各自子串；`modelWindows` 降级分别限定 `gemini-` / `claude-` / `gpt-`。
+  - Antigravity：上游 5258（#43026）删除了 `antigravityUsageLimits.ts`，不再从 Google 内部接口读额度，fork 原先在它上面加的窗口范围随之删除，Antigravity 实例当前没有额度窗口。补回另开一条线（11-26 用户选“C”），方案在总仓 `.local/tmp/t3code-cn/1126-antigravity-quota-restore/`。
   - `opencode` 的 `go_weekly` 与其他范围不明且非账号全模型的窗口不设 `modelScope`，估算器返回 `unknownScope`、不显示数字。
 
 ## 取数方式与契约边界
@@ -112,6 +112,6 @@ Limits 分段每个周窗口卡片（`PoolWindowCard`）在满足条件时追加
 
 ## 上游改动与未做
 
-- 上游文件最小插入：`packages/contracts/src/providerUsageLimits.ts`（+13）、`packages/provider-core/src/server/usageLimits.ts`（+31/-10）、`apps/server/src/provider/{claudeUsageLimits,antigravityUsageLimits}.ts`（+15/-2 与 +29/-1）及各自单测、`apps/web/src/state/usage.ts`（+1/-1 导出 `usageByWindowAtom`）、`apps/web/src/components/usage/{UsageLimits,UsageLimitsPooled,UsagePage}.tsx`（+7/-1、+19/-2、+12/-1）。
+- 上游文件最小插入：`packages/contracts/src/providerUsageLimits.ts`（+13）、`packages/provider-core/src/server/usageLimits.ts`（+31/-10）、`apps/server/src/provider/claudeUsageLimits.ts`（+15/-2）及其单测、`apps/web/src/state/usage.ts`（+1/-1 导出 `usageByWindowAtom`）、`apps/web/src/components/usage/{UsageLimits,UsageLimitsPooled,UsagePage}.tsx`（+7/-1、+19/-2、+12/-1）。
 - 文案沿用 `usage-speed` 先例，放在 `weeklyApiEstimateModel.cn.ts` 按 `useLocale()` 切中英文，不改动 `apps/web/src/i18n/translations/*.json`，在文案分支局部加 `oxlint-disable t3code/no-untranslated-copy` 保持 `check:changed` 零报错。
 - 未做：移动端（`apps/mobile` Limits 界面）未做；订阅月费与回本倍数未做。
