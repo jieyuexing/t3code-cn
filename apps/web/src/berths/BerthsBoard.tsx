@@ -44,6 +44,11 @@ import { readBerths, writeBerths } from "./berthsStorage";
 
 const SLOTS = [0, 1, 2, 3, 4, 5] as const;
 
+// Base UI modals do not register into ui-sdk's layer stack; pause page shortcuts while any dialog is open.
+const OPEN_MODAL_SELECTOR =
+  '[role="dialog"]:not([hidden]):not([aria-hidden="true"]), [role="alertdialog"]:not([hidden]):not([aria-hidden="true"])';
+const hasNoModalOpen = () => document.querySelector(OPEN_MODAL_SELECTOR) === null;
+
 const STATUS_LABEL: Readonly<Record<PendingThreadStatus, string>> = {
   approval: "待审批",
   input: "待回答",
@@ -346,13 +351,15 @@ export function BerthsBoard({
     emptyInputRefs.current[slot]?.focus();
   };
 
-  useShortcut("1", () => activateSlot(0));
-  useShortcut("2", () => activateSlot(1));
-  useShortcut("3", () => activateSlot(2));
-  useShortcut("4", () => activateSlot(3));
-  useShortcut("5", () => activateSlot(4));
-  useShortcut("6", () => activateSlot(5));
-  useShortcut("escape", () => setExpandedSlot(null), { when: () => activeExpanded !== null });
+  useShortcut("1", () => activateSlot(0), { when: hasNoModalOpen });
+  useShortcut("2", () => activateSlot(1), { when: hasNoModalOpen });
+  useShortcut("3", () => activateSlot(2), { when: hasNoModalOpen });
+  useShortcut("4", () => activateSlot(3), { when: hasNoModalOpen });
+  useShortcut("5", () => activateSlot(4), { when: hasNoModalOpen });
+  useShortcut("6", () => activateSlot(5), { when: hasNoModalOpen });
+  useShortcut("escape", () => setExpandedSlot(null), {
+    when: () => activeExpanded !== null && hasNoModalOpen(),
+  });
 
   const seated = new Set(seatedIds);
   const unseated = view.threads.filter((thread) => !seated.has(thread.threadId));

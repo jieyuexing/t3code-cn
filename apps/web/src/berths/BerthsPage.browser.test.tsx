@@ -170,6 +170,50 @@ it("renders 6 fixed rows (E1, E2, 03–06), expands via accordion/shortcuts, and
   expect(readBerths(environmentId)).toEqual(["e1", "e2", "p3", null, null, null]);
 });
 
+it("suppresses 1–6 and Escape shortcuts while an external modal dialog or alertdialog is open", async () => {
+  using _fresh = fresh();
+  writeBerths(environmentId, ["e1", null, null, null, null, null]);
+  const view = make([
+    thread("e1", {
+      displayTitle: "GWH-350 SIR#91",
+      status: "input",
+      snippet: "等待确认译法",
+    }),
+  ]);
+  await using screen = await render(
+    <div>
+      {board(view)}
+      <div role="dialog" aria-label="外部设置弹窗">
+        <button type="button">弹窗按钮</button>
+      </div>
+    </div>,
+    { router: false },
+  );
+
+  // Focus on a non-input inside an external Base UI dialog: "1" must not expand E1.
+  await userEvent.click(page.getByRole("button", { name: "弹窗按钮" }));
+  await userEvent.keyboard("1");
+  await expect.element(slotRow("E1").getByText("等待确认译法")).not.toBeInTheDocument();
+
+  // Close the dialog (keeping the wrapper div so BerthsBoard stays mounted), expand E1 via "1",
+  // then open an alertdialog: Escape must not collapse E1.
+  await screen.rerender(<div>{board(view)}</div>);
+  await userEvent.keyboard("1");
+  await expect.element(slotRow("E1").getByText("等待确认译法")).toBeVisible();
+
+  await screen.rerender(
+    <div>
+      {board(view)}
+      <div role="alertdialog" aria-label="确认操作">
+        <button type="button">知道了</button>
+      </div>
+    </div>,
+  );
+  await userEvent.click(page.getByRole("button", { name: "知道了" }));
+  await userEvent.keyboard("{Escape}");
+  await expect.element(slotRow("E1").getByText("等待确认译法")).toBeVisible();
+});
+
 it("empties a removed or settled slot in place without shifting neighboring rows", async () => {
   using _fresh = fresh();
   writeBerths(environmentId, ["a", "b", "c", null, null, null]);
