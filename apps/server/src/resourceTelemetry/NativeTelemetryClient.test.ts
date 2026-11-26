@@ -2,6 +2,8 @@ import type { HostPowerSnapshot } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as TestClock from "effect/testing/TestClock";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -11,6 +13,7 @@ import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/process";
 
 import {
+  requestProcessTable,
   commitCollectionControlUpdate,
   synchronizeCollectionControlOnStart,
 } from "./NativeTelemetryClient.ts";
@@ -194,3 +197,19 @@ describe("disabled native monitor", () => {
     ),
   );
 });
+
+it.effect("bounds a process-table write that outlasts the deadline", () =>
+  Effect.gen(function* () {
+    const response = yield* Deferred.make<void>();
+    const writing = yield* Deferred.make<void>();
+    const fiber = yield* requestProcessTable(
+      Deferred.succeed(writing, undefined).pipe(Effect.andThen(Effect.sleep(300))),
+      response,
+      Duration.millis(250),
+    ).pipe(Effect.flip, Effect.forkChild);
+    yield* Deferred.await(writing);
+    yield* TestClock.adjust(250);
+    expect(fiber.pollUnsafe()?._tag).toBe("Success");
+    expect((yield* Fiber.join(fiber)).timeoutMs).toBe(250);
+  }),
+);

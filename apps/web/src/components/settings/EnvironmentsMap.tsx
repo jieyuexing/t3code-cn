@@ -74,7 +74,6 @@ import { Button } from "../ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   buildFleetGraph,
   anchorFleetView,
@@ -137,6 +136,7 @@ import { EnvironmentsMapLoadToggle, EnvironmentNodeLoadRow } from "./Environment
 import { LinkSeveralEnvironmentsDialog } from "./LinkSeveralEnvironments";
 import { savedBackendStatus } from "./SavedEnvironmentRows";
 import { SettingsSearchTarget } from "./settingsLayout";
+import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 
 type GT = ReturnType<typeof useGT>;
 type Messages = ReturnType<typeof useMessages>;
@@ -899,9 +899,12 @@ function FleetCanvas({
             <InputGroupAddon>
               <SearchIcon aria-hidden />
             </InputGroupAddon>
+            {/* Native search inputs clear on Escape even during IME composition. */}
             <InputGroupInput
               size="sm"
-              type="search"
+              type="text"
+              role="searchbox"
+              enterKeyHint="search"
               value={query}
               aria-label={gt("Find a machine on the map")}
               placeholder={gt("Find a machine")}
@@ -909,10 +912,16 @@ function FleetCanvas({
               autoComplete="off"
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
+                // Enter and Escape that belong to an IME must not drive the map or close Settings.
+                if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                  event.stopPropagation();
+                  return;
+                }
                 if (event.key === "Enter") {
                   event.preventDefault();
                   goToFirstMatch();
                 } else if (event.key === "Escape" && query !== "") {
+                  event.preventDefault();
                   event.stopPropagation();
                   setQuery("");
                 }
@@ -946,32 +955,28 @@ function FleetCanvas({
             </span>
           ) : null}
           {sources.length === 0 ? null : source !== undefined ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button size="xs" variant="outline" onClick={() => onLinkSeveral(source.id)}>
-                    {gt("Link several…")}
-                  </Button>
-                }
-              />
-              <TooltipPopup>{selectSeveral}</TooltipPopup>
-            </Tooltip>
+            <SharedTooltipTrigger
+              render={
+                <Button size="xs" variant="outline" onClick={() => onLinkSeveral(source.id)}>
+                  {gt("Link several…")}
+                </Button>
+              }
+              label={selectSeveral}
+            />
           ) : (
             <Menu>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <MenuTrigger
-                      render={
-                        <Button size="xs" variant="outline">
-                          {gt("Link several…")}
-                        </Button>
-                      }
-                    />
-                  }
-                />
-                <TooltipPopup>{selectSeveral}</TooltipPopup>
-              </Tooltip>
+              <SharedTooltipTrigger
+                render={
+                  <MenuTrigger
+                    render={
+                      <Button size="xs" variant="outline">
+                        {gt("Link several…")}
+                      </Button>
+                    }
+                  />
+                }
+                label={selectSeveral}
+              />
               <MenuPopup align="end">
                 {sources.map((node) => (
                   <MenuItem key={node.id} onClick={() => onLinkSeveral(node.id)}>

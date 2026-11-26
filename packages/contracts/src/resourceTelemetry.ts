@@ -195,6 +195,7 @@ export const ResourceMonitorCapabilities = Schema.Struct({
   processTree: Schema.Boolean,
   hostSystem: Schema.optionalKey(Schema.Boolean),
   hostNetwork: Schema.optionalKey(Schema.Boolean),
+  processIdentities: Schema.optionalKey(Schema.Boolean),
 });
 export type ResourceMonitorCapabilities = typeof ResourceMonitorCapabilities.Type;
 
@@ -243,6 +244,7 @@ export type ResourceMonitorSampleNowCommand = typeof ResourceMonitorSampleNowCom
 export const ResourceMonitorProcessTableCommand = Schema.Struct({
   version: Schema.Literal(RESOURCE_MONITOR_PROTOCOL_VERSION),
   type: Schema.Literal("processTable"),
+  identities: Schema.optionalKey(Schema.Boolean),
   requestId: TrimmedNonEmptyString,
 });
 export type ResourceMonitorProcessTableCommand = typeof ResourceMonitorProcessTableCommand.Type;
@@ -331,6 +333,8 @@ export const ResourceMonitorSnapshotEvent = Schema.Struct({
 export type ResourceMonitorSnapshotEvent = typeof ResourceMonitorSnapshotEvent.Type;
 
 export const ResourceMonitorProcessTableEntry = Schema.Struct({
+  pgid: Schema.optionalKey(NonNegativeInt),
+  startTimeMicros: Schema.optionalKey(NonNegativeInt),
   pid: PositiveInt,
   ppid: NonNegativeInt,
   name: Schema.String,
