@@ -1,4 +1,5 @@
 import { EnvironmentId } from "@t3tools/contracts";
+import { createAgent } from "@ui-sdk/react/agent";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
@@ -100,8 +101,14 @@ const board = (view: BerthView, ready = true) => (
 
 const slotRow = (code: string) => page.getByRole("region", { name: `席位 ${code}` });
 
+let allowAgentConfirm = false;
+const agent = createAgent({
+  allow: (step) => !step.confirm || allowAgentConfirm,
+});
+
 function fresh(): Disposable {
   localStorage.clear();
+  allowAgentConfirm = false;
   mocks.navigate.mockReset();
   mocks.mountFamily.mockReset();
   mocks.mountRelease.mockReset();
@@ -110,7 +117,7 @@ function fresh(): Disposable {
   return { [Symbol.dispose]: () => localStorage.clear() };
 }
 
-it("renders 6 fixed rows (E1, E2, 03–06), expands one focus row at a time, and keeps empty slots clean behind a click", async () => {
+it("renders 6 fixed rows (E1, E2, 03–06), expands via accordion/shortcuts, and pins via searchable combobox", async () => {
   using _fresh = fresh();
   writeBerths(environmentId, ["e1", null, "p3", null, null, null]);
   const view = make(
@@ -145,19 +152,21 @@ it("renders 6 fixed rows (E1, E2, 03–06), expands one focus row at a time, and
   for (const code of ["E1", "E2", "03", "04", "05", "06"]) {
     await expect.element(slotRow(code)).toBeVisible();
   }
-  // Collapsed by default: snippet and management buttons stay hidden until focused.
   await expect.element(slotRow("E1").getByText("等待确认英文译法")).not.toBeInTheDocument();
-  await expect.element(slotRow("E1").getByRole("button", { name: "移出" })).not.toBeInTheDocument();
 
-  // Clicking E1 expands it in place and dims other slots.
-  await userEvent.click(slotRow("E1").getByRole("button", { name: /GWH-350 SIR#91/ }));
+  // Single-key shortcut "1" expands E1 and dims other slots; Escape restores.
+  await userEvent.keyboard("1");
   await expect.element(slotRow("E1").getByText("等待确认英文译法")).toBeVisible();
   await expect.element(slotRow("E1").getByText("校对三栏成稿")).toBeVisible();
   await expect.element(slotRow("03")).toHaveClass("opacity-40");
+  await userEvent.keyboard("{Escape}");
+  await expect.element(slotRow("E1").getByText("等待确认英文译法")).not.toBeInTheDocument();
 
-  // Clicking empty E2 opens the inline picker and pins NSNET-108 in place.
-  await userEvent.click(slotRow("E2").getByRole("button", { name: /E2/ }));
-  await userEvent.click(slotRow("E2").getByRole("button", { name: /NSNET-108 故障/ }));
+  // Empty slot E2 uses a searchable ui-sdk Combobox; typing digits does not fire slot shortcuts.
+  const e2Input = slotRow("E2").getByRole("combobox", { name: "钉入席位 E2" });
+  await userEvent.click(e2Input);
+  await userEvent.type(e2Input, "108");
+  await userEvent.click(page.getByRole("option", { name: /NSNET-108 故障/ }));
   expect(readBerths(environmentId)).toEqual(["e1", "e2", "p3", null, null, null]);
 });
 
@@ -168,7 +177,7 @@ it("empties a removed or settled slot in place without shifting neighboring rows
   await using screen = await render(board(all), { router: false });
 
   await userEvent.click(slotRow("E2").getByRole("button", { name: /线程 b/ }));
-  await userEvent.click(slotRow("E2").getByRole("button", { name: "移出" }));
+  await userEvent.click(slotRow("E2").getByRole("button", { name: "移出席位 E2" }));
   expect(readBerths(environmentId)).toEqual(["a", null, "c", null, null, null]);
   await expect.element(slotRow("E1").getByText("线程 a")).toBeVisible();
   await expect.element(slotRow("03").getByText("线程 c")).toBeVisible();
@@ -178,11 +187,11 @@ it("empties a removed or settled slot in place without shifting neighboring rows
   await expect.element(slotRow("03").getByText("线程 c")).toBeVisible();
 });
 
-it("keeps saved slots while not authoritative and keeps unseated and scheduled threads folded until opened", async () => {
+it("keeps saved slots while not authoritative and folds unseated and scheduled lists inside Collapsible", async () => {
   using _fresh = fresh();
   writeBerths(environmentId, ["a", null, null, null, null, null]);
   await using screen = await render(board(make([]), false), { router: false });
-  await expect.element(slotRow("E1").getByText("读取中…")).toBeVisible();
+  await expect.element(slotRow("E1").getByPlaceholder("读取中…")).toBeVisible();
   expect(readBerths(environmentId)).toEqual(["a", null, null, null, null, null]);
 
   await screen.rerender(
@@ -200,6 +209,52 @@ it("keeps saved slots while not authoritative and keeps unseated and scheduled t
   await expect.element(page.getByText("未钉急事")).toBeVisible();
   await userEvent.click(page.getByRole("button", { name: /定时任务（1）.*1 条待处理/ }));
   await expect.element(page.getByText("每日巡检")).toBeVisible();
+});
+
+it("exposes named controls to ui-sdk createAgent and gates slot removal behind data-agent-confirm", async () => {
+  using _fresh = fresh();
+  writeBerths(environmentId, ["e1", null, null, null, null, null]);
+  const view = make([
+    thread("e1", { displayTitle: "GWH-350 SIR#91", status: "input" }),
+    thread("e2", { displayTitle: "NSNET-108 故障", status: "failed" }),
+  ]);
+  await using _screen = await render(board(view), { router: false });
+
+  const components = agent
+    .snapshot()
+    .filter((entry) => !entry.offPage && entry.component !== "more");
+  for (const entry of components) {
+    expect(entry.label, `${entry.component} ${entry.ref} has no name`).toBeTruthy();
+  }
+  const labels = components.map((entry) => entry.label);
+  expect(labels).toContain("专注席位");
+  expect(labels).toContain("钉入席位 E2");
+
+  // Agent pins NSNET-108 into E2 through the Combobox API.
+  const pinResult = await agent.act({
+    steps: [{ ref: "钉入席位 E2", action: "setValue", args: ["NSNET-108 故障"] }],
+  });
+  expect(pinResult.ok, pinResult.error?.message).toBe(true);
+  expect(readBerths(environmentId)).toEqual(["e1", "e2", null, null, null, null]);
+
+  // Agent expands E1 and attempts to remove it: refused until human confirms, then succeeds.
+  const openE1 = await agent.act({
+    steps: [{ ref: "专注席位", action: "open", args: ["E1"] }],
+  });
+  expect(openE1.ok, openE1.error?.message).toBe(true);
+
+  const refused = await agent.act({
+    steps: [{ ref: "移出席位 E1", action: "press" }],
+  });
+  expect(refused.ok).toBe(false);
+  expect(readBerths(environmentId)[0]).toBe("e1");
+
+  allowAgentConfirm = true;
+  const approved = await agent.act({
+    steps: [{ ref: "移出席位 E1", action: "press" }],
+  });
+  expect(approved.ok, approved.error?.message).toBe(true);
+  expect(readBerths(environmentId)).toEqual([null, "e2", null, null, null, null]);
 });
 
 it("mounts threadFamilies for seated threads, bypasses sidebar tag filtering, and navigates on open and subagent click", async () => {
@@ -254,12 +309,12 @@ it("mounts threadFamilies for seated threads, bypasses sidebar tag filtering, an
   expect(mocks.mountFamily.mock.calls[0]?.[2]).toBe("a");
 
   await userEvent.click(slotRow("E1").getByRole("button", { name: /父线程/ }));
-  await userEvent.click(slotRow("E1").getByRole("button", { name: /待审批子代理/ }));
+  await userEvent.click(slotRow("E1").getByRole("button", { name: "打开子代理：待审批子代理" }));
   expect(mocks.navigate).toHaveBeenLastCalledWith({
     to: "/$environmentId/$threadId",
     params: { environmentId, threadId: "s" },
   });
-  await userEvent.click(slotRow("E1").getByRole("button", { name: "打开处理" }));
+  await userEvent.click(slotRow("E1").getByRole("button", { name: "打开处理：父线程" }));
   expect(mocks.navigate).toHaveBeenLastCalledWith({
     to: "/$environmentId/$threadId",
     params: { environmentId, threadId: "a" },
