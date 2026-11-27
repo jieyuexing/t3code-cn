@@ -35,6 +35,7 @@ import * as Sqlite from "../../persistence/Sqlite.ts";
 import { ServerActivation } from "../../serverActivation.ts";
 import * as Settings from "../../serverSettings.ts";
 import * as StorageCleanup from "../../storageCleanup.ts";
+import * as PendingSettleScripts from "../../orchestration-v2/PendingSettleScripts.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import * as TaskFolders from "../../workspace/TaskFolders.ts";
@@ -565,6 +566,7 @@ describe("AntigravityThreadCleanup", () => {
             find: () => Effect.succeed(null),
             remove: () => Effect.succeed({ removed: [], kept: [] }),
           } as unknown as TaskFolders.TaskFolders["Service"]),
+          Effect.provide(PendingSettleScripts.layer),
         );
         const service = Context.get(context, StorageCleanup.StorageCleanup);
         yield* Deferred.succeed(activated, undefined);
