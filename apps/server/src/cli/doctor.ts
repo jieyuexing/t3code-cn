@@ -234,7 +234,9 @@ export const doctorCommand = Command.make("doctor", {
   Command.withHandler((flags) =>
     Effect.gen(function* () {
       const logLevel = yield* GlobalFlag.LogLevel;
-      const config = yield* resolveCliAuthConfig(flags, logLevel);
+      const config = yield* resolveCliAuthConfig(flags, logLevel, {
+        prepareDirectories: !flags.dryRun,
+      });
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const home = yield* HostProcess.HomeDirectory;

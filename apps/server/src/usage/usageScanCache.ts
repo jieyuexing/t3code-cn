@@ -67,8 +67,9 @@ type SerializedRecord = readonly [
   rateModelIndex?: number | null,
   unresolvedServiceTierTurnId?: string | null,
   cacheCreation1hTokens?: number,
-  requestStartMs?: number,
-  requestEndMs?: number,
+  requestStartMs?: number | null,
+  requestEndMs?: number | null,
+  modelCalls?: number,
 ];
 
 interface SerializedFile {
@@ -128,18 +129,26 @@ function serializeFile(entry: CachedFile, tables: InternTables): SerializedFile 
     record.rateModel === undefined
       ? null
       : intern(tables.models, tables.modelIndex, record.rateModel),
-    ...(record.request !== undefined
+    ...(record.modelCalls !== undefined && record.modelCalls > 1
       ? ([
           record.unresolvedServiceTierTurnId ?? null,
           record.cacheCreation1hTokens ?? 0,
-          record.request.startMs,
-          record.request.endMs,
+          record.request?.startMs ?? null,
+          record.request?.endMs ?? null,
+          record.modelCalls,
         ] as const)
-      : record.cacheCreation1hTokens !== undefined
-        ? ([record.unresolvedServiceTierTurnId ?? null, record.cacheCreation1hTokens] as const)
-        : record.unresolvedServiceTierTurnId !== undefined
-          ? ([record.unresolvedServiceTierTurnId] as const)
-          : ([] as const)),
+      : record.request !== undefined
+        ? ([
+            record.unresolvedServiceTierTurnId ?? null,
+            record.cacheCreation1hTokens ?? 0,
+            record.request.startMs,
+            record.request.endMs,
+          ] as const)
+        : record.cacheCreation1hTokens !== undefined
+          ? ([record.unresolvedServiceTierTurnId ?? null, record.cacheCreation1hTokens] as const)
+          : record.unresolvedServiceTierTurnId !== undefined
+            ? ([record.unresolvedServiceTierTurnId] as const)
+            : ([] as const)),
   ];
   return {
     s: entry.size,
@@ -234,6 +243,7 @@ export function decodeScanCache(
         cacheCreation1h = 0,
         requestStartMs,
         requestEndMs,
+        modelCalls = 1,
       ] = row as SerializedRecord;
       const speed = typeof speedIndex === "number" ? SPEEDS[speedIndex] : undefined;
 
@@ -245,8 +255,11 @@ export function decodeScanCache(
         model === undefined ||
         (unresolvedServiceTierTurnId != null && typeof unresolvedServiceTierTurnId !== "string") ||
         !Number.isFinite(cacheCreation1h) ||
-        (requestStartMs !== undefined &&
+        (requestStartMs != null &&
           !(Number.isFinite(requestStartMs) && Number.isFinite(requestEndMs))) ||
+        typeof modelCalls !== "number" ||
+        !Number.isFinite(modelCalls) ||
+        modelCalls < 0 ||
         (rateModelIndex != null && rateModel === undefined) ||
         !Number.isFinite(uncached) ||
         !Number.isFinite(cached) ||
@@ -262,6 +275,7 @@ export function decodeScanCache(
       // parser cannot remove their previously saved local placeholders.
       if (provider === "claude" && model === CLAUDE_SYNTHETIC_MODEL) continue;
 
+      const calls = Math.trunc(modelCalls);
       records.push({
         provider,
         timestampMs,
@@ -276,11 +290,12 @@ export function decodeScanCache(
           reasoningTokens: reasoning,
         },
         ...(cacheCreation1h > 0 ? { cacheCreation1hTokens: cacheCreation1h } : {}),
-        ...(requestStartMs !== undefined && requestEndMs !== undefined
+        ...(requestStartMs != null && requestEndMs != null
           ? { request: { startMs: requestStartMs, endMs: requestEndMs } }
           : {}),
         reportedCostUsd: typeof reportedCostUsd === "number" ? reportedCostUsd : null,
         speed,
+        ...(calls > 1 ? { modelCalls: calls } : {}),
         ...(version >= 7 && unresolvedServiceTierTurnId != null
           ? { unresolvedServiceTierTurnId }
           : {}),
@@ -339,11 +354,12 @@ export function decodeScanCache(
     }
     // Keep history for deleted rollouts, but re-parse incompatible reducer state.
     // v13 adds Claude 1-hour cache writes; v14 Codex request ledgers; v15 repairs skipped Codex requests.
-    // v17 keys Grok turns by time. v18 dates each request, so Claude and Codex entries re-parse.
+    // v17 keys Grok turns by time. v18 dates each request, so Claude and Codex entries re-parse,
+    // and counts Grok model calls for per-call context tiers.
     const legacy =
       (entry.p === "claude" && version < 18) ||
       (entry.p === "codex" && version < 18) ||
-      (entry.p === "grok" && version < 17) ||
+      (entry.p === "grok" && version < 18) ||
       (format.state !== undefined &&
         (version < 6 ||
           (entry.p === "codex" && (version < 14 || (version < 15 && malformedCount > 0)))));
