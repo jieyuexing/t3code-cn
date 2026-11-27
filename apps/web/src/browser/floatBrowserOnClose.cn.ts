@@ -1,13 +1,13 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useSyncExternalStore } from "react";
-
-import { browserMiniPlayerSource, usePreviewMiniPlayerStore } from "../previewMiniPlayerStore";
 
 const STORAGE_KEY = "t3code-cn:float-browser-on-close:v1";
 
 const listeners = new Set<() => void>();
 
-/** Off by default: closing the browser panel just closes it. On restores upstream's mini player. */
+/**
+ * Off by default: closing the browser panel just closes it. On restores upstream's mini player,
+ * which useRightPanelActions then floats under upstream's own rules. Devices are not affected.
+ */
 export function getFloatBrowserOnClose(): boolean {
   try {
     return window.localStorage.getItem(STORAGE_KEY) === "true";
@@ -40,10 +40,4 @@ function subscribe(listener: () => void): () => void {
 
 export function useFloatBrowserOnClose(): boolean {
   return useSyncExternalStore(subscribe, getFloatBrowserOnClose, () => false);
-}
-
-/** Called when the right panel closes with a browser tab active; devices are not affected. */
-export function floatBrowserOnClose(threadRef: ScopedThreadRef, tabId: string): void {
-  if (!getFloatBrowserOnClose()) return;
-  usePreviewMiniPlayerStore.getState().open(threadRef, browserMiniPlayerSource(tabId));
 }
