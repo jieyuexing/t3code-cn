@@ -65,7 +65,7 @@ import {
 } from "@t3tools/shared/composerContextClipboard";
 import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { persistClientSettingsPatch } from "~/hooks/useSettings";
-import { importPastedComposerText } from "../composerInlineTokenPaste";
+import { importPastedComposerText, readPastedComposerClipboard } from "../composerInlineTokenPaste";
 
 const environmentQuery = vi.hoisted(() => ({
   error: "Pull request not found" as string | null,
@@ -3060,7 +3060,7 @@ describe("copyPlainText in MessagesTimeline", () => {
         `Check [App.tsx](t3-context://v1/mention/${contextId}) now`,
       );
       const imported = importPastedComposerText(
-        clipboardData,
+        readPastedComposerClipboard(clipboardData),
         (fragment) => new Map(fragment.records.map((item) => [item.contextId, item.contextId])),
       );
       expect(imported).toBe(`Check [App.tsx](t3-context://v1/mention/${contextId}) now`);
