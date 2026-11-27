@@ -366,6 +366,38 @@ describe("scan cache round trip", () => {
     expect(restored).toEqual(original);
   });
 
+  it("reads the fork's v18 rows and re-parses their Grok entries so they gain model calls", () => {
+    const span = { startMs: 1_785_999_990_000, endMs: 1_786_000_000_000 };
+    const original = cacheWith([["/claude.jsonl", 100, [record({ request: span })]]]);
+    original.set("/grok.jsonl", {
+      ...cacheWith([["/grok.jsonl", 100, [record({ provider: "grok", model: "grok-4.5" })]]]).get(
+        "/grok.jsonl",
+      )!,
+      provider: "grok",
+    });
+    const v18 = { ...parse(makeScanCacheWriter()(original, {})), version: 18 };
+    const restored = decodeScanCache(v18, TEST_FORMAT_MAP);
+    expect(restored.get("/claude.jsonl")).toEqual(original.get("/claude.jsonl"));
+    expect(restored.get("/grok.jsonl")).toMatchObject({
+      size: -1,
+      records: original.get("/grok.jsonl")!.records,
+      position: { resumeOffset: 0, state: null },
+    });
+  });
+
+  it("round-trips model calls with and without a request span", () => {
+    const span = { startMs: 1_785_999_990_000, endMs: 1_786_000_000_000 };
+    const original = cacheWith([
+      [
+        "/calls.jsonl",
+        100,
+        [record({ modelCalls: 3 }), record({ modelCalls: 2, request: span, dedupeKey: "msg_2:" })],
+      ],
+    ]);
+    const restored = decodeScanCache(parse(makeScanCacheWriter()(original, {})), TEST_FORMAT_MAP);
+    expect(restored).toEqual(original);
+  });
+
   it("re-parses v17 Claude and Codex entries so they gain request spans", () => {
     const original = cacheWith([["/claude.jsonl", 100, [record()]]]);
     original.set("/codex.jsonl", { ...original.get("/claude.jsonl")!, provider: "codex" });
